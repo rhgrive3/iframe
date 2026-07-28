@@ -1,20 +1,23 @@
 name: Apply position jitter
 
 on:
-  push:
-    paths:
-      - .github/workflows/apply-position-jitter.yml
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref || github.ref_name }}
 
       - name: Patch a.js
         shell: bash
@@ -70,10 +73,7 @@ jobs:
                   "  const randomEnabledInput = $id('randomEnabled');\n  const jitterInput = $id('jitter');\n",
                   "  const randomEnabledInput = $id('randomEnabled');\n  const jitterInput = $id('jitter');\n  const positionRandomEnabledInput = $id('positionRandomEnabled');\n  const positionJitterInput = $id('positionJitter');\n"
               )
-              replace_once(
-                  "      version: 4,",
-                  "      version: 5,"
-              )
+              replace_once("      version: 4,", "      version: 5,")
               replace_once(
                   "      randomEnabled: randomEnabledInput.checked,\n      jitterMs: jitterInput.value,\n",
                   "      randomEnabled: randomEnabledInput.checked,\n      jitterMs: jitterInput.value,\n      positionRandomEnabled: positionRandomEnabledInput.checked,\n      positionJitterPx: positionJitterInput.value,\n"
@@ -121,7 +121,6 @@ jobs:
                   "completion({ ok: true, installed: true, version: 4 });",
                   "completion({ ok: true, installed: true, version: 5 });"
               )
-
               path.write_text(source)
           PY
 
@@ -131,13 +130,12 @@ jobs:
       - name: Commit result
         shell: bash
         run: |
-          rm -f .github/workflows/apply-position-jitter.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add a.js .github/workflows/apply-position-jitter.yml
+          git add a.js
           if git diff --cached --quiet; then
             echo "No changes to commit."
             exit 0
           fi
           git commit -m "Add randomized click position jitter"
-          git push
+          git push origin HEAD:${{ github.head_ref || github.ref_name }}
