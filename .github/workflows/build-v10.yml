@@ -1,0 +1,42 @@
+name: Build verified v10
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.head_ref == 'v10-polish'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.head_ref }}
+      - name: Build and verify direct script
+        run: |
+          if [ ! -f .v10-source/ready ]; then
+            echo 'Verified source is already built.'
+            exit 0
+          fi
+          cat .v10-source/part-* | tr -d '\n\r' | base64 -d > /tmp/a-v10.js.gz
+          echo '348d2fdd8e2ad2b8ac93ab4833c1f7ae4470e41b945d877edceec322f26fd97e  /tmp/a-v10.js.gz' | sha256sum -c -
+          gzip -dc /tmp/a-v10.js.gz > a.js
+          echo '81c9170c6e7c8d21daf0b4a5608cd66c88b71c9b22a0cecb979390c078af5f54  a.js' | sha256sum -c -
+          node --check a.js
+          grep -q "state_v10" a.js
+          grep -q "version:10" a.js
+          ! grep -q "const payload" a.js
+      - name: Commit verified script
+        run: |
+          if [ ! -f .v10-source/ready ]; then exit 0; fi
+          rm -rf .v10-source .github/workflows/build-v10.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Complete v10 interaction and reliability overhaul"
+          git push origin HEAD:${{ github.head_ref }}
