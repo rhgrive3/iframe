@@ -2,14 +2,23 @@
   'use strict';
 
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
-  const STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v1__';
+  const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
+  const STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v2__';
+  const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v1__';
 
-  const existing = document.getElementById(ROOT_ID);
+  const LEGACY_MARKER_SIZE = 64;
+  const MARKER_HIT_SIZE = 46;
+  const MARKER_VISUAL_SIZE = 36;
+  const DRAG_THRESHOLD_PX = 3;
 
-  if (existing) {
-    existing.remove();
+  const previous = window[GLOBAL_KEY];
+
+  if (previous?.destroy) {
+    previous.destroy();
     return;
   }
+
+  document.getElementById(ROOT_ID)?.remove();
 
   const root = document.createElement('div');
   root.id = ROOT_ID;
@@ -60,6 +69,7 @@
         backdrop-filter: blur(18px);
         -webkit-backdrop-filter: blur(18px);
         color: #fff;
+        transition: transform .2s ease;
       }
 
       #url {
@@ -180,25 +190,44 @@
         position: fixed;
         left: 0;
         top: 0;
-        width: 64px;
-        height: 64px;
-        border: 4px solid #ff453a;
-        border-radius: 50%;
-        background: rgba(255,69,58,.12);
-        box-shadow:
-          0 0 0 2px rgba(255,255,255,.95),
-          0 7px 24px rgba(0,0,0,.32);
-        transform: translate3d(0,0,0);
+        width: 46px;
+        height: 46px;
+        transform: translate3d(0, 0, 0);
+        pointer-events: auto;
         touch-action: none;
         user-select: none;
         -webkit-user-select: none;
+        -webkit-user-drag: none;
         cursor: grab;
-        pointer-events: auto;
         will-change: transform;
+        contain: layout style;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
       }
 
-      .marker::before,
-      .marker::after {
+      .markerVisual {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 36px;
+        height: 36px;
+        transform: translate(-50%, -50%);
+        border: 3px solid #ff453a;
+        border-radius: 50%;
+        background: rgba(255,69,58,.13);
+        box-shadow:
+          0 0 0 1.5px rgba(255,255,255,.96),
+          0 5px 15px rgba(0,0,0,.3);
+        pointer-events: none;
+        transition:
+          border-color .14s ease,
+          background-color .14s ease,
+          box-shadow .14s ease,
+          filter .1s ease;
+      }
+
+      .markerVisual::before,
+      .markerVisual::after {
         content: '';
         position: absolute;
         left: 50%;
@@ -209,59 +238,66 @@
         pointer-events: none;
       }
 
-      .marker::before {
-        width: 18px;
+      .markerVisual::before {
+        width: 12px;
         height: 2px;
       }
 
-      .marker::after {
+      .markerVisual::after {
         width: 2px;
-        height: 18px;
+        height: 12px;
       }
 
-      .marker.selected {
+      .marker.selected .markerVisual {
         border-color: #32d74b;
-        background: rgba(50,215,75,.15);
-      }
-
-      .marker.running {
-        animation: pulse .28s ease-out;
+        background: rgba(50,215,75,.16);
       }
 
       .marker.dragging {
         cursor: grabbing;
-        scale: 1.08;
+      }
+
+      .marker.dragging .markerVisual {
+        filter: brightness(1.12);
+        box-shadow:
+          0 0 0 1.5px rgba(255,255,255,.98),
+          0 7px 20px rgba(0,0,0,.38);
+      }
+
+      .marker.running .markerVisual {
+        animation: markerPulse .24s ease-out;
       }
 
       .markerNumber {
         position: absolute;
-        right: -7px;
-        top: -8px;
-        min-width: 24px;
-        height: 24px;
-        padding: 0 6px;
-        border-radius: 12px;
+        right: -4px;
+        top: -5px;
+        min-width: 18px;
+        height: 18px;
+        padding: 0 4px;
+        border-radius: 9px;
         background: #111;
         color: #fff;
-        font-size: 12px;
-        line-height: 24px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 18px;
         text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,.35);
+        box-shadow: 0 2px 6px rgba(0,0,0,.35);
         pointer-events: none;
       }
 
-      @keyframes pulse {
+      @keyframes markerPulse {
         0% {
-          scale: 1;
+          transform: translate(-50%, -50%) scale(1);
         }
 
         45% {
-          scale: .72;
-          opacity: .65;
+          transform: translate(-50%, -50%) scale(.72);
+          opacity: .68;
         }
 
         100% {
-          scale: 1;
+          transform: translate(-50%, -50%) scale(1);
           opacity: 1;
         }
       }
@@ -273,10 +309,6 @@
 
         #toolbar button {
           padding: 0 9px;
-        }
-
-        .optionalText {
-          display: none;
         }
       }
     </style>
@@ -302,39 +334,17 @@
         spellcheck="false"
       >
 
-      <button id="load" class="primary">
-        表示
-      </button>
-
-      <button id="hideToolbar" title="上部バーを隠す">
-        －
-      </button>
-
-      <button id="close" class="danger">
-        ×
-      </button>
+      <button id="load" class="primary">表示</button>
+      <button id="hideToolbar" title="上部バーを隠す">－</button>
+      <button id="close" class="danger">×</button>
     </div>
 
     <div id="controlPanel">
-      <button id="addPoint" class="primary">
-        ＋ 地点
-      </button>
-
-      <button id="deletePoint">
-        削除
-      </button>
-
-      <button id="single">
-        単発
-      </button>
-
-      <button id="start" class="success">
-        ▶ 開始
-      </button>
-
-      <button id="stop" class="danger" disabled>
-        ■ 停止
-      </button>
+      <button id="addPoint" class="primary">＋ 地点</button>
+      <button id="deletePoint">削除</button>
+      <button id="single">単発</button>
+      <button id="start" class="success">▶ 開始</button>
+      <button id="stop" class="danger" disabled>■ 停止</button>
 
       <label>
         方式
@@ -382,7 +392,6 @@
   const iframe = shadow.getElementById('frame');
   const toolbar = shadow.getElementById('toolbar');
   const markerLayer = shadow.getElementById('markerLayer');
-  const controlPanel = shadow.getElementById('controlPanel');
 
   const urlInput = shadow.getElementById('url');
   const loadButton = shadow.getElementById('load');
@@ -404,8 +413,6 @@
   const loopInput = shadow.getElementById('loop');
   const status = shadow.getElementById('status');
 
-  const MARKER_SIZE = 64;
-
   const state = {
     points: [],
     selectedId: null,
@@ -414,8 +421,16 @@
     timer: null,
     sequenceIndex: 0,
     completedCycles: 0,
-    toolbarHidden: false
+    toolbarHidden: false,
+    destroyed: false
   };
+
+  const cleanupCallbacks = new Set();
+
+  function onCleanup(callback) {
+    cleanupCallbacks.add(callback);
+    return callback;
+  }
 
   function normalizeUrl(value) {
     const trimmed = String(value || '').trim();
@@ -435,18 +450,53 @@
     return Math.min(Math.max(value, min), max);
   }
 
-  function clampPoint(point) {
-    point.x = clamp(
-      point.x,
-      0,
-      Math.max(0, window.innerWidth - MARKER_SIZE)
-    );
+  function clampCoordinates(x, y) {
+    return {
+      x: clamp(
+        x,
+        0,
+        Math.max(0, window.innerWidth - MARKER_HIT_SIZE)
+      ),
+      y: clamp(
+        y,
+        0,
+        Math.max(0, window.innerHeight - MARKER_HIT_SIZE)
+      )
+    };
+  }
 
-    point.y = clamp(
-      point.y,
-      0,
-      Math.max(0, window.innerHeight - MARKER_SIZE)
-    );
+  function clampPoint(point) {
+    const next = clampCoordinates(point.x, point.y);
+    point.x = next.x;
+    point.y = next.y;
+  }
+
+  function readSavedState() {
+    const read = key => {
+      try {
+        return JSON.parse(localStorage.getItem(key) || 'null');
+      } catch (_) {
+        return null;
+      }
+    };
+
+    const current = read(STORAGE_KEY);
+
+    if (current) {
+      return {
+        data: current,
+        isLegacy: false
+      };
+    }
+
+    const legacy = read(LEGACY_STORAGE_KEY);
+
+    return legacy
+      ? {
+          data: legacy,
+          isLegacy: true
+        }
+      : null;
   }
 
   function saveState() {
@@ -454,6 +504,8 @@
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
+          version: 2,
+          markerHitSize: MARKER_HIT_SIZE,
           url: urlInput.value,
           points: state.points.map(({ id, x, y }) => ({
             id,
@@ -474,20 +526,29 @@
   }
 
   function loadState() {
+    const savedState = readSavedState();
+
+    if (!savedState) {
+      return;
+    }
+
+    const { data: saved, isLegacy } = savedState;
+
     try {
-      const saved = JSON.parse(
-        localStorage.getItem(STORAGE_KEY) || 'null'
-      );
-
-      if (!saved) {
-        return;
-      }
-
       if (typeof saved.url === 'string') {
         urlInput.value = saved.url;
       }
 
       if (Array.isArray(saved.points)) {
+        const savedMarkerSize = Number(saved.markerHitSize);
+        const sourceMarkerSize = Number.isFinite(savedMarkerSize)
+          ? savedMarkerSize
+          : isLegacy
+            ? LEGACY_MARKER_SIZE
+            : MARKER_HIT_SIZE;
+        const centerCorrection =
+          (sourceMarkerSize - MARKER_HIT_SIZE) / 2;
+
         state.points = saved.points
           .filter(
             point =>
@@ -496,8 +557,8 @@
           )
           .map(point => ({
             id: Number(point.id) || state.nextId++,
-            x: point.x,
-            y: point.y,
+            x: point.x + centerCorrection,
+            y: point.y + centerCorrection,
             element: null
           }));
 
@@ -512,14 +573,13 @@
         1
       );
 
-      state.selectedId =
-        state.points.some(point => point.id === saved.selectedId)
-          ? saved.selectedId
-          : state.points[0]?.id ?? null;
+      state.selectedId = state.points.some(
+        point => point.id === saved.selectedId
+      )
+        ? saved.selectedId
+        : state.points[0]?.id ?? null;
 
-      if (
-        ['tap', 'click', 'both'].includes(saved.method)
-      ) {
+      if (['tap', 'click', 'both'].includes(saved.method)) {
         methodSelect.value = saved.method;
       }
 
@@ -532,6 +592,10 @@
       }
 
       loopInput.checked = Boolean(saved.loop);
+
+      if (isLegacy) {
+        saveState();
+      }
     } catch (error) {
       console.warn('[AutoClicker] 設定読込失敗', error);
     }
@@ -547,8 +611,8 @@
 
   function markerCenter(point) {
     return {
-      x: point.x + MARKER_SIZE / 2,
-      y: point.y + MARKER_SIZE / 2
+      x: point.x + MARKER_HIT_SIZE / 2,
+      y: point.y + MARKER_HIT_SIZE / 2
     };
   }
 
@@ -567,7 +631,7 @@
     addPointButton.disabled = state.running;
   }
 
-  function selectPoint(id) {
+  function selectPoint(id, { persist = true } = {}) {
     state.selectedId = id;
 
     for (const point of state.points) {
@@ -588,7 +652,10 @@
     );
 
     updateButtons();
-    saveState();
+
+    if (persist) {
+      saveState();
+    }
   }
 
   function renderPointNumbers() {
@@ -603,29 +670,116 @@
     });
   }
 
+  function setMarkerPosition(point) {
+    point.element.style.transform =
+      `translate3d(${point.x}px, ${point.y}px, 0)`;
+  }
+
   function createMarkerElement(point) {
     const marker = document.createElement('div');
     marker.className = 'marker';
+    marker.setAttribute('role', 'button');
+    marker.setAttribute('aria-label', `クリック地点 ${point.id}`);
+
+    const visual = document.createElement('div');
+    visual.className = 'markerVisual';
 
     const number = document.createElement('span');
     number.className = 'markerNumber';
 
-    marker.append(number);
+    visual.append(number);
+    marker.append(visual);
     markerLayer.append(marker);
 
     point.element = marker;
 
-    function render() {
-      marker.style.transform =
-        `translate3d(${point.x}px, ${point.y}px, 0)`;
-    }
-
     const drag = {
       active: false,
       pointerId: null,
-      offsetX: 0,
-      offsetY: 0
+      startClientX: 0,
+      startClientY: 0,
+      startPointX: 0,
+      startPointY: 0,
+      pendingX: point.x,
+      pendingY: point.y,
+      moved: false,
+      frameId: null
     };
+
+    function flushDragFrame() {
+      if (drag.frameId !== null) {
+        cancelAnimationFrame(drag.frameId);
+        drag.frameId = null;
+      }
+
+      point.x = drag.pendingX;
+      point.y = drag.pendingY;
+      setMarkerPosition(point);
+    }
+
+    function scheduleDragFrame() {
+      if (drag.frameId !== null) {
+        return;
+      }
+
+      drag.frameId = requestAnimationFrame(() => {
+        drag.frameId = null;
+        point.x = drag.pendingX;
+        point.y = drag.pendingY;
+        setMarkerPosition(point);
+      });
+    }
+
+    function updateDragFromEvent(event) {
+      const coalesced =
+        typeof event.getCoalescedEvents === 'function'
+          ? event.getCoalescedEvents()
+          : null;
+      const sample = coalesced?.length
+        ? coalesced[coalesced.length - 1]
+        : event;
+
+      const deltaX = sample.clientX - drag.startClientX;
+      const deltaY = sample.clientY - drag.startClientY;
+
+      if (
+        !drag.moved &&
+        Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD_PX
+      ) {
+        drag.moved = true;
+      }
+
+      const next = clampCoordinates(
+        drag.startPointX + deltaX,
+        drag.startPointY + deltaY
+      );
+
+      drag.pendingX = next.x;
+      drag.pendingY = next.y;
+      scheduleDragFrame();
+    }
+
+    function finishDrag(event) {
+      if (
+        !drag.active ||
+        event.pointerId !== drag.pointerId
+      ) {
+        return;
+      }
+
+      event.preventDefault?.();
+      flushDragFrame();
+
+      drag.active = false;
+      drag.pointerId = null;
+      marker.classList.remove('dragging');
+
+      try {
+        marker.releasePointerCapture(event.pointerId);
+      } catch (_) {}
+
+      saveState();
+    }
 
     marker.addEventListener(
       'pointerdown',
@@ -644,12 +798,17 @@
         event.preventDefault();
         event.stopPropagation();
 
-        selectPoint(point.id);
+        selectPoint(point.id, { persist: false });
 
         drag.active = true;
         drag.pointerId = event.pointerId;
-        drag.offsetX = event.clientX - point.x;
-        drag.offsetY = event.clientY - point.y;
+        drag.startClientX = event.clientX;
+        drag.startClientY = event.clientY;
+        drag.startPointX = point.x;
+        drag.startPointY = point.y;
+        drag.pendingX = point.x;
+        drag.pendingY = point.y;
+        drag.moved = false;
 
         marker.classList.add('dragging');
 
@@ -671,50 +830,38 @@
         }
 
         event.preventDefault();
-
-        point.x = event.clientX - drag.offsetX;
-        point.y = event.clientY - drag.offsetY;
-
-        clampPoint(point);
-        render();
+        event.stopPropagation();
+        updateDragFromEvent(event);
       },
       { passive: false }
     );
 
-    const finishDrag = event => {
-      if (
-        !drag.active ||
-        event.pointerId !== drag.pointerId
-      ) {
-        return;
-      }
-
-      drag.active = false;
-      drag.pointerId = null;
-
-      marker.classList.remove('dragging');
-
-      try {
-        marker.releasePointerCapture(event.pointerId);
-      } catch (_) {}
-
-      saveState();
-    };
-
-    marker.addEventListener('pointerup', finishDrag);
-    marker.addEventListener('pointercancel', finishDrag);
-
-    marker.addEventListener('click', event => {
-      event.stopPropagation();
-      selectPoint(point.id);
+    marker.addEventListener('pointerup', finishDrag, {
+      passive: false
+    });
+    marker.addEventListener('pointercancel', finishDrag, {
+      passive: false
     });
 
-    render();
+    marker.addEventListener('lostpointercapture', event => {
+      if (
+        drag.active &&
+        event.pointerId === drag.pointerId
+      ) {
+        flushDragFrame();
+        drag.active = false;
+        drag.pointerId = null;
+        marker.classList.remove('dragging');
+        saveState();
+      }
+    });
+
+    setMarkerPosition(point);
     return marker;
   }
 
   function addPoint(x, y) {
-    const offset = state.points.length * 14;
+    const offset = state.points.length * 12;
 
     const point = {
       id: state.nextId++,
@@ -722,13 +869,13 @@
         Number.isFinite(x)
           ? x
           : window.innerWidth / 2 -
-            MARKER_SIZE / 2 +
+            MARKER_HIT_SIZE / 2 +
             offset,
       y:
         Number.isFinite(y)
           ? y
           : window.innerHeight / 2 -
-            MARKER_SIZE / 2 +
+            MARKER_HIT_SIZE / 2 +
             offset,
       element: null
     };
@@ -782,7 +929,7 @@
     renderPointNumbers();
 
     if (state.selectedId !== null) {
-      selectPoint(state.selectedId);
+      selectPoint(state.selectedId, { persist: false });
     } else {
       updateButtons();
     }
@@ -800,8 +947,7 @@
       typeof element.shadowRoot.elementFromPoint ===
         'function'
     ) {
-      const inner =
-        element.shadowRoot.elementFromPoint(x, y);
+      const inner = element.shadowRoot.elementFromPoint(x, y);
 
       if (!inner || inner === element) {
         break;
@@ -864,18 +1010,13 @@
       const y = viewportY - frameRect.top;
 
       return (
-        deepestElementFromPoint(
-          frameDocument,
-          x,
-          y
-        ) || {
+        deepestElementFromPoint(frameDocument, x, y) || {
           error: '対象なし'
         }
       );
-    } catch (error) {
+    } catch (_) {
       return {
-        error:
-          '別ドメインiframeの内部は操作不可'
+        error: '別ドメインiframeの内部は操作不可'
       };
     }
   }
@@ -906,20 +1047,15 @@
     return element.closest(selector) || element;
   }
 
-  function triggerJQueryTap(
-    target,
-    clientX,
-    clientY
-  ) {
+  function triggerJQueryTap(target, clientX, clientY) {
     const view =
       target.ownerDocument?.defaultView || window;
 
-    const $ =
-      view.jQuery?.fn?.jquery
-        ? view.jQuery
-        : view.$?.fn?.jquery
-          ? view.$
-          : null;
+    const $ = view.jQuery?.fn?.jquery
+      ? view.jQuery
+      : view.$?.fn?.jquery
+        ? view.$
+        : null;
 
     if (!$) {
       return false;
@@ -938,11 +1074,7 @@
     return true;
   }
 
-  function triggerClick(
-    target,
-    clientX,
-    clientY
-  ) {
+  function triggerClick(target, clientX, clientY) {
     const view =
       target.ownerDocument?.defaultView || window;
 
@@ -1048,19 +1180,14 @@
     }
 
     const center = markerCenter(point);
-    const hit = targetAtViewportPoint(
-      center.x,
-      center.y
-    );
+    const hit = targetAtViewportPoint(center.x, center.y);
 
     if (hit.error) {
       updateStatus(hit.error);
       return false;
     }
 
-    const target = chooseClickableTarget(
-      hit.element
-    );
+    const target = chooseClickableTarget(hit.element);
 
     if (!target) {
       updateStatus('対象なし');
@@ -1086,15 +1213,10 @@
         method === 'both' ||
         (method === 'tap' && !tapWorked)
       ) {
-        triggerClick(
-          target,
-          hit.x,
-          hit.y
-        );
+        triggerClick(target, hit.x, hit.y);
       }
 
-      const index =
-        state.points.indexOf(point) + 1;
+      const index = state.points.indexOf(point) + 1;
 
       updateStatus(
         `地点${index}: ${elementLabel(target)}`
@@ -1102,11 +1224,7 @@
 
       return true;
     } catch (error) {
-      console.error(
-        '[Iframe AutoClicker]',
-        error
-      );
-
+      console.error('[Iframe AutoClicker]', error);
       updateStatus('実行失敗');
       return false;
     }
@@ -1119,11 +1237,7 @@
       return 1000;
     }
 
-    return clamp(
-      Math.floor(value),
-      50,
-      600000
-    );
+    return clamp(Math.floor(value), 50, 600000);
   }
 
   function getCycleCount() {
@@ -1133,11 +1247,7 @@
       return 1;
     }
 
-    return clamp(
-      Math.floor(value),
-      1,
-      999999
-    );
+    return clamp(Math.floor(value), 1, 999999);
   }
 
   function stopSequence(message = '停止') {
@@ -1165,16 +1275,12 @@
       return;
     }
 
-    const point =
-      state.points[state.sequenceIndex];
-
+    const point = state.points[state.sequenceIndex];
     executePoint(point);
 
     state.sequenceIndex += 1;
 
-    if (
-      state.sequenceIndex >= state.points.length
-    ) {
+    if (state.sequenceIndex >= state.points.length) {
       state.sequenceIndex = 0;
       state.completedCycles += 1;
 
@@ -1182,9 +1288,7 @@
         !loopInput.checked &&
         state.completedCycles >= getCycleCount()
       ) {
-        stopSequence(
-          `${state.completedCycles}回完了`
-        );
+        stopSequence(`${state.completedCycles}回完了`);
         return;
       }
     }
@@ -1229,31 +1333,53 @@
     updateStatus('読込中');
   }
 
-  loadButton.addEventListener(
-    'click',
-    loadUrl
-  );
-
-  urlInput.addEventListener(
-    'keydown',
-    event => {
-      if (event.key === 'Enter') {
-        event.preventDefault();
-        loadUrl();
-      }
+  function handleResize() {
+    for (const point of state.points) {
+      clampPoint(point);
+      setMarkerPosition(point);
     }
-  );
+
+    saveState();
+  }
+
+  function destroy() {
+    if (state.destroyed) {
+      return;
+    }
+
+    state.destroyed = true;
+    stopSequence();
+
+    for (const callback of cleanupCallbacks) {
+      try {
+        callback();
+      } catch (_) {}
+    }
+
+    cleanupCallbacks.clear();
+    root.remove();
+
+    if (window[GLOBAL_KEY]?.root === root) {
+      delete window[GLOBAL_KEY];
+    }
+  }
+
+  loadButton.addEventListener('click', loadUrl);
+
+  urlInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      loadUrl();
+    }
+  });
 
   iframe.addEventListener('load', () => {
     try {
-      urlInput.value =
-        iframe.contentWindow.location.href;
+      urlInput.value = iframe.contentWindow.location.href;
       saveState();
       updateStatus('読込完了');
     } catch (_) {
-      updateStatus(
-        '読込完了・別ドメイン'
-      );
+      updateStatus('読込完了・別ドメイン');
     }
   });
 
@@ -1265,113 +1391,73 @@
     }
   });
 
-  forwardButton.addEventListener(
-    'click',
-    () => {
-      try {
-        iframe.contentWindow.history.forward();
-      } catch (_) {
-        updateStatus('進む操作不可');
-      }
+  forwardButton.addEventListener('click', () => {
+    try {
+      iframe.contentWindow.history.forward();
+    } catch (_) {
+      updateStatus('進む操作不可');
     }
-  );
+  });
 
-  reloadButton.addEventListener(
-    'click',
-    () => {
-      try {
-        iframe.contentWindow.location.reload();
-      } catch (_) {
-        iframe.src = iframe.src;
-      }
+  reloadButton.addEventListener('click', () => {
+    try {
+      iframe.contentWindow.location.reload();
+    } catch (_) {
+      iframe.src = iframe.src;
     }
-  );
+  });
 
-  hideToolbarButton.addEventListener(
-    'click',
-    () => {
-      state.toolbarHidden =
-        !state.toolbarHidden;
+  hideToolbarButton.addEventListener('click', () => {
+    state.toolbarHidden = !state.toolbarHidden;
 
-      toolbar.style.transform =
-        state.toolbarHidden
-          ? 'translate(-50%, calc(-100% - 18px))'
-          : 'translateX(-50%)';
+    toolbar.style.transform = state.toolbarHidden
+      ? 'translate(-50%, calc(-100% - 18px))'
+      : 'translateX(-50%)';
 
-      hideToolbarButton.textContent =
-        state.toolbarHidden ? '＋' : '－';
-    }
-  );
+    hideToolbarButton.textContent =
+      state.toolbarHidden ? '＋' : '－';
+  });
 
-  addPointButton.addEventListener(
-    'click',
-    () => addPoint()
-  );
-
+  addPointButton.addEventListener('click', () => addPoint());
   deletePointButton.addEventListener(
     'click',
     deleteSelectedPoint
   );
+  singleButton.addEventListener('click', () =>
+    executePoint(selectedPoint())
+  );
+  startButton.addEventListener('click', startSequence);
+  stopButton.addEventListener('click', () => stopSequence());
+  closeButton.addEventListener('click', destroy);
 
-  singleButton.addEventListener(
-    'click',
-    () => executePoint(selectedPoint())
+  methodSelect.addEventListener('change', saveState);
+  intervalInput.addEventListener('change', saveState);
+  countInput.addEventListener('change', saveState);
+  loopInput.addEventListener('change', saveState);
+
+  window.addEventListener('resize', handleResize, {
+    passive: true
+  });
+  onCleanup(() =>
+    window.removeEventListener('resize', handleResize)
   );
 
-  startButton.addEventListener(
-    'click',
-    startSequence
-  );
-
-  stopButton.addEventListener(
-    'click',
-    () => stopSequence()
-  );
-
-  closeButton.addEventListener(
-    'click',
-    () => {
-      stopSequence();
-      root.remove();
-    }
-  );
-
-  methodSelect.addEventListener(
-    'change',
-    saveState
-  );
-
-  intervalInput.addEventListener(
-    'change',
-    saveState
-  );
-
-  countInput.addEventListener(
-    'change',
-    saveState
-  );
-
-  loopInput.addEventListener(
-    'change',
-    saveState
-  );
-
-  window.addEventListener(
-    'resize',
-    () => {
-      for (const point of state.points) {
-        clampPoint(point);
-
-        point.element.style.transform =
-          `translate3d(${point.x}px, ${point.y}px, 0)`;
-      }
-
-      saveState();
-    },
-    { passive: true }
+  window.addEventListener('orientationchange', handleResize, {
+    passive: true
+  });
+  onCleanup(() =>
+    window.removeEventListener(
+      'orientationchange',
+      handleResize
+    )
   );
 
   document.documentElement.append(root);
+
+  window[GLOBAL_KEY] = {
+    root,
+    destroy
+  };
 
   loadState();
   rebuildMarkers();
