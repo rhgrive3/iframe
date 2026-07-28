@@ -1,21 +1,22 @@
 name: Replace compressed loader
 
 on:
-  push:
+  pull_request:
     branches: [main]
-    paths:
-      - .fix-plain-loader
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   replace:
+    if: github.head_ref == 'fix-direct-loader'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.head_ref }}
       - name: Expand embedded source
         run: |
           node <<'NODE'
@@ -35,11 +36,13 @@ jobs:
           fs.writeFileSync('a.js', source);
           NODE
           node --check a.js
+          grep -q "const ROOT_ID" a.js
+          ! grep -q "const payload" a.js
       - name: Commit direct script
         run: |
-          rm -f .fix-plain-loader .github/workflows/replace-loader.yml
+          rm -f .fix-plain-loader .fix-pr-loader .github/workflows/replace-loader.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m "Replace compressed loader with direct script"
-          git push
+          git push origin HEAD:${{ github.head_ref }}
