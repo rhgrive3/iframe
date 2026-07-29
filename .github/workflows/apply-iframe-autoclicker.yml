@@ -4,12 +4,17 @@ on:
   push:
     paths:
       - '.tmp/iframe-autoclicker-ready'
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '.tmp/iframe-autoclicker-pr-ready'
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +28,6 @@ jobs:
           echo 'bd3073e6bb68dcb273974d6cbc8987e2ef0cb395fc61779bdd535c18867ca4be  a.js.new' | sha256sum --check --strict
           mv a.js.new a.js
           rm -rf .tmp
-          rm -f .github/workflows/apply-iframe-autoclicker.yml
       - name: Commit a.js
         shell: bash
         run: |
