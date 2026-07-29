@@ -1,0 +1,27 @@
+name: Validate Auto Flow
+
+on:
+  pull_request:
+    paths:
+      - a.js
+      - tests/**
+      - .github/workflows/validate-autoflow.yml
+  push:
+    branches: [main]
+    paths:
+      - a.js
+      - tests/**
+      - .github/workflows/validate-autoflow.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: node --check a.js
+      - name: UX regression checks
+        run: node --test tests/autoflow.static.test.mjs
