@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 15;
+  const APP_VERSION = 18;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1431,6 +1431,248 @@
     return next;
   }
 
+  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 125, stdDev: 20, min: 70, max: 250 });
+  const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
+  const TOUCH_END_MAX_DRIFT_PX = 5;
+  const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
+  const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
+
+  function sampleClampedNormalMs({ mean, stdDev, min, max }, random = Math.random) {
+    const meanValue = Number(mean);
+    const stdDevValue = Number(stdDev);
+    const minValue = Number(min);
+    const maxValue = Number(max);
+    if (![meanValue, stdDevValue, minValue, maxValue].every(Number.isFinite)
+      || stdDevValue < 0
+      || maxValue < minValue) {
+      throw new FlowError('正規分布レイテンシのパラメータが不正です', 'INVALID_NORMAL_LATENCY');
+    }
+    const u1 = Math.max(Number.MIN_VALUE, 1 - random());
+    const u2 = 1 - random();
+    const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return Math.round(clamp((z0 * stdDevValue) + meanValue, minValue, maxValue));
+  }
+
+  function createSyntheticTouch(win, target, identifier, point) {
+    if (typeof win.Touch !== 'function') {
+      throw new FlowError('この環境は標準Touchコンストラクタに対応していません', 'TOUCH_UNSUPPORTED');
+    }
+    const init = {
+      identifier,
+      target,
+      clientX: point.x,
+      clientY: point.y,
+      screenX: point.x + finite(win.screenX, 0),
+      screenY: point.y + finite(win.screenY, 0),
+      pageX: point.x + finite(win.scrollX, 0),
+      pageY: point.y + finite(win.scrollY, 0),
+      radiusX: randomUniform(1.2, 2.8),
+      radiusY: randomUniform(1.2, 2.8),
+      rotationAngle: randomUniform(-8, 8),
+      force: randomUniform(0.35, 0.75)
+    };
+    try {
+      return new win.Touch(init);
+    } catch (error) {
+      throw new FlowError(`Touch生成に失敗しました: ${error.message}`, 'TOUCH_CONSTRUCTION_FAILED');
+    }
+  }
+
+  function dispatchSyntheticTouch(win, target, type, touch, active) {
+    if (typeof win.TouchEvent !== 'function') {
+      throw new FlowError('この環境は標準TouchEventに対応していません', 'TOUCH_EVENT_UNSUPPORTED');
+    }
+    const activeTouches = active ? [touch] : [];
+    let event;
+    try {
+      event = new win.TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        touches: activeTouches,
+        targetTouches: activeTouches,
+        changedTouches: [touch]
+      });
+    } catch (error) {
+      throw new FlowError(`TouchEvent生成に失敗しました: ${error.message}`, 'TOUCH_EVENT_CONSTRUCTION_FAILED');
+    }
+    const accepted = target.dispatchEvent(event);
+    if (!accepted || event.defaultPrevented) {
+      throw new FlowError(`${type}が対象側でキャンセルされました`, 'TOUCH_EVENT_CANCELED');
+    }
+    return event;
+  }
+
+  function scrollableAncestors(target) {
+    const doc = target.ownerDocument;
+    const win = doc.defaultView;
+    const result = [];
+    for (let node = target.parentElement; node && node !== doc.documentElement; node = node.parentElement) {
+      const style = win.getComputedStyle(node);
+      const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+      const canScrollX = /(auto|scroll|overlay)/.test(style.overflowX) && node.scrollWidth > node.clientWidth + 1;
+      if (canScrollX || canScrollY) result.push(node);
+    }
+    const root = doc.scrollingElement || doc.documentElement;
+    if (root && !result.includes(root)) result.push(root);
+    return result;
+  }
+
+  function scrollViewport(win, scroller) {
+    const doc = win.document;
+    const root = doc.scrollingElement || doc.documentElement;
+    if (scroller === root || scroller === doc.documentElement || scroller === doc.body) {
+      return { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
+    }
+    const rect = scroller.getBoundingClientRect();
+    return {
+      left: rect.left + scroller.clientLeft,
+      top: rect.top + scroller.clientTop,
+      right: rect.left + scroller.clientLeft + scroller.clientWidth,
+      bottom: rect.top + scroller.clientTop + scroller.clientHeight
+    };
+  }
+
+  function scrollPosition(win, scroller) {
+    const doc = win.document;
+    const root = doc.scrollingElement || doc.documentElement;
+    if (scroller === root || scroller === doc.documentElement || scroller === doc.body) {
+      return { x: finite(win.scrollX, root.scrollLeft), y: finite(win.scrollY, root.scrollTop) };
+    }
+    return { x: scroller.scrollLeft, y: scroller.scrollTop };
+  }
+
+  function setScrollPosition(win, scroller, x, y) {
+    const doc = win.document;
+    const root = doc.scrollingElement || doc.documentElement;
+    if (scroller === root || scroller === doc.documentElement || scroller === doc.body) {
+      win.scrollTo(x, y);
+      return;
+    }
+    scroller.scrollLeft = x;
+    scroller.scrollTop = y;
+  }
+
+  function maxScrollPosition(win, scroller) {
+    const doc = win.document;
+    const root = doc.scrollingElement || doc.documentElement;
+    if (scroller === root || scroller === doc.documentElement || scroller === doc.body) {
+      return {
+        x: Math.max(0, root.scrollWidth - win.innerWidth),
+        y: Math.max(0, root.scrollHeight - win.innerHeight)
+      };
+    }
+    return {
+      x: Math.max(0, scroller.scrollWidth - scroller.clientWidth),
+      y: Math.max(0, scroller.scrollHeight - scroller.clientHeight)
+    };
+  }
+
+  function nextAnimationFrame(win, signal) {
+    return new Promise((resolve, reject) => {
+      throwIfAborted(signal);
+      const request = win.requestAnimationFrame?.bind(win)
+        || (callback => win.setTimeout(() => callback(win.performance?.now?.() ?? performance.now()), 16));
+      const cancel = win.cancelAnimationFrame?.bind(win) || win.clearTimeout.bind(win);
+      let frameId = 0;
+      const onAbort = () => {
+        cancel(frameId);
+        reject(abortException(signal));
+      };
+      frameId = request(timestamp => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve(timestamp);
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  async function animatePhysicalScroll(win, scroller, destination, signal) {
+    const start = scrollPosition(win, scroller);
+    const max = maxScrollPosition(win, scroller);
+    const end = {
+      x: clamp(destination.x, 0, max.x),
+      y: clamp(destination.y, 0, max.y)
+    };
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    if (distance < 1) return false;
+    const speed = randomUniform(SCROLL_SPEED_MIN_PX_PER_SEC, SCROLL_SPEED_MAX_PX_PER_SEC);
+    const duration = clamp((distance / speed) * 1000, 140, 900);
+    const jitterAmplitude = randomUniform(0.15, Math.min(1.25, Math.max(0.15, distance * 0.01)));
+    const startedAt = await nextAnimationFrame(win, signal);
+    while (true) {
+      const now = await nextAnimationFrame(win, signal);
+      const progress = clamp((now - startedAt) / duration, 0, 1);
+      const eased = 1 - ((1 - progress) ** 3);
+      const fade = 1 - progress;
+      const jitter = Math.sin(progress * Math.PI * 6) * jitterAmplitude * fade;
+      setScrollPosition(
+        win,
+        scroller,
+        start.x + ((end.x - start.x) * eased),
+        start.y + ((end.y - start.y) * eased) + jitter
+      );
+      if (progress >= 1) break;
+    }
+    setScrollPosition(win, scroller, end.x, end.y);
+    return true;
+  }
+
+  function pointForTarget(target, fractions) {
+    const rect = target.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
+    }
+    return {
+      rect,
+      x: rect.left + (rect.width * fractions.x),
+      y: rect.top + (rect.height * fractions.y)
+    };
+  }
+
+  function pointInsideViewport(point, viewport, margin = 1) {
+    return point.x >= viewport.left + margin
+      && point.x < viewport.right - margin
+      && point.y >= viewport.top + margin
+      && point.y < viewport.bottom - margin;
+  }
+
+  async function ensureTargetPointVisible(target, fractions, { signal } = {}) {
+    const win = target.ownerDocument.defaultView;
+    let scrolled = false;
+    for (const scroller of scrollableAncestors(target)) {
+      throwIfAborted(signal);
+      const point = pointForTarget(target, fractions);
+      const viewport = scrollViewport(win, scroller);
+      if (pointInsideViewport(point, viewport, 4)) continue;
+      const current = scrollPosition(win, scroller);
+      const anchorX = randomUniform(0.38, 0.62);
+      const anchorY = randomUniform(0.34, 0.66);
+      const desiredX = viewport.left + ((viewport.right - viewport.left) * anchorX);
+      const desiredY = viewport.top + ((viewport.bottom - viewport.top) * anchorY);
+      scrolled = await animatePhysicalScroll(win, scroller, {
+        x: current.x + point.x - desiredX,
+        y: current.y + point.y - desiredY
+      }, signal) || scrolled;
+    }
+    const finalPoint = pointForTarget(target, fractions);
+    const viewport = { left: 0, top: 0, right: win.innerWidth, bottom: win.innerHeight };
+    if (!pointInsideViewport(finalPoint, viewport, 1)) {
+      throw new FlowError('押下対象を画面内までスクロールできませんでした', 'TARGET_OFFSCREEN');
+    }
+    return { ...finalPoint, scrolled };
+  }
+
+  function randomEndPoint(start, rect) {
+    const angle = randomUniform(0, Math.PI * 2);
+    const radius = Math.sqrt(Math.random()) * TOUCH_END_MAX_DRIFT_PX;
+    const epsilon = 0.01;
+    return {
+      x: clamp(start.x + (Math.cos(angle) * radius), rect.left + epsilon, rect.right - epsilon),
+      y: clamp(start.y + (Math.sin(angle) * radius), rect.top + epsilon, rect.bottom - epsilon)
+    };
+  }
+
   async function jqTapStrict(target, { signal, label: targetLabel = '対象' } = {}) {
     if (!target || !target.isConnected) throw new FlowError(`${targetLabel}が見つかりません`, 'TARGET_MISSING');
     return queueExclusive(async () => {
@@ -1438,14 +1680,52 @@
       if (activeTapTargets.has(target)) throw new FlowError(`${targetLabel}はすでに押下処理中です`, 'TAP_BUSY');
       const win = target.ownerDocument?.defaultView;
       if (!win || win !== frameWindow()) throw new FlowError(`${targetLabel}が現在のiframeに属していません`, 'STALE_TARGET');
-      const jq = win.jQuery || win.$;
-      if (typeof jq !== 'function' || !jq.fn || typeof jq.fn.trigger !== 'function') {
-        throw new FlowError('iframe側のjQueryまたはtapが利用できないため停止しました', 'JQUERY_TAP_UNAVAILABLE');
-      }
       activeTapTargets.add(target);
+      let dispatchTarget = null;
+      let identifier = null;
+      let activePoint = null;
+      let touchActive = false;
       try {
-        jq(target).trigger('tap');
+        const fractions = { x: Math.random(), y: Math.random() };
+        let start = null;
+        for (let attempt = 0; attempt < 4; attempt++) {
+          await ensureTargetPointVisible(target, fractions, { signal });
+          await abortableDelay(sampleClampedNormalMs(TOUCH_VISIBLE_LATENCY_MS), signal);
+          if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
+            throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
+          }
+          const checked = await ensureTargetPointVisible(target, fractions, { signal });
+          if (!checked.scrolled) {
+            start = checked;
+            break;
+          }
+        }
+        if (!start) throw new FlowError(`${targetLabel}の表示位置が安定しません`, 'TARGET_UNSTABLE');
+        const hit = target.ownerDocument.elementFromPoint(start.x, start.y);
+        if (!hit || (hit !== target && !target.contains(hit))) {
+          throw new FlowError(`${targetLabel}のランダム座標が他要素に遮られています`, 'TARGET_OCCLUDED');
+        }
+        dispatchTarget = hit;
+        identifier = Math.floor(randomUniform(1, 2_147_483_647));
+        activePoint = start;
+        const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
+        dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
+        touchActive = true;
+        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);
+        const endPoint = randomEndPoint(start, start.rect);
+        activePoint = endPoint;
+        const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
+        dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
+        touchActive = false;
         await sleepMicrotask();
+      } catch (error) {
+        if (touchActive && dispatchTarget && activePoint && identifier != null) {
+          try {
+            const cancelTouch = createSyntheticTouch(win, dispatchTarget, identifier, activePoint);
+            dispatchSyntheticTouch(win, dispatchTarget, 'touchcancel', cancelTouch, false);
+          } catch {}
+        }
+        throw error;
       } finally {
         activeTapTargets.delete(target);
       }
@@ -1734,9 +2014,28 @@
     const { signal } = context;
     await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
     const found = await monitorFrame(() => {
-      const observed = fullAutoState();
-      return observed.exists && observed.visible ? observed : false;
-    }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
+      const doc = frameDocument();
+      const observed = fullAutoState(doc);
+      if (!observed.exists || !observed.visible) return false;
+      if (observed.on) return observed;
+
+      const attack = attackSnapshot(doc);
+      const attackReady = Boolean(
+        attack.start
+        && attack.start.classList.contains('display-on')
+        && !attack.start.classList.contains('display-off')
+        && computedVisible(attack.start)
+        && !attack.dummyVisible
+        && !attack.cancelVisible
+        && !attack.actorAttacking
+      );
+      return attackReady ? observed : false;
+    }, {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      stableMs: DEFAULT_STABLE_MS,
+      description: 'フルオート操作可能状態待ち'
+    });
     if (found.on) return { changed: false };
     await jqTapStrict(found.button, { signal, label: 'フルオート' });
     return { changed: true };
