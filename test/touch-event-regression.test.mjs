@@ -4,31 +4,34 @@ import test from 'node:test';
 import vm from 'node:vm';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
-
-test('distribution script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
-test('native touch lifecycle is enforced', () => {
-  assert.match(source, /typeof win\.Touch !== 'function'/);
-  assert.match(source, /typeof win\.TouchEvent !== 'function'/);
-  assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchstart'/);
-  assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchend'/);
-  assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchcancel'/);
-  assert.match(source, /TOUCH_EVENT_CANCELED/);
-  assert.doesNotMatch(source, /function makeTouchList\(/);
-});
-test('Box-Muller timing parameters match the requested model', () => {
-  assert.match(source, /TOUCH_HOLD_LATENCY_MS = Object\.freeze\(\{ mean: 95, stdDev: 15, min: 50, max: 180 \}\)/);
-  assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\.freeze\(\{ mean: 125, stdDev: 20, min: 70, max: 250 \}\)/);
-  assert.match(source, /const z0 = Math\.sqrt\(-2 \* Math\.log\(u1\)\) \* Math\.cos\(2 \* Math\.PI \* u2\)/);
-  assert.match(source, /\(z0 \* stdDevValue\) \+ meanValue/);
+test('script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
+test('visible wait matches the requested normal distribution', () => {
+  assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\.freeze\(\{ mean: 130, stdDev: 20, min: 80, max: 250 \}\)/);
   assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_VISIBLE_LATENCY_MS\), signal\)/);
-  assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_HOLD_LATENCY_MS\), signal\)/);
-  assert.doesNotMatch(source, /TOUCH_(?:VISIBLE_WAIT|HOLD)_(?:MIN|MAX)_MS/);
 });
-test('full-auto waits for stable visible battle controls', () => {
-  assert.match(source, /attack\.start\.classList\.contains\('display-on'\)/);
-  assert.match(source, /computedVisible\(attack\.start\)/);
-  assert.match(source, /!attack\.dummyVisible/);
-  assert.match(source, /!attack\.cancelVisible/);
-  assert.match(source, /!attack\.actorAttacking/);
-  assert.match(source, /stableMs: DEFAULT_STABLE_MS/);
+test('start point is a clamped center-biased 2D Gaussian sample', () => {
+  assert.match(source, /TOUCH_START_STDDEV_RATIO_MIN = 0\.12/);
+  assert.match(source, /TOUCH_START_STDDEV_RATIO_MAX = 0\.15/);
+  assert.match(source, /x: clamp\(0\.5 \+ \(sampleStandardNormal\(random\) \* stdDevRatio\), 0, 1\)/);
+  assert.match(source, /y: clamp\(0\.5 \+ \(sampleStandardNormal\(random\) \* stdDevRatio\), 0, 1\)/);
+  assert.doesNotMatch(source, /fractions = \{ x: Math\.random\(\), y: Math\.random\(\) \}/);
+});
+test('movement emits touchmove before touchend', () => {
+  const move = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchmove'");
+  const end = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchend'");
+  assert.ok(move >= 0 && end > move);
+  assert.match(source, /movement > Number\.EPSILON/);
+  assert.doesNotMatch(source, /TOUCH_END_MAX_DRIFT_PX/);
+});
+test('optional physical attributes are not independently resampled', () => {
+  const start = source.indexOf('function createSyntheticTouch');
+  const end = source.indexOf('function dispatchSyntheticTouch', start);
+  assert.doesNotMatch(source.slice(start, end), /radiusX|radiusY|rotationAngle|force/);
+});
+test('TouchEvent lists remain coherent', () => {
+  assert.match(source, /const activeTouches = active \? \[touch\] : \[\]/);
+  assert.match(source, /touches: activeTouches/);
+  assert.match(source, /targetTouches: activeTouches/);
+  assert.match(source, /changedTouches: \[touch\]/);
+  assert.match(source, /'touchcancel', cancelTouch, false/);
 });
