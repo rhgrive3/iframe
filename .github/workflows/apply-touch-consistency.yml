@@ -4,6 +4,9 @@ on:
   push:
     branches: [experiment/touch-event-consistency]
     paths: [.github/workflows/apply-touch-consistency.yml]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   patch:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'experiment/touch-event-consistency'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -34,12 +38,7 @@ jobs:
           path = Path('a.js')
           source = path.read_text(encoding='utf-8')
 
-          source, version_count = re.subn(
-              r"  const APP_VERSION = 18;",
-              "  const APP_VERSION = 19;",
-              source,
-              count=1,
-          )
+          source, version_count = re.subn(r"  const APP_VERSION = 18;", "  const APP_VERSION = 19;", source, count=1)
           if version_count != 1:
               raise SystemExit(f'APP_VERSION replacement count: {version_count}')
 
@@ -176,16 +175,8 @@ jobs:
 
           if source.count('        const fractions = { x: Math.random(), y: Math.random() };') != 1:
               raise SystemExit('start-coordinate logic changed concurrently')
-          source = source.replace(
-              '        const fractions = { x: Math.random(), y: Math.random() };',
-              '        const fractions = sampleTouchStartFractions();',
-              1,
-          )
-          source = source.replace(
-              '`${targetLabel}のランダム座標が他要素に遮られています`',
-              '`${targetLabel}のガウス座標が他要素に遮られています`',
-              1,
-          )
+          source = source.replace('        const fractions = { x: Math.random(), y: Math.random() };', '        const fractions = sampleTouchStartFractions();', 1)
+          source = source.replace('`${targetLabel}のランダム座標が他要素に遮られています`', '`${targetLabel}のガウス座標が他要素に遮られています`', 1)
 
           old_lifecycle = """        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);
             const endPoint = randomEndPoint(start, start.rect);
@@ -232,7 +223,6 @@ jobs:
           if source.count(old_uniform) != 1:
               raise SystemExit('randomUniform changed concurrently')
           source = source.replace(old_uniform, new_uniform, 1)
-
           path.write_text(source, encoding='utf-8')
 
       - name: Update regression coverage
@@ -245,14 +235,11 @@ jobs:
           import vm from 'node:vm';
 
           const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
-
           test('script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
-
           test('visible wait matches the requested normal distribution', () => {
             assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\.freeze\(\{ mean: 130, stdDev: 20, min: 80, max: 250 \}\)/);
             assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_VISIBLE_LATENCY_MS\), signal\)/);
           });
-
           test('start point is a clamped center-biased 2D Gaussian sample', () => {
             assert.match(source, /TOUCH_START_STDDEV_RATIO_MIN = 0\.12/);
             assert.match(source, /TOUCH_START_STDDEV_RATIO_MAX = 0\.15/);
@@ -260,7 +247,6 @@ jobs:
             assert.match(source, /y: clamp\(0\.5 \+ \(sampleStandardNormal\(random\) \* stdDevRatio\), 0, 1\)/);
             assert.doesNotMatch(source, /fractions = \{ x: Math\.random\(\), y: Math\.random\(\) \}/);
           });
-
           test('movement emits touchmove before touchend', () => {
             const move = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchmove'");
             const end = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchend'");
@@ -268,14 +254,12 @@ jobs:
             assert.match(source, /movement >= TOUCH_MOVE_THRESHOLD_PX/);
             assert.doesNotMatch(source, /TOUCH_END_MAX_DRIFT_PX/);
           });
-
           test('optional physical attributes are not independently resampled', () => {
             const start = source.indexOf('function createSyntheticTouch');
             const end = source.indexOf('function dispatchSyntheticTouch', start);
             const body = source.slice(start, end);
             assert.doesNotMatch(body, /radiusX|radiusY|rotationAngle|force/);
           });
-
           test('TouchEvent lists remain coherent', () => {
             assert.match(source, /const activeTouches = active \? \[touch\] : \[\]/);
             assert.match(source, /touches: activeTouches/);
