@@ -67,3 +67,27 @@ test("user-derived condition summaries do not use innerHTML", () => {
   assert.doesNotMatch(source, /conditionTargetSummary[^;\n]*innerHTML/);
   assert.match(source, /setConditionTargetSummary/);
 });
+
+
+test("Granblue assistant explains state and recommends conditions", () => {
+  assert.match(source, /id="granblueAssistant"/);
+  assert.match(source, /id="conditionRecommendation"/);
+  assert.match(source, /function conditionRecommendationFor/);
+  assert.match(source, /function refreshGranblueAssistant/);
+  assert.match(source, /gbf_attack_ready/);
+  assert.match(source, /gbf_attack_not_ready/);
+  assert.match(source, /DOMにありますが画面には見えていません/);
+});
+
+test("condition choices explain existence visibility enabled and toggle states", () => {
+  assert.match(source, /HTML上に生成された時/);
+  assert.match(source, /実際に画面へ見えた時/);
+  assert.match(source, /disabled解除/);
+  assert.match(source, /classやaria属性だけ変化/);
+});
+
+test("first iframe load mirrors the parent page URL when no saved URL exists", () => {
+  assert.match(source, /normalizeUrl\(urlInput\.value\|\|location\.href\)/);
+  assert.match(source, /urlInput\.value=initial;iframe\.src=initial/);
+  assert.doesNotMatch(source, /iframe\.src=initial\|\|'about:blank'/);
+});
