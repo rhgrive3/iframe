@@ -54,6 +54,7 @@ test("responsive density remains readable", () => {
   assert.match(source, /\.logEntry\{[^}]*font-size:11px/);
   assert.match(source, /usesSoftwareKeyboard/);
   assert.match(source, /\(hover:none\) and \(pointer:coarse\)/);
+  assert.match(source, /if\(!usesSoftwareKeyboard\(\)\)return;enterKeyboardMode\(target\)/);
 });
 
 test("destructive and replacement operations are recoverable", () => {
