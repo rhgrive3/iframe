@@ -2,10 +2,11 @@ name: Apply Touch Consistency Patch
 
 on:
   issues:
-    types: [opened]
+    types: [opened, reopened]
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: apply-touch-consistency-main
@@ -17,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Report start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "touch consistency finalizer started at commit ${{ github.sha }}"
       - uses: actions/checkout@v5
         with:
           ref: main
@@ -50,3 +55,8 @@ jobs:
           git add -A
           git commit -m 'fix: make synthetic touch gestures statistically coherent'
           git push origin HEAD:main
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --body "touch consistency finalizer finished with status: ${{ job.status }}"
