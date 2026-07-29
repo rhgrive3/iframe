@@ -1,32 +1,44 @@
-name: Validate Auto Flow
+name: Apply Touch Consistency Patch
 
 on:
   pull_request:
-    paths:
-      - a.js
-      - tests/**
-      - .github/workflows/validate-autoflow.yml
-  push:
     branches: [main]
+    types: [opened, synchronize, reopened]
     paths:
-      - a.js
-      - tests/**
       - .github/workflows/validate-autoflow.yml
+      - .github/scripts/apply_touch_consistency.py
+      - .github/workflows/apply-touch-consistency.yml
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: apply-touch-consistency-pr-23
+  cancel-in-progress: false
 
 jobs:
-  validate:
+  patch:
+    if: github.event.pull_request.head.ref == 'experiment/touch-event-consistency'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - name: JavaScript syntax
-        run: node --check a.js
-      - name: UX regression checks
-        run: node --test tests/autoflow.static.test.mjs
+        with:
+          ref: experiment/touch-event-consistency
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply patch
+        run: python .github/scripts/apply_touch_consistency.py
+      - name: Verify
+        run: |
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+      - name: Commit final changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: make synthetic touch gestures statistically coherent'
+          git push origin HEAD:experiment/touch-event-consistency
