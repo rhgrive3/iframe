@@ -1,5 +1,6 @@
 name: Apply Touch Consistency Patch
 
+# One-shot trigger: 2026-07-30
 on:
   push:
     branches: [main]
