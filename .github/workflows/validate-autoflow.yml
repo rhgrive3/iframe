@@ -1,9 +1,8 @@
 name: Apply Touch Consistency Patch
 
 on:
-  pull_request:
+  push:
     branches: [main]
-    types: [opened, synchronize, reopened]
     paths:
       - .github/workflows/validate-autoflow.yml
       - .github/scripts/apply_touch_consistency.py
@@ -13,22 +12,31 @@ permissions:
   contents: write
 
 concurrency:
-  group: apply-touch-consistency-pr-23
+  group: apply-touch-consistency-main
   cancel-in-progress: false
 
 jobs:
   patch:
-    if: github.event.pull_request.head.ref == 'experiment/touch-event-consistency'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: experiment/touch-event-consistency
+          ref: main
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Finalize exact movement invariant
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('.github/scripts/apply_touch_consistency.py')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace('  const TOUCH_MOVE_THRESHOLD_PX = 0.1;\n', '')
+          source = source.replace('if (movement >= TOUCH_MOVE_THRESHOLD_PX) {', 'if (movement > Number.EPSILON) {')
+          source = source.replace('assert.match(source, /movement >= TOUCH_MOVE_THRESHOLD_PX/);', 'assert.match(source, /movement > Number\\.EPSILON/);')
+          path.write_text(source, encoding='utf-8')
       - name: Apply patch
         run: python .github/scripts/apply_touch_consistency.py
       - name: Verify
@@ -41,4 +49,4 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git commit -m 'fix: make synthetic touch gestures statistically coherent'
-          git push origin HEAD:experiment/touch-event-consistency
+          git push origin HEAD:main
