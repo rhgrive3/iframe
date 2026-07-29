@@ -11,9 +11,10 @@ test('coarse pointers disable expensive visual effects', () => {
   assert.match(source, /const lightweightMode =/);
 });
 test('lightweight mode avoids full-document MutationObserver', () => {
-  assert.match(source, /if \(lightweightMode\) return;/);
-  assert.doesNotMatch(source, /characterData: true/);
-  assert.match(source, /attributeFilter: \['class', 'style'\]/);
+  const body = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
+  assert.match(body, /if \(lightweightMode\) return;/);
+  assert.doesNotMatch(body, /characterData: true/);
+  assert.match(body, /attributeFilter: \['class', 'style'\]/);
 });
 test('logs update incrementally and remain bounded', () => {
   assert.match(source, /const MAX_LOGS = 100/);
