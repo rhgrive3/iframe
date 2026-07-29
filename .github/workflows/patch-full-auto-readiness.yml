@@ -1,0 +1,90 @@
+name: Apply full-auto readiness patch
+
+on:
+  push:
+    branches:
+      - 'experiment/touch-events-scroll'
+    paths:
+      - '.github/workflows/patch-full-auto-readiness.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: experiment/touch-events-scroll
+          fetch-depth: 0
+
+      - name: Patch full-auto readiness wait
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+          old = """  async function ensureFullAuto(config, context) {
+    const { signal } = context;
+    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+    const found = await monitorFrame(() => {
+      const observed = fullAutoState();
+      return observed.exists && observed.visible ? observed : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
+    if (found.on) return { changed: false };
+    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    return { changed: true };
+  }
+"""
+          new = """  async function ensureFullAuto(config, context) {
+    const { signal } = context;
+    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+    const found = await monitorFrame(() => {
+      const doc = frameDocument();
+      const observed = fullAutoState(doc);
+      if (!observed.exists || !observed.visible) return false;
+      if (observed.on) return observed;
+
+      const attack = attackSnapshot(doc);
+      const attackReady = Boolean(
+        attack.start
+        && attack.start.classList.contains('display-on')
+        && !attack.start.classList.contains('display-off')
+        && computedVisible(attack.start)
+        && !isAttackInProgress(attack)
+      );
+      return attackReady ? observed : false;
+    }, {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      stableMs: DEFAULT_STABLE_MS,
+      description: 'フルオート操作可能状態待ち'
+    });
+    if (found.on) return { changed: false };
+    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    return { changed: true };
+  }
+"""
+
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one ensureFullAuto block, found {count}')
+
+          path.write_text(source.replace(old, new), encoding='utf-8')
+          PY
+
+          node --check a.js
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js
+          git rm .github/workflows/patch-full-auto-readiness.yml
+          git commit -m 'fix: wait for battle controls before enabling full auto'
+          git push origin HEAD:experiment/touch-events-scroll
