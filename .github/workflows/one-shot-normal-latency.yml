@@ -1,0 +1,142 @@
+name: One-shot normal latency model
+
+on:
+  push:
+    branches:
+      - experiment/touch-events-scroll
+    paths:
+      - .github/workflows/one-shot-normal-latency.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: experiment/touch-events-scroll
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply Box-Muller latency model
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+
+          replacements = [
+              ("""  const TOUCH_VISIBLE_WAIT_MIN_MS = 98;
+  const TOUCH_VISIBLE_WAIT_MAX_MS = 150;
+  const TOUCH_HOLD_MIN_MS = 65;
+  const TOUCH_HOLD_MAX_MS = 115;
+  const TOUCH_END_MAX_DRIFT_PX = 5;
+  const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
+  const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
+""", """  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 125, stdDev: 20, min: 70, max: 250 });
+  const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
+  const TOUCH_END_MAX_DRIFT_PX = 5;
+  const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
+  const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
+
+  function sampleClampedNormalMs({ mean, stdDev, min, max }, random = Math.random) {
+    const meanValue = Number(mean);
+    const stdDevValue = Number(stdDev);
+    const minValue = Number(min);
+    const maxValue = Number(max);
+    if (![meanValue, stdDevValue, minValue, maxValue].every(Number.isFinite)
+      || stdDevValue < 0
+      || maxValue < minValue) {
+      throw new FlowError('正規分布レイテンシのパラメータが不正です', 'INVALID_NORMAL_LATENCY');
+    }
+    const u1 = Math.max(Number.MIN_VALUE, 1 - random());
+    const u2 = 1 - random();
+    const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return Math.round(clamp((z0 * stdDevValue) + meanValue, minValue, maxValue));
+  }
+"""),
+              ('          await abortableDelay(randomUniform(TOUCH_VISIBLE_WAIT_MIN_MS, TOUCH_VISIBLE_WAIT_MAX_MS), signal);', '          await abortableDelay(sampleClampedNormalMs(TOUCH_VISIBLE_LATENCY_MS), signal);'),
+              ('        await abortableDelay(randomUniform(TOUCH_HOLD_MIN_MS, TOUCH_HOLD_MAX_MS), signal);', '        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);')
+          ]
+
+          for old, new in replacements:
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one replacement target, found {count}: {old[:80]!r}')
+              source = source.replace(old, new, 1)
+
+          path.write_text(source, encoding='utf-8')
+
+          Path('test/touch-event-regression.test.mjs').write_text("""import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import vm from 'node:vm';
+
+const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
+
+test('distribution script parses', () => {
+  assert.doesNotThrow(() => new vm.Script(source));
+});
+
+test('tap path uses touchstart and touchend without jQuery tap', () => {
+  assert.match(source, /dispatchSyntheticTouch\\(win, dispatchTarget, 'touchstart'/);
+  assert.match(source, /dispatchSyntheticTouch\\(win, dispatchTarget, 'touchend'/);
+  assert.doesNotMatch(source, /\\.trigger\\(['\"]tap['\"]\\)/);
+});
+
+test('touch timing parameters use the requested clamped normal models', () => {
+  assert.match(source, /TOUCH_HOLD_LATENCY_MS = Object\\.freeze\\(\\{ mean: 95, stdDev: 15, min: 50, max: 180 \\}\\)/);
+  assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\\.freeze\\(\\{ mean: 125, stdDev: 20, min: 70, max: 250 \\}\\)/);
+  assert.doesNotMatch(source, /TOUCH_(?:VISIBLE_WAIT|HOLD)_(?:MIN|MAX)_MS/);
+});
+
+test('latency generation uses Box-Muller and clamps the result', () => {
+  const start = source.indexOf('function sampleClampedNormalMs');
+  const end = source.indexOf('function createSyntheticTouch', start);
+  const body = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(body, /Math\\.sqrt\\(-2 \\* Math\\.log\\(u1\\)\\)/);
+  assert.match(body, /Math\\.cos\\(2 \\* Math\\.PI \\* u2\\)/);
+  assert.match(body, /\\(z0 \\* stdDevValue\\) \\+ meanValue/);
+  assert.match(body, /clamp\\([^;]+minValue, maxValue\\)/);
+});
+
+test('visibility and hold waits consume the normal latency sampler', () => {
+  assert.match(source, /abortableDelay\\(sampleClampedNormalMs\\(TOUCH_VISIBLE_LATENCY_MS\\), signal\\)/);
+  assert.match(source, /abortableDelay\\(sampleClampedNormalMs\\(TOUCH_HOLD_LATENCY_MS\\), signal\\)/);
+});
+
+test('offscreen targets retain randomized animated scrolling', () => {
+  assert.match(source, /async function animatePhysicalScroll\\(/);
+  assert.match(source, /SCROLL_SPEED_MIN_PX_PER_SEC = 900/);
+  assert.match(source, /SCROLL_SPEED_MAX_PX_PER_SEC = 1800/);
+});
+
+test('an interrupted touch is cancelled cleanly', () => {
+  assert.match(source, /dispatchSyntheticTouch\\(win, dispatchTarget, 'touchcancel'/);
+});
+""", encoding='utf-8')
+          PY
+
+      - name: Verify
+        run: |
+          node --check a.js
+          node --test test/touch-event-regression.test.mjs
+
+      - name: Commit changes and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js test/touch-event-regression.test.mjs
+          git rm .github/workflows/one-shot-normal-latency.yml
+          git commit -m 'refactor: model touch latency with Box-Muller distribution'
+          git push origin HEAD:experiment/touch-events-scroll
