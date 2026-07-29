@@ -1,0 +1,339 @@
+name: Apply safe touch hardening
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.issue.title == 'apply-safe-touch-hardening-now'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: experiment/touch-events-scroll
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply correctness and readiness patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+
+          source, version_count = re.subn(
+              r"  const APP_VERSION = 16;",
+              "  const APP_VERSION = 17;",
+              source,
+              count=1,
+          )
+          if version_count != 1:
+              raise SystemExit(f'APP_VERSION replacement count was {version_count}, expected 1')
+
+          touch_pattern = re.compile(
+              r"  const TOUCH_VISIBLE_WAIT_MIN_MS = 98;.*?\n  function randomUniform\(min, max\) \{",
+              re.S,
+          )
+          touch_replacement = r'''  const TOUCH_SETTLE_MS = 120;
+          const TOUCH_HOLD_MS = 80;
+
+          function targetCenterPoint(target) {
+            const rect = target.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+              throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
+            }
+            return {
+              rect,
+              x: rect.left + (rect.width / 2),
+              y: rect.top + (rect.height / 2)
+            };
+          }
+
+          function pointInsideViewport(point, win, margin = 1) {
+            return point.x >= margin
+              && point.x < win.innerWidth - margin
+              && point.y >= margin
+              && point.y < win.innerHeight - margin;
+          }
+
+          function nextAnimationFrame(win, signal) {
+            return new Promise((resolve, reject) => {
+              throwIfAborted(signal);
+              const request = win.requestAnimationFrame?.bind(win)
+                || (callback => win.setTimeout(() => callback(win.performance?.now?.() ?? performance.now()), 16));
+              const cancel = win.cancelAnimationFrame?.bind(win) || win.clearTimeout.bind(win);
+              let frameId = 0;
+              const onAbort = () => {
+                cancel(frameId);
+                reject(abortException(signal));
+              };
+              frameId = request(timestamp => {
+                signal?.removeEventListener('abort', onAbort);
+                resolve(timestamp);
+              });
+              signal?.addEventListener('abort', onAbort, { once: true });
+            });
+          }
+
+          async function ensureTargetPointVisible(target, { signal } = {}) {
+            const win = target.ownerDocument?.defaultView;
+            if (!win) throw new FlowError('押下対象のwindowを取得できません', 'TARGET_WINDOW_MISSING');
+            let point = targetCenterPoint(target);
+            if (!pointInsideViewport(point, win, 4)) {
+              target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' });
+              await nextAnimationFrame(win, signal);
+              point = targetCenterPoint(target);
+            }
+            if (!pointInsideViewport(point, win, 1)) {
+              throw new FlowError('押下対象を画面内までスクロールできませんでした', 'TARGET_OFFSCREEN');
+            }
+            return point;
+          }
+
+          function createTouchSequence(win, target, identifier) {
+            if (typeof win.Touch !== 'function' || typeof win.TouchEvent !== 'function') {
+              throw new FlowError('このブラウザではTouch/TouchEventを生成できません', 'TOUCH_EVENT_UNSUPPORTED');
+            }
+            return Object.freeze({
+              win,
+              target,
+              identifier,
+              radiusX: 1,
+              radiusY: 1,
+              rotationAngle: 0,
+              force: 0.5
+            });
+          }
+
+          function createSyntheticTouch(sequence, point) {
+            const { win, target, identifier, radiusX, radiusY, rotationAngle, force } = sequence;
+            try {
+              return new win.Touch({
+                identifier,
+                target,
+                clientX: point.x,
+                clientY: point.y,
+                screenX: point.x + finite(win.screenX, 0),
+                screenY: point.y + finite(win.screenY, 0),
+                pageX: point.x + finite(win.scrollX, 0),
+                pageY: point.y + finite(win.scrollY, 0),
+                radiusX,
+                radiusY,
+                rotationAngle,
+                force
+              });
+            } catch (error) {
+              throw new FlowError(`Touch生成に失敗しました: ${error.message}`, 'TOUCH_CONSTRUCTION_FAILED');
+            }
+          }
+
+          function dispatchSyntheticTouch(sequence, type, touch, active) {
+            let event;
+            try {
+              event = new sequence.win.TouchEvent(type, {
+                bubbles: true,
+                cancelable: true,
+                composed: true,
+                touches: active ? [touch] : [],
+                targetTouches: active ? [touch] : [],
+                changedTouches: [touch]
+              });
+            } catch (error) {
+              throw new FlowError(`TouchEvent生成に失敗しました: ${error.message}`, 'TOUCH_EVENT_CONSTRUCTION_FAILED');
+            }
+            const accepted = sequence.target.dispatchEvent(event);
+            return { event, accepted, defaultPrevented: event.defaultPrevented };
+          }
+
+          async function jqTapStrict(target, { signal, label: targetLabel = '対象' } = {}) {
+            if (!target || !target.isConnected) throw new FlowError(`${targetLabel}が見つかりません`, 'TARGET_MISSING');
+            return queueExclusive(async () => {
+              throwIfAborted(signal);
+              if (activeTapTargets.has(target)) throw new FlowError(`${targetLabel}はすでに押下処理中です`, 'TAP_BUSY');
+              const win = target.ownerDocument?.defaultView;
+              if (!win || win !== frameWindow()) throw new FlowError(`${targetLabel}が現在のiframeに属していません`, 'STALE_TARGET');
+              activeTapTargets.add(target);
+              let sequence = null;
+              let point = null;
+              let touchActive = false;
+              try {
+                await ensureTargetPointVisible(target, { signal });
+                await abortableDelay(TOUCH_SETTLE_MS, signal);
+                if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
+                  throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
+                }
+                point = await ensureTargetPointVisible(target, { signal });
+                const hit = target.ownerDocument.elementFromPoint(point.x, point.y);
+                if (!hit || (hit !== target && !target.contains(hit))) {
+                  throw new FlowError(`${targetLabel}の中央座標が他要素に遮られています`, 'TARGET_OCCLUDED');
+                }
+                sequence = createTouchSequence(win, hit, Math.floor(Math.random() * 2_147_483_646) + 1);
+                const startTouch = createSyntheticTouch(sequence, point);
+                const startDispatch = dispatchSyntheticTouch(sequence, 'touchstart', startTouch, true);
+                touchActive = true;
+                await abortableDelay(TOUCH_HOLD_MS, signal);
+                const endTouch = createSyntheticTouch(sequence, point);
+                const endDispatch = dispatchSyntheticTouch(sequence, 'touchend', endTouch, false);
+                touchActive = false;
+                await sleepMicrotask();
+                return {
+                  startDefaultPrevented: startDispatch.defaultPrevented,
+                  endDefaultPrevented: endDispatch.defaultPrevented
+                };
+              } catch (error) {
+                if (touchActive && sequence && point) {
+                  try {
+                    const cancelTouch = createSyntheticTouch(sequence, point);
+                    dispatchSyntheticTouch(sequence, 'touchcancel', cancelTouch, false);
+                  } catch {}
+                }
+                throw error;
+              } finally {
+                activeTapTargets.delete(target);
+              }
+            });
+          }
+
+          function randomUniform(min, max) {'''
+
+          source, touch_count = touch_pattern.subn(touch_replacement, source, count=1)
+          if touch_count != 1:
+              raise SystemExit(f'touch implementation replacement count was {touch_count}, expected 1')
+
+          full_auto_old = """  async function ensureFullAuto(config, context) {
+            const { signal } = context;
+            await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+            const found = await monitorFrame(() => {
+              const observed = fullAutoState();
+              return observed.exists && observed.visible ? observed : false;
+            }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
+            if (found.on) return { changed: false };
+            await jqTapStrict(found.button, { signal, label: 'フルオート' });
+            return { changed: true };
+          }
+          """
+          full_auto_new = """  async function ensureFullAuto(config, context) {
+            const { signal } = context;
+            await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+            const found = await monitorFrame(() => {
+              const doc = frameDocument();
+              const observed = fullAutoState(doc);
+              if (!observed.exists || !observed.visible) return false;
+              if (observed.on) return observed;
+
+              const attack = attackSnapshot(doc);
+              const attackReady = Boolean(
+                attack.start
+                && attack.start.classList.contains('display-on')
+                && !attack.start.classList.contains('display-off')
+                && computedVisible(attack.start)
+                && !isAttackInProgress(attack)
+              );
+              return attackReady ? observed : false;
+            }, {
+              signal,
+              timeoutMs: config.timeoutSec * 1000,
+              stableMs: DEFAULT_STABLE_MS,
+              description: 'フルオート操作可能状態待ち'
+            });
+            if (found.on) return { changed: false };
+            await jqTapStrict(found.button, { signal, label: 'フルオート' });
+            return { changed: true };
+          }
+          """
+          if source.count(full_auto_old) != 1:
+              raise SystemExit(f'ensureFullAuto target count was {source.count(full_auto_old)}, expected 1')
+          source = source.replace(full_auto_old, full_auto_new, 1)
+
+          path.write_text(source, encoding='utf-8')
+          PY
+
+          cat > test/touch-event-regression.test.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import test from 'node:test';
+          import vm from 'node:vm';
+
+          const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
+
+          test('distribution script parses', () => {
+            assert.doesNotThrow(() => new vm.Script(source));
+          });
+
+          test('touch path requires native Touch and TouchEvent', () => {
+            assert.match(source, /typeof win\.Touch !== 'function'/);
+            assert.match(source, /typeof win\.TouchEvent !== 'function'/);
+            assert.match(source, /new win\.Touch\(/);
+            assert.match(source, /new sequence\.win\.TouchEvent\(/);
+            assert.doesNotMatch(source, /function makeTouchList\(/);
+            assert.doesNotMatch(source, /new win\.Event\(type/);
+          });
+
+          test('one contact profile is reused through the touch sequence', () => {
+            assert.match(source, /function createTouchSequence\(/);
+            assert.match(source, /radiusX: 1/);
+            assert.match(source, /radiusY: 1/);
+            assert.match(source, /rotationAngle: 0/);
+            assert.match(source, /force: 0\.5/);
+            assert.match(source, /createSyntheticTouch\(sequence, point\)/);
+          });
+
+          test('target handling is deterministic and standards based', () => {
+            assert.match(source, /rect\.left \+ \(rect\.width \/ 2\)/);
+            assert.match(source, /scrollIntoView\(\{ block: 'center', inline: 'center', behavior: 'auto' \}\)/);
+            assert.match(source, /const TOUCH_SETTLE_MS = 120/);
+            assert.match(source, /const TOUCH_HOLD_MS = 80/);
+            assert.doesNotMatch(source, /function randomEndPoint\(/);
+            assert.doesNotMatch(source, /async function animatePhysicalScroll\(/);
+          });
+
+          test('dispatch cancellation state is surfaced to the caller', () => {
+            assert.match(source, /const accepted = sequence\.target\.dispatchEvent\(event\)/);
+            assert.match(source, /return \{ event, accepted, defaultPrevented: event\.defaultPrevented \}/);
+            assert.match(source, /startDefaultPrevented:/);
+            assert.match(source, /endDefaultPrevented:/);
+          });
+
+          test('full auto waits for stable battle controls', () => {
+            assert.match(source, /attack\.start\.classList\.contains\('display-on'\)/);
+            assert.match(source, /!isAttackInProgress\(attack\)/);
+            assert.match(source, /stableMs: DEFAULT_STABLE_MS/);
+            assert.match(source, /フルオート操作可能状態待ち/);
+          });
+          EOF
+
+          rm -f .github/workflows/patch-full-auto-readiness.yml
+
+      - name: Verify
+        shell: bash
+        run: |
+          node --check a.js
+          node --test test/touch-event-regression.test.mjs
+          mapfile -d '' tests < <(find tests -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if [ "${#tests[@]}" -gt 0 ]; then
+            node --test "${tests[@]}"
+          fi
+
+      - name: Commit experiment
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A a.js test/touch-event-regression.test.mjs .github/workflows/patch-full-auto-readiness.yml
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix: harden touch dispatch and wait for battle controls'
+          git push origin HEAD:experiment/touch-events-scroll
