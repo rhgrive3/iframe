@@ -1,8 +1,9 @@
 name: One-shot full-auto fix
 
 on:
-  issues:
-    types: [opened]
+  schedule:
+    - cron: '48 15 29 7 *'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -10,7 +11,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.issue.title == 'RUN_FULL_AUTO_HOTFIX_20260730'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,18 +35,19 @@ jobs:
               raise SystemExit(f'expected exactly one target, found {count}')
           path.write_text(source.replace(old, new, 1))
           PY
-      - name: Verify
+      - name: Verify and remove runner
         run: |
           node --check a.js
           ! grep -q "フルオートON待ち" a.js
-      - name: Commit
+          rm .github/workflows/one-shot-full-auto-fix.yml
+      - name: Commit hotfix
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add a.js
+          git add -A
           git commit -m 'fix: let full-auto block continue after tap'
           git push
       - name: Close trigger issue
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue close "${{ github.event.issue.number }}" --comment 'Hotfix applied.'
+        run: gh issue close 13 --comment 'Hotfix applied and one-shot workflow removed.'
