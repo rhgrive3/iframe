@@ -87,7 +87,7 @@ test("condition choices explain existence visibility enabled and toggle states",
 });
 
 test("first iframe load mirrors the parent page URL when no saved URL exists", () => {
-  assert.match(source, /normalizeUrl\(urlInput\.value\|\|location\.href\)/);
+  assert.match(source, /normalizeUrl\(!savedInitial\|\|savedInitial==='about:blank'\?location\.href:savedInitial\)/);
   assert.match(source, /urlInput\.value=initial;iframe\.src=initial/);
   assert.doesNotMatch(source, /iframe\.src=initial\|\|'about:blank'/);
 });
@@ -101,4 +101,10 @@ test("Granblue presets bind their known stable selectors", () => {
   assert.match(source, /conditionSelector\.value=preset\.startsWith\('gbf_full_auto_'\)\?'\.btn-auto':'\.btn-attack-start'/);
   assert.match(source, /function findGranblueElement/);
   assert.match(source, /if\(!state\.settingsOpen\|\|state\.activeTab!=='condition'\)return/);
+});
+
+
+test("legacy about blank state also falls back to the parent URL", () => {
+  assert.match(source, /!savedInitial\|\|savedInitial==='about:blank'\?location\.href:savedInitial/);
+  assert.match(source, /if\(state\.activeTab==='condition'\)requestAnimationFrame\(refreshGranblueAssistant\)/);
 });
