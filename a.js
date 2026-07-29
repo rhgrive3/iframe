@@ -1737,12 +1737,7 @@
       return observed.exists && observed.visible ? observed : false;
     }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
     if (found.on) return { changed: false };
-    const waitOn = monitorFrame(() => {
-      const observed = fullAutoState();
-      return observed.exists && observed.visible && observed.on ? observed : false;
-    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
     await jqTapStrict(found.button, { signal, label: 'フルオート' });
-    await waitOn;
     return { changed: true };
   }
 
