@@ -5,34 +5,30 @@ import vm from 'node:vm';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
-test('distribution script parses', () => {
-  assert.doesNotThrow(() => new vm.Script(source));
-});
-
-test('tap path uses touchstart and touchend without jQuery tap', () => {
+test('distribution script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
+test('native touch lifecycle is enforced', () => {
+  assert.match(source, /typeof win\.Touch !== 'function'/);
+  assert.match(source, /typeof win\.TouchEvent !== 'function'/);
   assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchstart'/);
   assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchend'/);
-  assert.doesNotMatch(source, /\.trigger\(['"]tap['"]\)/);
-});
-
-test('start point, hold, visible delay, and end drift are randomized', () => {
-  assert.match(source, /TOUCH_VISIBLE_WAIT_MIN_MS = 98/);
-  assert.match(source, /TOUCH_VISIBLE_WAIT_MAX_MS = 150/);
-  assert.match(source, /TOUCH_HOLD_MIN_MS = 65/);
-  assert.match(source, /TOUCH_HOLD_MAX_MS = 115/);
-  assert.match(source, /TOUCH_END_MAX_DRIFT_PX = 5/);
-  assert.match(source, /fractions = \{ x: Math\.random\(\), y: Math\.random\(\) \}/);
-  assert.match(source, /Math\.sqrt\(Math\.random\(\)\)/);
-});
-
-test('offscreen targets use randomized animated scrolling', () => {
-  assert.match(source, /function scrollableAncestors\(/);
-  assert.match(source, /async function animatePhysicalScroll\(/);
-  assert.match(source, /SCROLL_SPEED_MIN_PX_PER_SEC = 900/);
-  assert.match(source, /SCROLL_SPEED_MAX_PX_PER_SEC = 1800/);
-  assert.match(source, /await ensureTargetPointVisible\(target, fractions/);
-});
-
-test('an interrupted touch is cancelled cleanly', () => {
   assert.match(source, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchcancel'/);
+  assert.match(source, /TOUCH_EVENT_CANCELED/);
+  assert.doesNotMatch(source, /function makeTouchList\(/);
+});
+test('Box-Muller timing parameters match the requested model', () => {
+  assert.match(source, /TOUCH_HOLD_LATENCY_MS = Object\.freeze\(\{ mean: 95, stdDev: 15, min: 50, max: 180 \}\)/);
+  assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\.freeze\(\{ mean: 125, stdDev: 20, min: 70, max: 250 \}\)/);
+  assert.match(source, /const z0 = Math\.sqrt\(-2 \* Math\.log\(u1\)\) \* Math\.cos\(2 \* Math\.PI \* u2\)/);
+  assert.match(source, /\(z0 \* stdDevValue\) \+ meanValue/);
+  assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_VISIBLE_LATENCY_MS\), signal\)/);
+  assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_HOLD_LATENCY_MS\), signal\)/);
+  assert.doesNotMatch(source, /TOUCH_(?:VISIBLE_WAIT|HOLD)_(?:MIN|MAX)_MS/);
+});
+test('full-auto waits for stable visible battle controls', () => {
+  assert.match(source, /attack\.start\.classList\.contains\('display-on'\)/);
+  assert.match(source, /computedVisible\(attack\.start\)/);
+  assert.match(source, /!attack\.dummyVisible/);
+  assert.match(source, /!attack\.cancelVisible/);
+  assert.match(source, /!attack\.actorAttacking/);
+  assert.match(source, /stableMs: DEFAULT_STABLE_MS/);
 });

@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 16;
+  const APP_VERSION = 18;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1431,24 +1431,32 @@
     return next;
   }
 
-  const TOUCH_VISIBLE_WAIT_MIN_MS = 98;
-  const TOUCH_VISIBLE_WAIT_MAX_MS = 150;
-  const TOUCH_HOLD_MIN_MS = 65;
-  const TOUCH_HOLD_MAX_MS = 115;
+  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 125, stdDev: 20, min: 70, max: 250 });
+  const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
   const TOUCH_END_MAX_DRIFT_PX = 5;
   const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
   const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
 
-  function makeTouchList(items) {
-    const list = [...items];
-    Object.defineProperty(list, 'item', {
-      configurable: true,
-      value(index) { return list[index] ?? null; }
-    });
-    return list;
+  function sampleClampedNormalMs({ mean, stdDev, min, max }, random = Math.random) {
+    const meanValue = Number(mean);
+    const stdDevValue = Number(stdDev);
+    const minValue = Number(min);
+    const maxValue = Number(max);
+    if (![meanValue, stdDevValue, minValue, maxValue].every(Number.isFinite)
+      || stdDevValue < 0
+      || maxValue < minValue) {
+      throw new FlowError('正規分布レイテンシのパラメータが不正です', 'INVALID_NORMAL_LATENCY');
+    }
+    const u1 = Math.max(Number.MIN_VALUE, 1 - random());
+    const u2 = 1 - random();
+    const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return Math.round(clamp((z0 * stdDevValue) + meanValue, minValue, maxValue));
   }
 
   function createSyntheticTouch(win, target, identifier, point) {
+    if (typeof win.Touch !== 'function') {
+      throw new FlowError('この環境は標準Touchコンストラクタに対応していません', 'TOUCH_UNSUPPORTED');
+    }
     const init = {
       identifier,
       target,
@@ -1463,37 +1471,35 @@
       rotationAngle: randomUniform(-8, 8),
       force: randomUniform(0.35, 0.75)
     };
-    if (typeof win.Touch === 'function') {
-      try { return new win.Touch(init); } catch {}
+    try {
+      return new win.Touch(init);
+    } catch (error) {
+      throw new FlowError(`Touch生成に失敗しました: ${error.message}`, 'TOUCH_CONSTRUCTION_FAILED');
     }
-    return Object.freeze(init);
   }
 
   function dispatchSyntheticTouch(win, target, type, touch, active) {
-    const activeTouches = makeTouchList(active ? [touch] : []);
-    const changedTouches = makeTouchList([touch]);
-    let event = null;
-    if (typeof win.TouchEvent === 'function') {
-      try {
-        event = new win.TouchEvent(type, {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          touches: activeTouches,
-          targetTouches: activeTouches,
-          changedTouches
-        });
-      } catch {}
+    if (typeof win.TouchEvent !== 'function') {
+      throw new FlowError('この環境は標準TouchEventに対応していません', 'TOUCH_EVENT_UNSUPPORTED');
     }
-    if (!event) {
-      event = new win.Event(type, { bubbles: true, cancelable: true, composed: true });
-      Object.defineProperties(event, {
-        touches: { configurable: true, value: activeTouches },
-        targetTouches: { configurable: true, value: activeTouches },
-        changedTouches: { configurable: true, value: changedTouches }
+    const activeTouches = active ? [touch] : [];
+    let event;
+    try {
+      event = new win.TouchEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        touches: activeTouches,
+        targetTouches: activeTouches,
+        changedTouches: [touch]
       });
+    } catch (error) {
+      throw new FlowError(`TouchEvent生成に失敗しました: ${error.message}`, 'TOUCH_EVENT_CONSTRUCTION_FAILED');
     }
-    target.dispatchEvent(event);
+    const accepted = target.dispatchEvent(event);
+    if (!accepted || event.defaultPrevented) {
+      throw new FlowError(`${type}が対象側でキャンセルされました`, 'TOUCH_EVENT_CANCELED');
+    }
     return event;
   }
 
@@ -1684,7 +1690,7 @@
         let start = null;
         for (let attempt = 0; attempt < 4; attempt++) {
           await ensureTargetPointVisible(target, fractions, { signal });
-          await abortableDelay(randomUniform(TOUCH_VISIBLE_WAIT_MIN_MS, TOUCH_VISIBLE_WAIT_MAX_MS), signal);
+          await abortableDelay(sampleClampedNormalMs(TOUCH_VISIBLE_LATENCY_MS), signal);
           if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
             throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
           }
@@ -1705,7 +1711,7 @@
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
         touchActive = true;
-        await abortableDelay(randomUniform(TOUCH_HOLD_MIN_MS, TOUCH_HOLD_MAX_MS), signal);
+        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);
         const endPoint = randomEndPoint(start, start.rect);
         activePoint = endPoint;
         const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
@@ -2008,9 +2014,28 @@
     const { signal } = context;
     await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
     const found = await monitorFrame(() => {
-      const observed = fullAutoState();
-      return observed.exists && observed.visible ? observed : false;
-    }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
+      const doc = frameDocument();
+      const observed = fullAutoState(doc);
+      if (!observed.exists || !observed.visible) return false;
+      if (observed.on) return observed;
+
+      const attack = attackSnapshot(doc);
+      const attackReady = Boolean(
+        attack.start
+        && attack.start.classList.contains('display-on')
+        && !attack.start.classList.contains('display-off')
+        && computedVisible(attack.start)
+        && !attack.dummyVisible
+        && !attack.cancelVisible
+        && !attack.actorAttacking
+      );
+      return attackReady ? observed : false;
+    }, {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      stableMs: DEFAULT_STABLE_MS,
+      description: 'フルオート操作可能状態待ち'
+    });
     if (found.on) return { changed: false };
     await jqTapStrict(found.button, { signal, label: 'フルオート' });
     return { changed: true };
