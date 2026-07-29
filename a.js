@@ -49,6 +49,7 @@
     attackStart: '.btn-attack-start',
     attackDummy: '.prt-attack-start-dummy',
     attackCancel: '.btn-attack-cancel',
+    attackActor: '.prt-command .btn-command-character.attack',
     turn: '#js-turn-num-count'
   });
 
@@ -1761,12 +1762,13 @@
       startVisible: elementDisplayOn(start),
       dummyVisible: elementDisplayOn(dummy),
       cancelVisible: elementDisplayOn(cancel),
+      actorAttacking: Boolean(doc.querySelector(SELECTORS.attackActor)),
       turn: turnSignature(doc)
     };
   }
 
   function isAttackInProgress(snapshot) {
-    return Boolean(snapshot.cancelVisible || snapshot.dummyVisible);
+    return Boolean(snapshot.cancelVisible || snapshot.dummyVisible || snapshot.actorAttacking);
   }
 
   async function waitForAutoAttack(config, context) {
@@ -1781,7 +1783,7 @@
       const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
       const startBecameHidden = baseline.startVisible && !current.startVisible;
       const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
-      const started = current.cancelVisible || current.dummyVisible || startReplaced || startBecameHidden || turnChanged;
+      const started = current.cancelVisible || current.dummyVisible || current.actorAttacking || startReplaced || startBecameHidden || turnChanged;
       return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
     }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 40, description: 'フルオート攻撃開始待ち' });
   }
