@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 14;
+  const APP_VERSION = 15;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -21,7 +21,7 @@
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
-  const MAX_LOGS = 250;
+  const MAX_LOGS = 100;
 
   const ERROR_MESSAGES = Object.freeze({
     MAX_ASSIST: '救援できるマルチバトルは最大3つまでです。',
@@ -102,7 +102,7 @@
       .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
       @media(max-width:620px){#dock{height:min(860px,calc(100vh - 70px))}.grid2,.grid3{grid-template-columns:1fr}.span2{grid-column:auto}.paletteGrid{grid-template-columns:1fr}.blockHead{grid-template-columns:36px minmax(0,1fr)}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:41px}.logEntry{grid-template-columns:58px 64px minmax(0,1fr)}}
       @media(max-width:430px){#browserBar{grid-template-columns:42px 42px minmax(70px,1fr) 56px 42px}#forwardFrame{display:none}.toolbar>*{flex-basis:90px}}
-      @media(hover:none) and (pointer:coarse){button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
+      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 8px 24px rgba(0,0,0,.32)}button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
     </style>
     <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="markerLayer"></div><div id="recordLayer"></div>
@@ -187,6 +187,7 @@
   const sleepMicrotask = () => new Promise(resolve => queueMicrotask(resolve));
 
   const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
+  const lightweightMode = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? false;
   const dragLock = { active: false, pointerId: null, owner: null, restore: null };
 
   function consumeDragEvent(event, immediate = false) {
@@ -272,11 +273,34 @@
     state.toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 2200);
   }
 
+  function createLogRow(log) {
+    const row = document.createElement('div');
+    row.className = `logEntry ${log.level || ''}`;
+    const time = document.createElement('span');
+    time.className = 'logTime';
+    time.textContent = log.time;
+    const name = document.createElement('span');
+    name.textContent = log.blockName || '全体';
+    const body = document.createElement('span');
+    body.textContent = log.message;
+    row.append(time, name, body);
+    return row;
+  }
+
   function appendLog(message, level = '', blockName = '') {
-    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    state.logs.push({ time, level, blockName, message: String(message) });
+    const log = {
+      time: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      level,
+      blockName,
+      message: String(message)
+    };
+    state.logs.push(log);
     if (state.logs.length > MAX_LOGS) state.logs.splice(0, state.logs.length - MAX_LOGS);
-    renderLogs();
+    if (state.page !== 'logs') return;
+    ui.logList.querySelector('.hint')?.remove();
+    ui.logList.append(createLogRow(log));
+    while (ui.logList.children.length > MAX_LOGS) ui.logList.firstElementChild?.remove();
+    ui.logList.scrollTop = ui.logList.scrollHeight;
   }
 
   function renderLogs() {
@@ -288,19 +312,9 @@
       ui.logList.append(empty);
       return;
     }
-    for (const log of state.logs) {
-      const row = document.createElement('div');
-      row.className = `logEntry ${log.level || ''}`;
-      const time = document.createElement('span');
-      time.className = 'logTime';
-      time.textContent = log.time;
-      const name = document.createElement('span');
-      name.textContent = log.blockName || '全体';
-      const body = document.createElement('span');
-      body.textContent = log.message;
-      row.append(time, name, body);
-      ui.logList.append(row);
-    }
+    const fragment = document.createDocumentFragment();
+    for (const log of state.logs) fragment.append(createLogRow(log));
+    ui.logList.append(fragment);
     ui.logList.scrollTop = ui.logList.scrollHeight;
   }
 
@@ -1316,13 +1330,17 @@
         observer?.disconnect();
         observedDoc = doc;
         const rootNode = doc.documentElement || doc;
+        if (lightweightMode) return;
+        let scheduled = false;
         observer = new MutationObserver(() => {
           lastMutation = performance.now();
           stableSince = null;
-          evaluate();
+          if (scheduled) return;
+          scheduled = true;
+          requestAnimationFrame(() => { scheduled = false; evaluate(); });
         });
         try {
-          observer.observe(rootNode, { subtree: true, childList: true, attributes: true, characterData: true });
+          observer.observe(rootNode, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
         } catch {}
       };
       const evaluate = () => {
@@ -1352,7 +1370,7 @@
       iframe.addEventListener('load', onFrameLoad);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
-      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : 300);
+      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : (lightweightMode ? 500 : 300));
       bindObserver();
       evaluate();
     });
@@ -1959,8 +1977,14 @@
   function setRunningBlock(context, block, progress = '') {
     context.currentBlockId = block?.id || null;
     state.blockProgress.clear();
-    if (block && progress) state.blockProgress.set(block.id, progress);
-    renderWorkflowEditor();
+    shadow.querySelectorAll('.blockCard.running').forEach(card => card.classList.remove('running'));
+    shadow.querySelectorAll('.progressBadge').forEach(badge => badge.remove());
+    if (!block) return;
+    if (progress) state.blockProgress.set(block.id, progress);
+    const escapedId = window.CSS?.escape ? window.CSS.escape(block.id) : String(block.id).replace(/["\\]/g, '\\$&');
+    const card = shadow.querySelector(`.blockCard[data-block-id="${escapedId}"]`);
+    card?.classList.add('running');
+    if (card && progress) card.querySelector('.blockName')?.append(element('span', { className: 'progressBadge', text: progress }));
   }
 
   function updateBlockProgress(context, block, progress) {
@@ -3081,6 +3105,7 @@
     state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
     shadow.querySelectorAll('.mainTab').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
     shadow.querySelectorAll('.page').forEach(section => section.classList.toggle('active', section.id === `page-${state.page}`));
+    if (state.page === 'logs') renderLogs();
     renderLegacyMarkers();
   }
 
