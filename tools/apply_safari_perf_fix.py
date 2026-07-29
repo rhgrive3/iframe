@@ -100,7 +100,7 @@ old_running = '''  function setRunningBlock(context, block, progress = '') {
     if (block && progress) state.blockProgress.set(block.id, progress);
     renderWorkflowEditor();
   }'''
-new_running = '''  function setRunningBlock(context, block, progress = '') {
+new_running = r'''  function setRunningBlock(context, block, progress = '') {
     context.currentBlockId = block?.id || null;
     state.blockProgress.clear();
     shadow.querySelectorAll('.blockCard.running').forEach(card => card.classList.remove('running'));
