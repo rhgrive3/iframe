@@ -40,3 +40,5 @@ jobs:
           git add a.js
           git commit -m 'fix: let full-auto block continue after tap'
           git push
+
+# trigger: 2
