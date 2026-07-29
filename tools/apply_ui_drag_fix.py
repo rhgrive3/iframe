@@ -1,0 +1,293 @@
+from pathlib import Path
+
+SOURCE = Path("a.js")
+source = SOURCE.read_text()
+
+
+def replace_once(old: str, new: str, label: str) -> None:
+    global source
+    count = source.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected exactly one match, found {count}")
+    source = source.replace(old, new, 1)
+
+
+replace_once("const APP_VERSION = 13;", "const APP_VERSION = 14;", "version")
+
+replace_once(
+    ":host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\n"
+    "      :host{--panel:rgba(18,20,27,.965);",
+    ":host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}\n"
+    "      :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:rgba(18,20,27,.965);",
+    "host containment",
+)
+replace_once(
+    "button:active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}",
+    "button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}",
+    "drag handle active state",
+)
+replace_once(
+    "#frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}",
+    "#frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}:host(.ui-dragging) #frame{pointer-events:none}",
+    "iframe drag shield",
+)
+replace_once(
+    "#dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));height:min(820px,calc(100vh - 78px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}",
+    "#dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));width:min(780px,calc(100dvw - 16px));height:min(820px,calc(100vh - 78px));height:min(820px,calc(100dvh - 78px));max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}",
+    "dynamic viewport dock",
+)
+replace_once(
+    "#dock.compact{width:116px;height:52px;border-radius:27px}.compactOnly{display:none}#dock.compact .compactOnly{display:grid;grid-template-columns:58px 58px}#dock.compact .fullOnly{display:none!important}",
+    "#dock.compact{width:120px;height:56px;border-radius:28px}.compactOnly{display:none;width:100%;height:100%}#dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#dock.compact .fullOnly{display:none!important}",
+    "compact layout",
+)
+replace_once(
+    "#dockGrip{position:relative;background:transparent;touch-action:none;cursor:grab}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}",
+    "#dockGrip,#compactGrip{position:relative;background:transparent;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}#dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}",
+    "drag handle CSS",
+)
+replace_once(
+    "#pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain}",
+    "#pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}",
+    "page scrolling",
+)
+replace_once(
+    ".toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px}",
+    ".toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px;min-width:0}",
+    "toolbar overflow",
+)
+replace_once(
+    ".marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;box-shadow:",
+    ".marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;box-shadow:",
+    "marker selection prevention",
+)
+replace_once(
+    '<div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く">⠿</button><button id="compactRun" aria-label="実行">▶</button></div>',
+    '<div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く"></button><button id="compactRun" aria-label="実行">▶</button></div>',
+    "duplicate compact grip icon",
+)
+
+helpers_anchor = "  const sleepMicrotask = () => new Promise(resolve => queueMicrotask(resolve));\n\n"
+helpers = r'''  const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
+  const dragLock = { active: false, pointerId: null, owner: null, restore: null };
+
+  function consumeDragEvent(event, immediate = false) {
+    if (event?.cancelable) event.preventDefault();
+    if (immediate) event?.stopImmediatePropagation?.();
+    else event?.stopPropagation?.();
+  }
+
+  function acquireDragLock(event, owner) {
+    releaseDragLock();
+    consumeDragEvent(event, true);
+    dragLock.active = true;
+    dragLock.pointerId = event.pointerId;
+    dragLock.owner = owner;
+    root.classList.add('ui-dragging');
+    owner?.classList?.add('is-dragging');
+    try { owner?.setPointerCapture?.(event.pointerId); } catch {}
+
+    const targets = [document.documentElement, document.body].filter(Boolean);
+    const properties = ['touchAction', 'overscrollBehavior', 'userSelect', 'webkitUserSelect'];
+    const snapshots = targets.map(target => [target, Object.fromEntries(properties.map(property => [property, target.style[property]]))]);
+    for (const target of targets) {
+      target.style.touchAction = 'none';
+      target.style.overscrollBehavior = 'none';
+      target.style.userSelect = 'none';
+      target.style.webkitUserSelect = 'none';
+    }
+    dragLock.restore = () => {
+      for (const [target, snapshot] of snapshots) {
+        for (const property of properties) target.style[property] = snapshot[property];
+      }
+    };
+  }
+
+  function releaseDragLock(event = null, owner = dragLock.owner) {
+    if (!dragLock.active) return;
+    if (event && dragLock.pointerId != null && event.pointerId != null && event.pointerId !== dragLock.pointerId) return;
+    consumeDragEvent(event, true);
+    try {
+      if (owner?.hasPointerCapture?.(dragLock.pointerId)) owner.releasePointerCapture(dragLock.pointerId);
+    } catch {}
+    owner?.classList?.remove('is-dragging');
+    root.classList.remove('ui-dragging');
+    try { dragLock.restore?.(); } catch {}
+    dragLock.active = false;
+    dragLock.pointerId = null;
+    dragLock.owner = null;
+    dragLock.restore = null;
+  }
+
+  const suppressNativeDrag = event => {
+    if (dragLock.active) consumeDragEvent(event, true);
+  };
+  for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
+    window.addEventListener(type, suppressNativeDrag, { capture: true, passive: false });
+  }
+  const releaseDragOnBlur = () => releaseDragLock();
+  window.addEventListener('blur', releaseDragOnBlur, true);
+  addCleanup(() => {
+    releaseDragLock();
+    for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
+      window.removeEventListener(type, suppressNativeDrag, true);
+    }
+    window.removeEventListener('blur', releaseDragOnBlur, true);
+  });
+
+'''
+replace_once(helpers_anchor, helpers_anchor + helpers, "drag helpers")
+
+replace_once(
+    "card.draggable = !state.running;",
+    "card.draggable = !state.running && supportsNativeBlockDrag;",
+    "coarse pointer block drag",
+)
+replace_once(
+    "if (state.running) return event.preventDefault();\n        state.dragBlockId = block.id;",
+    "if (state.running || !supportsNativeBlockDrag || event.target.closest?.('button,input,select,textarea,label')) return event.preventDefault();\n        state.dragBlockId = block.id;",
+    "block drag arming",
+)
+
+marker_old = '''      const move = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        event.preventDefault();
+        action.cx = clamp(drag.baseX + event.clientX - drag.startX, 0, window.innerWidth);
+        action.cy = clamp(drag.baseY + event.clientY - drag.startY, 0, window.innerHeight);
+        marker.style.left = `${action.cx}px`;
+        marker.style.top = `${action.cy}px`;
+      };
+      const finish = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        drag.active = false;
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', finish, true);
+        window.removeEventListener('pointercancel', finish, true);
+        saveLegacyState();
+        renderLegacyListOnly();
+      };
+      marker.addEventListener('pointerdown', event => {
+        if (state.legacyRunning || state.recording || event.button !== 0) return;
+        event.preventDefault();
+        drag.active = true;'''
+marker_new = '''      const move = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        consumeDragEvent(event, true);
+        action.cx = clamp(drag.baseX + event.clientX - drag.startX, 0, window.innerWidth);
+        action.cy = clamp(drag.baseY + event.clientY - drag.startY, 0, window.innerHeight);
+        marker.style.left = `${action.cx}px`;
+        marker.style.top = `${action.cy}px`;
+      };
+      const finish = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        consumeDragEvent(event, true);
+        drag.active = false;
+        releaseDragLock(event, marker);
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', finish, true);
+        window.removeEventListener('pointercancel', finish, true);
+        saveLegacyState();
+        renderLegacyListOnly();
+      };
+      marker.addEventListener('pointerdown', event => {
+        if (state.legacyRunning || state.recording || event.button !== 0) return;
+        acquireDragLock(event, marker);
+        drag.active = true;'''
+replace_once(marker_old, marker_new, "marker drag lifecycle")
+
+replace_once(
+    "  function setCompact(compact) {\n    dock.classList.toggle('compact', compact);\n    byId('toggleCompact').textContent = compact ? '□' : '—';\n    saveLegacyState();\n  }",
+    "  function setCompact(compact) {\n    dock.classList.toggle('compact', compact);\n    byId('toggleCompact').textContent = compact ? '□' : '—';\n    requestAnimationFrame(positionDock);\n    saveLegacyState();\n  }",
+    "compact reposition",
+)
+
+dock_old = '''    const move = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      event.preventDefault();
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      drag.moved ||= Math.hypot(dx, dy) > 3;
+      state.dockX = drag.baseX + dx;
+      state.dockY = drag.baseY + dy;
+      positionDock();
+    };
+    const finish = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      drag.active = false;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      if (!drag.moved && handle.id === 'compactGrip') setCompact(false);
+      saveLegacyState();
+    };
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const rect = dock.getBoundingClientRect();'''
+dock_new = '''    const move = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      drag.moved ||= Math.hypot(dx, dy) > 3;
+      state.dockX = drag.baseX + dx;
+      state.dockY = drag.baseY + dy;
+      positionDock();
+    };
+    const finish = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      drag.active = false;
+      releaseDragLock(event, handle);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      if (!drag.moved && handle.id === 'compactGrip') setCompact(false);
+      saveLegacyState();
+    };
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      acquireDragLock(event, handle);
+      const rect = dock.getBoundingClientRect();'''
+replace_once(dock_old, dock_new, "dock drag lifecycle")
+
+replace_once(
+    "    addCleanup(() => {\n      window.removeEventListener('pointermove', move, true);\n      window.removeEventListener('pointerup', finish, true);\n      window.removeEventListener('pointercancel', finish, true);\n    });",
+    "    addCleanup(() => {\n      if (drag.active) releaseDragLock(null, handle);\n      window.removeEventListener('pointermove', move, true);\n      window.removeEventListener('pointerup', finish, true);\n      window.removeEventListener('pointercancel', finish, true);\n    });",
+    "dock drag cleanup",
+)
+
+SOURCE.write_text(source)
+
+TEST = Path("tests/ui-drag-regression.test.mjs")
+TEST.parent.mkdir(parents=True, exist_ok=True)
+TEST.write_text(r'''import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+import vm from 'node:vm';
+
+const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
+
+test('distribution script parses', () => {
+  assert.doesNotThrow(() => new vm.Script(source));
+});
+
+test('touch drag owns its pointer and suppresses native page movement', () => {
+  assert.match(source, /function acquireDragLock\(/);
+  assert.match(source, /setPointerCapture\?\.\(event\.pointerId\)/);
+  assert.match(source, /touchmove', suppressNativeDrag, \{ capture: true, passive: false \}/);
+  assert.match(source, /releaseDragLock\(event, handle\)/);
+  assert.match(source, /releaseDragLock\(event, marker\)/);
+});
+
+test('coarse pointers do not use fragile HTML drag and drop', () => {
+  assert.match(source, /supportsNativeBlockDrag/);
+  assert.match(source, /card\.draggable = !state\.running && supportsNativeBlockDrag/);
+});
+
+test('compact UI stays within its box and has one grip icon', () => {
+  assert.match(source, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+  assert.match(source, /requestAnimationFrame\(positionDock\)/);
+  assert.doesNotMatch(source, /id="compactGrip"[^>]*>⠿<\/button>/);
+});
+''')
