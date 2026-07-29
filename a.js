@@ -3,62 +3,54 @@
 
   if (window.top !== window) return;
 
+  const APP_VERSION = 13;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
-  const STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
-  const LEGACY_STORAGE_KEYS = [
-    '__fullscreen_iframe_autoclicker_state_v11__',
-    '__fullscreen_iframe_autoclicker_state_v10__',
-    '__fullscreen_iframe_autoclicker_state_v9__',
-    '__fullscreen_iframe_autoclicker_state_v8__',
-    '__fullscreen_iframe_autoclicker_state_v7__',
-    '__fullscreen_iframe_autoclicker_state_v6__',
-    '__fullscreen_iframe_autoclicker_state_v5__',
-    '__fullscreen_iframe_autoclicker_state_v4__',
-    '__fullscreen_iframe_autoclicker_state_v3__',
-    '__fullscreen_iframe_autoclicker_state_v2__',
-    '__fullscreen_iframe_autoclicker_state_v1__'
-  ];
-  const PRESET_PREFIX = '__fullscreen_iframe_autoclicker_preset_v8__';
-  const LEGACY_PRESET_PREFIXES = [
-    '__fullscreen_iframe_autoclicker_preset_v7__',
-    '__fullscreen_iframe_autoclicker_preset_v6__',
-    '__fullscreen_iframe_autoclicker_preset_v5__',
-    '__fullscreen_iframe_autoclicker_preset_v4__',
-    '__fullscreen_iframe_autoclicker_preset_v3__',
-    '__fullscreen_iframe_autoclicker_preset_v2__',
-    '__fullscreen_iframe_autoclicker_preset_v1__'
-  ];
+  const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
+  const LEGACY_STORAGE_KEYS = Array.from({ length: 11 }, (_, index) =>
+    `__fullscreen_iframe_autoclicker_state_v${11 - index}__`
+  );
+  const LEGACY_PRESET_PREFIX = '__fullscreen_iframe_autoclicker_preset_v8__';
+  const LEGACY_PRESET_PREFIXES = Array.from({ length: 7 }, (_, index) =>
+    `__fullscreen_iframe_autoclicker_preset_v${7 - index}__`
+  );
+  const WORKFLOW_STORAGE_KEY = '__fullscreen_iframe_autoclicker_workflows_v1__';
+  const WORKFLOW_AUTOSAVE_KEY = '__fullscreen_iframe_autoclicker_workflow_autosave_v1__';
+  const MAX_REPEAT_COUNT = 10_000;
+  const MAX_CONDITION_ITERATIONS = 10_000;
+  const DEFAULT_TIMEOUT_MS = 15_000;
+  const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
+  const DEFAULT_STABLE_MS = 140;
+  const MAX_LOGS = 250;
 
-  const MARKER_HIT_SIZE = 48;
-  const MARKER_VISUAL_SIZE = 27;
-  const EDGE_OVERSHOOT_PX = 10;
-  const DEFAULT_POINT_DELAY_MS = 1000;
-  const DEFAULT_HOLD_MS = 55;
-  const DEFAULT_TIME_JITTER_MS = 100;
-  const DEFAULT_POSITION_JITTER_PX = 2;
-  const DEFAULT_NAVIGATION_TIMEOUT_MS = 15000;
-  const DEFAULT_TARGET_TIMEOUT_MS = 15000;
-  const DEFAULT_CONDITION_TIMEOUT_MS = 30000;
-  const DEFAULT_CONDITION_STABLE_MS = 80;
-  const MAX_DELAY_MS = 600000;
-  const MAX_HOLD_MS = 5000;
-  const MAX_POSITION_JITTER_PX = 30;
-  const MAX_NAVIGATION_TIMEOUT_MS = 120000;
-  const MAX_TARGET_TIMEOUT_MS = 120000;
-  const MAX_CONDITION_TIMEOUT_MS = 600000;
-  const MAX_CONDITION_STABLE_MS = 5000;
-  const PRESET_SLOTS = 8;
-  const DRAG_THRESHOLD_PX = 3;
-  const COMPACT_DOCK_WIDTH = 104;
-  const COMPACT_DOCK_HEIGHT = 52;
-  const MIN_DOCK_WIDTH = 360;
-  const MIN_DOCK_HEIGHT = 300;
-  const DEFAULT_DOCK_WIDTH = 720;
-  const DEFAULT_DOCK_HEIGHT = 640;
-  const MAX_DOCK_WIDTH = 980;
-  const MAX_DOCK_HEIGHT = 1200;
-  const RECOVERY_KEY = '__fullscreen_iframe_autoclicker_recovery_v1__';
+  const ERROR_MESSAGES = Object.freeze({
+    MAX_ASSIST: '救援できるマルチバトルは最大3つまでです。',
+    UNCLAIMED: '未確認バトルを確認して下さい。',
+    RAID_FULL: '参戦人数が上限に達しているため参戦できませんでした。'
+  });
+
+  const SELECTORS = Object.freeze({
+    assistScreen: '#prt-assist-search.prt-assist-contents.active',
+    assistRefresh: '#prt-assist-search .btn-search-refresh',
+    assistList: '#prt-search-list',
+    assistRows: '#prt-search-list > .btn-multi-raid.lis-raid.search',
+    supporterScreen: '#cnt-quest.cnt-quest.supporter_raid',
+    supporterRows: '.btn-supporter.lis-supporter',
+    supporterAuto: '.btn-autoselect-supporter',
+    deckOk: '.pop-deck.supporter_raid .prt-btn-deck > .btn-usual-ok.se-quest-start',
+    popup: '#pop .common-pop-error.pop-show',
+    popupBody: '#popup-body',
+    popupOk: '.prt-popup-footer > .btn-usual-ok',
+    unclaimedList: '#prt-unclaimed-list',
+    unclaimedRows: '#prt-unclaimed-list > .btn-multi-raid.lis-raid[data-href^="result_multi/"]',
+    assistReturn: '#btn-link-quest-assist',
+    battleScreen: '.cnt-raid-stage.multi',
+    fullAuto: '.btn-auto',
+    attackStart: '.btn-attack-start',
+    attackDummy: '.prt-attack-start-dummy',
+    attackCancel: '.btn-attack-cancel',
+    turn: '#js-turn-num-count'
+  });
 
   const previous = window[GLOBAL_KEY];
   if (previous?.destroy) previous.destroy();
@@ -77,606 +69,3226 @@
   const shadow = root.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
     <style>
-      :host, * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-      :host {
-        --panel:rgba(18,20,26,.94); --panel-solid:rgb(20,22,28);
-        --surface:rgba(255,255,255,.055); --surface-2:rgba(255,255,255,.09);
-        --line:rgba(255,255,255,.10); --line-strong:rgba(255,255,255,.17);
-        --text:rgba(255,255,255,.96); --muted:rgba(255,255,255,.58);
-        --subtle:rgba(255,255,255,.40); --accent:#6f7cff; --accent-2:#5868ff;
-        --green:#35c982; --red:#f0646d; --purple:#9b7cff; --amber:#e3a84d;
-        --radius:14px; --dock-width:720px; --dock-height:640px;
-      }
-      button,select,input{font:inherit} button{border:0;color:var(--text);background:var(--surface);cursor:pointer;touch-action:manipulation} button:active{transform:scale(.975)} button:disabled,input:disabled,select:disabled{opacity:.38}
-      input,select{outline:none;font-size:14px} input:focus-visible,select:focus-visible,button:focus-visible{box-shadow:0 0 0 2px rgba(111,124,255,.48)}
+      :host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+      :host{--panel:rgba(18,20,27,.965);--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
+      button,input,select,textarea{font:inherit;color:var(--text)}
+      button{min-height:44px;border:1px solid transparent;border-radius:11px;background:var(--surface);font-weight:760;touch-action:manipulation;cursor:pointer}
+      button:active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}
+      input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:rgba(0,0,0,.25);font-size:16px;outline:none}
+      textarea{min-height:72px;resize:vertical}
+      button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #c0c5ff;outline-offset:2px}
       #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
-
-      #browserBar{position:fixed;z-index:190;top:max(8px,env(safe-area-inset-top));left:50%;width:min(1080px,calc(100vw - 16px));transform:translateX(-50%);display:flex;align-items:center;gap:5px;padding:6px;border:1px solid var(--line-strong);border-radius:15px;color:var(--text);background:var(--panel);box-shadow:0 12px 36px rgba(0,0,0,.34);backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%);transition:transform .2s ease,opacity .18s ease}
-      #browserBar.hidden{transform:translate(-50%,calc(-100% - 22px));opacity:0;pointer-events:none} #browserBar button{flex:0 0 auto;width:40px;height:40px;border-radius:11px;font-size:17px;font-weight:760} #browserBar .wide{width:auto;min-width:52px;padding:0 13px;background:var(--accent-2);font-size:13px}
-      #url{flex:1;min-width:70px;height:40px;padding:0 12px;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(0,0,0,.22);font-size:15px} #url::placeholder{color:rgba(255,255,255,.42)}
-      #browserHandle{position:fixed;z-index:189;top:max(6px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:none;width:50px;height:30px;border:1px solid var(--line);border-radius:0 0 13px 13px;background:var(--panel);box-shadow:0 7px 22px rgba(0,0,0,.28)} #browserHandle.visible{display:block}
-
-      #markerLayer{position:fixed;inset:0;z-index:70;pointer-events:none;overflow:visible} #shell.running .marker,#shell.recording .marker{pointer-events:none}
-      .marker{position:fixed;left:0;top:0;width:${MARKER_HIT_SIZE}px;height:${MARKER_HIT_SIZE}px;transform:translate3d(0,0,0);pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;cursor:grab;will-change:transform;contain:layout style}
-      .markerVisual{position:absolute;left:50%;top:50%;width:${MARKER_VISUAL_SIZE}px;height:${MARKER_VISUAL_SIZE}px;transform:translate(-50%,-50%);border:2px solid #ff625d;border-radius:50%;background:rgba(255,98,93,.14);box-shadow:0 0 0 1px rgba(255,255,255,.92),0 4px 12px rgba(0,0,0,.31);pointer-events:none;transition:border-color .14s,background .14s,box-shadow .14s,filter .1s}
-      .markerVisual::before,.markerVisual::after{content:'';position:absolute;left:50%;top:50%;border-radius:2px;background:#fff;transform:translate(-50%,-50%)} .markerVisual::before{width:9px;height:1.5px}.markerVisual::after{width:1.5px;height:9px}
-      .marker.selected .markerVisual{border-color:#43d58b;background:rgba(67,213,139,.17);box-shadow:0 0 0 1px rgba(255,255,255,.94),0 0 0 4px rgba(67,213,139,.11),0 5px 14px rgba(0,0,0,.34)} .marker.dragging{cursor:grabbing}.marker.dragging .markerVisual{filter:brightness(1.17)}.marker.running .markerVisual{animation:markerPulse .24s ease-out}
-      .markerNumber{position:absolute;right:-1px;top:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;color:#fff;background:rgba(8,9,13,.95);font-size:9px;font-weight:800;line-height:16px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.36);pointer-events:none}
-      .markerDelay{position:absolute;left:50%;top:calc(100% - 2px);transform:translateX(-50%);padding:2px 5px;border:1px solid rgba(255,255,255,.1);border-radius:6px;color:rgba(255,255,255,.92);background:rgba(10,11,15,.84);font-size:8px;font-weight:720;line-height:1.05;white-space:nowrap;box-shadow:0 2px 7px rgba(0,0,0,.22);pointer-events:none}
-      @keyframes markerPulse{0%{transform:translate(-50%,-50%) scale(1)}45%{transform:translate(-50%,-50%) scale(.7);opacity:.7}100%{transform:translate(-50%,-50%) scale(1);opacity:1}}
-
-      #recordLayer{position:fixed;inset:0;z-index:145;display:none;pointer-events:none;touch-action:none;background:rgba(255,71,93,.025)}#recordLayer.active{display:block;pointer-events:auto}.recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);border:2px solid rgba(255,255,255,.95);border-radius:50%;color:#fff;background:rgba(255,61,88,.86);box-shadow:0 0 0 5px rgba(255,61,88,.16),0 6px 16px rgba(0,0,0,.28);font-size:10px;font-weight:800;line-height:24px;text-align:center;pointer-events:none;animation:dotIn .2s ease-out}@keyframes dotIn{from{transform:translate(-50%,-50%) scale(.55);opacity:0}to{transform:translate(-50%,-50%) scale(1);opacity:1}}
-      #recordHud{position:fixed;z-index:230;top:max(64px,calc(env(safe-area-inset-top) + 54px));left:50%;display:none;align-items:center;gap:8px;transform:translateX(-50%);padding:7px 8px 7px 12px;border:1px solid var(--line-strong);border-radius:999px;color:#fff;background:rgba(22,18,23,.96);box-shadow:0 10px 30px rgba(0,0,0,.34);backdrop-filter:blur(20px)}#recordHud.active{display:flex}.recordPulse{width:10px;height:10px;border-radius:50%;background:#ff4d68;box-shadow:0 0 0 4px rgba(255,77,104,.16);animation:recPulse 1.1s infinite}@keyframes recPulse{50%{opacity:.45;transform:scale(.8)}}#recordCount{font-size:12px;font-weight:760}#finishRecord,#cancelRecord{height:34px;padding:0 12px;border-radius:999px;font-size:12px;font-weight:760}#finishRecord{background:var(--accent-2)}#cancelRecord{background:rgba(240,100,109,.18);color:#ffb0b5}
-
-      #dock{position:fixed;z-index:210;left:0;top:0;width:min(var(--dock-width),calc(100vw - 16px));height:min(var(--dock-height),calc(100vh - 16px));display:flex;flex-direction:column;color:var(--text);border:1px solid rgba(255,255,255,.14);border-radius:18px;background:linear-gradient(180deg,rgba(255,255,255,.022),transparent 86px),rgba(17,19,24,.965);box-shadow:0 24px 72px rgba(0,0,0,.50),inset 0 1px rgba(255,255,255,.035);backdrop-filter:blur(30px) saturate(135%);-webkit-backdrop-filter:blur(30px) saturate(135%);overflow:hidden;will-change:left,top,width,height;transition:width .18s ease,height .18s ease,border-radius .18s ease,box-shadow .18s ease}
-      #dock.compact{width:${COMPACT_DOCK_WIDTH}px!important;height:${COMPACT_DOCK_HEIGHT}px!important;border-radius:26px;box-shadow:0 10px 30px rgba(0,0,0,.38)}
-      #topBar{display:grid;grid-template-columns:42px minmax(0,1fr) 48px 40px 40px;align-items:center;gap:4px;padding:5px 6px;border-bottom:1px solid var(--line)}
-      #dockHandle{position:relative;width:42px;height:40px;border-radius:12px;cursor:grab;touch-action:none;background:transparent}#dockHandle::before{content:'';position:absolute;left:50%;top:50%;width:16px;height:12px;transform:translate(-50%,-50%);opacity:.55;background:radial-gradient(circle,white 1.15px,transparent 1.35px) 0 0/5px 5px}#dockHandle.dragging{cursor:grabbing}
-      .brand{min-width:0;display:flex;align-items:center;gap:10px}.brandIcon{width:28px;height:28px;display:grid;place-items:center;border-radius:9px;background:rgba(111,124,255,.17);box-shadow:inset 0 0 0 1px rgba(111,124,255,.22);font-size:12px;font-weight:850;letter-spacing:-.04em}.brandText{min-width:0}.brandTitle{font-size:12px;font-weight:820;letter-spacing:.02em}.brandStatus{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10px;margin-top:1px}.saveStateBadge{display:inline-flex;align-items:center;gap:4px;margin-left:7px;color:rgba(255,255,255,.42);font-size:9px;font-weight:700}.saveStateBadge::before{content:'';width:5px;height:5px;border-radius:50%;background:#5fd59a}.saveStateBadge.saving::before{background:#e0aa5b}.saveStateBadge.error{color:#ffb0b6}.saveStateBadge.error::before{background:#f0646d}
-      .iconButton{width:40px;height:40px;border-radius:12px;font-size:15px;font-weight:780}.quickSaveButton{width:48px;font-size:10px;letter-spacing:.02em;background:rgba(53,201,130,.14);color:#9aefbf}.iconButton.active{background:rgba(111,124,255,.19);color:#cbd0ff}
-      #actionBar{display:grid;grid-template-columns:minmax(96px,1.15fr) minmax(82px,1fr) minmax(86px,1fr) minmax(108px,1.2fr);gap:6px;padding:8px}.mainAction{height:42px;padding:0 10px;border-radius:12px;font-size:12px;font-weight:780;white-space:nowrap}.mainAction.secondary{background:rgba(255,255,255,.065)}#addMenuButton{background:rgba(111,124,255,.18);color:#dce0ff;box-shadow:inset 0 0 0 1px rgba(111,124,255,.20)}#recordButton{color:#ffb4bf;background:rgba(255,77,104,.13)}#single{color:rgba(255,255,255,.80)}#runToggle{background:var(--green);color:#07170f;box-shadow:0 6px 18px rgba(53,201,130,.19)}#runToggle.stopping{background:var(--red);color:#fff;box-shadow:none}
-      #addMenu{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-height:0;padding:0 8px;opacity:0;overflow:hidden;transition:max-height .18s ease,padding .18s ease,opacity .15s ease}#addMenu.open{max-height:86px;padding:0 8px 8px;opacity:1}.addChoice{height:58px;display:flex;align-items:center;gap:9px;padding:0 11px;border-radius:13px;text-align:left}.addChoice strong{display:block;font-size:11px}.addChoice small{display:block;margin-top:2px;color:var(--muted);font-size:9px;font-weight:600}.choiceIcon{width:29px;height:29px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;font-size:13px;font-weight:850}.clickChoice .choiceIcon{background:rgba(53,201,130,.16);color:#75e7aa}.navigateChoice .choiceIcon{background:rgba(155,124,255,.16);color:#c2abff}.waitChoice .choiceIcon{background:rgba(227,168,77,.15);color:#f2c270}
-      #sequenceArea{padding:0 8px 8px}.sequenceHeader{display:flex;align-items:center;justify-content:space-between;padding:3px 2px 6px;color:var(--subtle);font-size:9px;font-weight:760;letter-spacing:.04em}.sequenceHeader button{height:26px;padding:0 8px;border-radius:8px;color:#ffadb3;background:transparent;font-size:9px}.pointStrip{display:flex;gap:6px;overflow-x:auto;padding:1px 0 2px;scrollbar-width:none;scroll-snap-type:x proximity}.pointStrip::-webkit-scrollbar{display:none}.pointChip{position:relative;flex:0 0 auto;min-width:78px;max-width:190px;height:38px;display:flex;align-items:center;gap:7px;padding:0 10px;border:1px solid transparent;border-radius:12px;color:rgba(255,255,255,.75);background:rgba(255,255,255,.045);scroll-snap-align:start}.pointChip.selected{color:#fff;border-color:rgba(111,124,255,.40);background:rgba(111,124,255,.14)}.pointChip.navigate{color:#ddd2ff}.pointChip.wait{color:#f3d6a1}.chipIcon{font-size:10px;font-weight:900}.chipText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:750}.conditionDot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:var(--amber);box-shadow:0 0 0 3px rgba(227,168,77,.10)}
-      #compactBar{display:none;width:${COMPACT_DOCK_WIDTH}px;height:${COMPACT_DOCK_HEIGHT}px;grid-template-columns:52px 48px;gap:0;padding:2px}#dock.compact #compactBar{display:grid}#dock.compact>#topBar,#dock.compact>#actionBar,#dock.compact>#addMenu,#dock.compact>#sequenceArea,#dock.compact>#settingsPanel{display:none!important}#compactGrip,#compactRun{height:48px;border-radius:24px}#compactGrip{position:relative;background:transparent;touch-action:none}#compactGrip::before{content:'';position:absolute;left:50%;top:50%;width:15px;height:11px;transform:translate(-50%,-50%);opacity:.55;background:radial-gradient(circle,white 1.1px,transparent 1.3px) 0 0/5px 5px}#compactRun{background:var(--green);color:#07170f;font-size:15px;font-weight:850}#compactRun.stopping{background:var(--red);color:#fff}
-
-      #settingsPanel{flex:1;min-height:0;max-height:none;overflow:auto;border-top:1px solid var(--line);background:rgba(7,8,11,.10);transition:max-height .2s ease,opacity .16s ease;overscroll-behavior:contain}#settingsPanel.closed{flex:0 0 0;max-height:0;opacity:0;pointer-events:none;overflow:hidden}
-      #tabBar{position:sticky;top:0;z-index:3;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px;background:rgba(18,20,26,.94);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);border-bottom:1px solid var(--line)}.tabButton{height:34px;border-radius:10px;color:var(--muted);background:transparent;font-size:10px;font-weight:780}.tabButton.active{color:#fff;background:var(--surface-2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
-      .tabPage{display:none;padding:10px}.tabPage.active{display:block}.card{padding:12px;border:1px solid var(--line);border-radius:15px;background:rgba(255,255,255,.035);box-shadow:inset 0 1px rgba(255,255,255,.025)}.card+.card{margin-top:8px}.cardHeader{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px}.cardTitle{font-size:12px;font-weight:820}.cardMeta{color:var(--muted);font-size:9px;font-weight:680}.typePill{height:24px;display:inline-flex;align-items:center;gap:5px;padding:0 8px;border-radius:999px;color:#cfd4ff;background:rgba(111,124,255,.13);font-size:9px;font-weight:800}.typePill.navigate{color:#dfd4ff;background:rgba(155,124,255,.14)}.typePill.wait{color:#f3d6a1;background:rgba(227,168,77,.13)}
-      .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.wide{grid-column:1/-1}.field{display:flex;flex-direction:column;gap:5px;min-width:0;color:var(--muted);font-size:10px;font-weight:650}.field.inline{min-height:42px;flex-direction:row;align-items:center;justify-content:space-between;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.13)}.field input[type=number],.field input[type=text],.field input[type=url],.field select{width:100%;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(0,0,0,.18)}input[type=checkbox]{position:relative;width:34px;height:20px;flex:0 0 auto;appearance:none;-webkit-appearance:none;border:1px solid rgba(255,255,255,.15);border-radius:999px;background:rgba(255,255,255,.10);transition:background .16s,border-color .16s;cursor:pointer}input[type=checkbox]::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:rgba(255,255,255,.86);box-shadow:0 1px 4px rgba(0,0,0,.38);transition:transform .16s}input[type=checkbox]:checked{border-color:rgba(111,124,255,.60);background:var(--accent-2)}input[type=checkbox]:checked::after{transform:translateX(14px);background:#fff}
-      .buttonRow{display:flex;gap:6px}.buttonRow button{flex:1;height:39px;border-radius:11px;font-size:10px;font-weight:760}.dangerButton{color:#ffb0b6;background:rgba(240,100,109,.12)}.primaryButton{background:rgba(111,124,255,.18);color:#d7dcff}.editor.hidden,.conditionalField.hidden{display:none!important}
-      .plainHelp{margin-top:8px;color:var(--subtle);font-size:9.5px;line-height:1.55}.callout{margin-top:8px;padding:9px 10px;border-radius:11px;color:rgba(255,255,255,.66);background:rgba(111,124,255,.075);font-size:9.5px;line-height:1.5}.conditionBuilder{display:grid;gap:8px}.sentenceRow{display:grid;grid-template-columns:74px minmax(0,1fr);align-items:center;gap:8px}.sentenceLabel{color:var(--muted);font-size:10px;font-weight:760}.conditionResult{min-height:40px;display:flex;align-items:center;gap:8px;margin-top:9px;padding:8px 10px;border:1px solid var(--line);border-radius:11px;color:var(--muted);background:rgba(0,0,0,.13);font-size:9.5px;line-height:1.4}.conditionResult.ok{color:#9ce8bf;border-color:rgba(53,201,130,.25);background:rgba(53,201,130,.07)}.conditionResult.bad{color:#ffb0b6;border-color:rgba(240,100,109,.24);background:rgba(240,100,109,.065)}.resultDot{width:8px;height:8px;flex:0 0 auto;border-radius:50%;background:currentColor}.advanced{margin-top:8px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.08)}.advanced summary{padding:10px;cursor:pointer;color:var(--muted);font-size:10px;font-weight:760;list-style:none}.advanced summary::-webkit-details-marker{display:none}.advanced summary::after{content:'＋';float:right}.advanced[open] summary::after{content:'−'}.advancedBody{padding:0 10px 10px}
-      #memoryRow{display:grid;grid-template-columns:96px repeat(3,minmax(0,1fr));gap:6px}#memoryRow button{height:40px;border-radius:11px;font-size:10px;font-weight:760}#memoryRow select{min-width:0;height:40px;padding:0 10px;border:1px solid var(--line);border-radius:11px;color:var(--text);background:rgba(0,0,0,.18);font-size:10px;font-weight:720;outline:none}#savePreset{background:var(--accent-2)}#deletePreset{color:#ffb0b6;background:rgba(240,100,109,.12)}
-      .sameOriginNote{display:flex;gap:8px;align-items:flex-start;margin-top:8px;padding:9px 10px;border-radius:11px;color:rgba(255,255,255,.50);background:rgba(227,168,77,.055);font-size:9px;line-height:1.45}.sameOriginNote b{color:#f0c47e}
-      #pickerLayer{position:fixed;inset:0;z-index:205;display:none;pointer-events:none;touch-action:none;background:rgba(5,7,11,.08);cursor:crosshair}#pickerLayer.active{display:block;pointer-events:auto}.pickerHint{position:fixed;left:50%;top:max(60px,calc(env(safe-area-inset-top) + 50px));transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:calc(100vw - 24px);padding:9px 10px 9px 14px;border:1px solid rgba(255,255,255,.18);border-radius:999px;color:#fff;background:rgba(18,20,25,.96);box-shadow:0 12px 36px rgba(0,0,0,.38);font-size:11px;font-weight:720}.pickerHint button{width:34px;height:34px;flex:0 0 auto;border-radius:50%;background:rgba(255,255,255,.08)}#targetHighlight{position:fixed;z-index:204;display:none;pointer-events:none;border:2px solid #79dcaa;border-radius:10px;background:rgba(53,201,130,.08);box-shadow:0 0 0 4px rgba(53,201,130,.13),0 8px 28px rgba(0,0,0,.26);transition:left .12s ease,top .12s ease,width .12s ease,height .12s ease}#targetHighlight.visible{display:block}
-      .cardHeaderTools{display:flex;align-items:center;gap:7px}.useSwitch{height:28px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--line);border-radius:999px;color:var(--muted);background:rgba(0,0,0,.10);font-size:9px;font-weight:760}.useSwitch input{width:17px;height:17px}.targetMode{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:9px;padding:4px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.14)}.targetMode button{height:36px;border-radius:9px;color:var(--muted);background:transparent;font-size:10px;font-weight:780}.targetMode button.active{color:#fff;background:rgba(111,124,255,.18);box-shadow:inset 0 0 0 1px rgba(111,124,255,.20)}.targetSummary{display:flex;align-items:flex-start;gap:8px;margin-top:8px;padding:9px 10px;border:1px solid var(--line);border-radius:11px;color:var(--muted);background:rgba(0,0,0,.12);font-size:9.5px;line-height:1.45}.targetSummary strong{color:rgba(255,255,255,.86)}.targetSummary .targetDot{width:8px;height:8px;flex:0 0 auto;margin-top:3px;border-radius:50%;background:#8d97a8}.targetSummary.ok .targetDot{background:var(--green)}.targetSummary.bad .targetDot{background:var(--red)}
-      .quickPresetRow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;margin-bottom:9px}.quickPreset{height:36px;border-radius:10px;color:rgba(255,255,255,.74);background:rgba(255,255,255,.05);font-size:9.5px;font-weight:760}.quickPreset.active{color:#fff;background:rgba(111,124,255,.18)}.pointChip.disabledAction{opacity:.43}.pointChip.selectorTarget .chipIcon{color:#8fe6b6}.pointChip.currentRun{box-shadow:0 0 0 2px rgba(53,201,130,.30) inset}.runStats{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:11px;color:var(--muted);background:rgba(0,0,0,.12);font-size:9.5px}.logList{max-height:160px;overflow:auto;margin-top:7px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.12)}.logEmpty{padding:16px;color:var(--subtle);font-size:9.5px;text-align:center}.logEntry{display:grid;grid-template-columns:50px minmax(0,1fr);gap:8px;padding:7px 9px;border-bottom:1px solid rgba(255,255,255,.055);color:rgba(255,255,255,.68);font-size:9px;line-height:1.4}.logEntry:last-child{border-bottom:0}.logEntry.success{color:#9de8c0}.logEntry.error{color:#ffb0b6}.logEntry.skip{color:#f0ca88}.logTime{color:var(--subtle);font-variant-numeric:tabular-nums}.toolbarMini{height:28px!important;flex:0 0 auto!important;padding:0 9px!important;border-radius:8px!important;font-size:9px!important}.saveTools{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px}.saveTools button{height:39px;border-radius:11px;font-size:10px;font-weight:760}
-      @media(max-width:620px){.quickPresetRow{grid-template-columns:repeat(2,1fr)}#browserBar{gap:4px}#browserBar button{width:37px;height:38px}#dock{width:min(600px,calc(100vw - 10px))}#actionBar{grid-template-columns:repeat(2,1fr)}#addMenu{grid-template-columns:1fr}.addChoice{height:48px}#addMenu.open{max-height:168px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}#memoryRow{grid-template-columns:82px repeat(3,1fr)}.brandIcon{display:none}}
-
-      @media(max-width:620px),(hover:none) and (pointer:coarse){#url,.field input[type=number],.field input[type=text],.field input[type=url],.field select,#memoryRow select{font-size:16px!important}#settingsPanel{padding-bottom:env(safe-area-inset-bottom)}}
-      @media(max-width:460px){#forward{display:none}#browserBar{width:calc(100vw - 8px);padding:4px}#browserBar button{width:36px}#browserBar .wide{min-width:48px;padding:0 10px}}
-      @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-      #shell.keyboardOpen:not(.urlKeyboardOpen) #browserBar,#shell.keyboardOpen:not(.urlKeyboardOpen) #browserHandle,#shell.keyboardOpen:not(.urlKeyboardOpen) #topBar,#shell.keyboardOpen:not(.urlKeyboardOpen) #actionBar,#shell.keyboardOpen:not(.urlKeyboardOpen) #addMenu,#shell.keyboardOpen:not(.urlKeyboardOpen) #sequenceArea,#shell.keyboardOpen:not(.urlKeyboardOpen) #tabBar,#shell.keyboardOpen:not(.urlKeyboardOpen) .resizeHandle{display:none!important}
-      #shell.keyboardOpen:not(.urlKeyboardOpen) #dock{height:var(--dock-height)!important;max-height:none!important;transition:none!important;border-radius:14px}
-      #shell.keyboardOpen:not(.urlKeyboardOpen) #settingsPanel{border-top:0;overscroll-behavior:contain}
-      #shell.keyboardOpen:not(.urlKeyboardOpen) .tabPage{padding-top:8px;padding-bottom:max(90px,calc(env(safe-area-inset-bottom) + 70px))}
-
-      #dock.settingsClosed{height:auto!important}
-      #dock.resizing{transition:none!important;user-select:none;-webkit-user-select:none}
-      .resizeHandle{position:absolute;z-index:12;bottom:0;width:34px;height:34px;padding:0;background:transparent;touch-action:none;cursor:nwse-resize;opacity:.46}
-      .resizeHandle::before,.resizeHandle::after{content:'';position:absolute;bottom:7px;width:12px;height:1.5px;border-radius:2px;background:rgba(255,255,255,.72)}
-      .resizeHandle.right{right:0}.resizeHandle.left{left:0;cursor:nesw-resize}.resizeHandle.right::before{right:7px;transform:rotate(-45deg)}.resizeHandle.right::after{right:11px;bottom:7px;transform:rotate(-45deg)}.resizeHandle.left::before{left:7px;transform:rotate(45deg)}.resizeHandle.left::after{left:11px;bottom:7px;transform:rotate(45deg)}
-      #dock.compact .resizeHandle,#dock.settingsClosed .resizeHandle{display:none}
-      .conditionStep{padding:11px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025)}.conditionStep+.conditionStep{margin-top:8px}.stepTitle{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:11px;font-weight:810}.stepNumber{width:21px;height:21px;display:grid;place-items:center;border-radius:7px;color:#d9ddff;background:rgba(111,124,255,.16);font-size:9px}.conditionTargetSummary{min-height:44px;display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:11px;color:var(--muted);background:rgba(0,0,0,.14);font-size:10px;line-height:1.45}.conditionTargetSummary strong{color:var(--text)}.conditionSentence{margin-top:8px;padding:9px 10px;border-left:3px solid rgba(111,124,255,.65);border-radius:4px 10px 10px 4px;color:rgba(255,255,255,.78);background:rgba(111,124,255,.075);font-size:10px;font-weight:680;line-height:1.5}
-      .quickPresetRow{grid-template-columns:repeat(2,minmax(0,1fr))}.quickPreset{min-height:42px;padding:0 9px}.quickPreset.smart{grid-column:1/-1;color:#dce0ff;background:rgba(111,124,255,.13)}
-      .conditionResult{font-size:10px;line-height:1.55}.conditionResult.ok{color:#a9ecc8}.conditionResult.bad{color:#f0ca82;border-color:rgba(227,168,77,.25);background:rgba(227,168,77,.06)}
-      .saveHero{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.saveHero button{height:40px;padding:0 15px;border-radius:11px;background:var(--accent-2);font-size:10px;font-weight:790}.saveMeta{margin-top:7px;color:var(--subtle);font-size:9px}.saveTools{grid-template-columns:repeat(2,minmax(0,1fr))}.saveTools button{min-height:40px}.recoveryButton{color:#f2d4a2;background:rgba(227,168,77,.11)!important}.toolbarMini{height:30px;padding:0 9px;border-radius:9px}
-      @media(max-width:540px){#actionBar{grid-template-columns:repeat(2,minmax(0,1fr))}#addMenu{grid-template-columns:1fr}#addMenu.open{max-height:210px}.grid{grid-template-columns:1fr}.wide{grid-column:auto}.sentenceRow{grid-template-columns:66px minmax(0,1fr)}.brandIcon{display:none}.brand{gap:4px}}
-
-      /* v12: touch-first readability, hierarchy, accessibility, and recovery */
-      :host{--muted:rgba(255,255,255,.72);--subtle:rgba(255,255,255,.58)}
-      button,select,input:not([type=checkbox]){min-height:44px}
-      button{font-weight:750}
-      input:not([type=checkbox]),select{font-size:13px;line-height:1.25}
-      input:focus-visible,select:focus-visible,button:focus-visible,summary:focus-visible,.marker:focus-visible{outline:2px solid #b7bdff;outline-offset:2px;box-shadow:0 0 0 4px rgba(111,124,255,.22)!important}
-      #browserBar{gap:6px;padding:6px}
-      #browserBar button{width:44px;height:44px}
-      #url{height:44px;font-size:16px}
-      #browserHandle{width:58px;height:44px;border-radius:0 0 15px 15px}
-      #recordHud{min-height:52px}
-      #recordHud button{min-width:48px}
-      #topBar{grid-template-columns:44px minmax(0,1fr) 44px 44px 44px;min-height:56px;padding:5px 7px}
-      #dockHandle,.iconButton{width:44px;height:44px}
-      .undoButton{color:#d7dcff;background:rgba(111,124,255,.14)}
-      .brandTitle{font-size:13px}.brandStatus{font-size:11.5px;line-height:1.35}
-      #actionBar{gap:8px;padding:10px}.mainAction{height:48px;font-size:13px}
-      .addChoice{min-height:62px}.addChoice strong{font-size:13px}.addChoice small{font-size:11px;line-height:1.35}.choiceIcon{width:34px;height:34px}
-      .sequenceHeader{font-size:11px}.sequenceHeader button{height:40px;font-size:11px}
-      .pointChip{height:46px;min-width:96px}.chipText{font-size:11.5px}.chipIcon{font-size:12px}
-      #tabBar{padding:8px 10px}.tabButton{height:44px;font-size:12px}
-      .tabPage{padding:12px}.card{padding:14px}.cardTitle{font-size:14px}.cardMeta{font-size:11px;line-height:1.4}
-      .field{gap:6px;font-size:12px;line-height:1.35}.field.inline{min-height:48px}.field input[type=number],.field input[type=text],.field input[type=url],.field select{height:44px;font-size:13px}
-      .buttonRow button{height:44px;font-size:12px}
-      .plainHelp,.callout,.conditionResult,.conditionTargetSummary,.conditionSentence,.targetSummary,.sameOriginNote,.runStats,.saveMeta{font-size:11.5px}
-      .quickPreset{min-height:44px;font-size:11.5px}
-      #memoryRow button,#memoryRow select{height:44px;font-size:12px}
-      .advanced summary,.gamePresets summary{min-height:44px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;font-size:12px}
-      .useSwitch{min-height:44px;font-size:11.5px}.targetMode button{height:44px;font-size:12px}
-      .pickerHint{font-size:12px}.pickerHint button{width:44px;height:44px}
-      .resizeHandle{width:44px;height:44px}
-      .emptyFlow{flex:1 0 100%;min-height:76px;display:flex;align-items:center;justify-content:center;gap:10px;padding:12px;border:1px dashed rgba(183,189,255,.34);border-radius:13px;color:#e4e7ff;background:rgba(111,124,255,.08);text-align:left}
-      .emptyFlowIcon{width:36px;height:36px;display:grid;place-items:center;flex:0 0 auto;border-radius:11px;background:rgba(111,124,255,.18);font-size:20px}.emptyFlow strong{display:block;font-size:13px}.emptyFlow small{display:block;margin-top:3px;color:var(--muted);font-size:11px}
-      .gamePresets{margin:0 0 9px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.10)}.gamePresets summary{color:var(--muted);cursor:pointer;list-style:none}.gamePresets summary::-webkit-details-marker{display:none}.gamePresets summary::after{content:'＋'}.gamePresets[open] summary::after{content:'−'}.gamePresets .quickPresetRow{padding:0 9px 9px;margin:0}
-      .layoutGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.sizePresetRow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:8px}.layoutGrid button,.sizePresetRow button{min-height:44px;border-radius:11px;font-size:11.5px}
-      @media(max-width:540px){#topBar{grid-template-columns:44px minmax(0,1fr) 44px 44px 44px}.cardHeader{align-items:flex-start;flex-wrap:wrap}.layoutGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.sizePresetRow{grid-template-columns:repeat(2,minmax(0,1fr))}}
-      @media(prefers-contrast:more){:host{--line:rgba(255,255,255,.25);--line-strong:rgba(255,255,255,.42);--muted:rgba(255,255,255,.86);--subtle:rgba(255,255,255,.76)}button,input,select,.card{border-color:var(--line-strong)!important}}
-
-      /* v12 final density audit */
-      .typePill{height:28px;font-size:11px}.saveStateBadge{font-size:10.5px}
-      .markerNumber{font-size:10px}.markerDelay{font-size:9.5px}
-      .logEntry{grid-template-columns:58px minmax(0,1fr);padding:9px 10px;font-size:11px}.logEmpty{font-size:11px}.toolbarMini{min-height:40px!important;font-size:11px!important}
-      .sentenceLabel{font-size:11.5px}.stepNumber{font-size:10.5px}.saveHero button,.saveTools button{font-size:11.5px}
-      #memoryRow{grid-template-columns:minmax(0,1.4fr) repeat(2,minmax(80px,.7fr))}
-      @media(max-width:380px){#memoryRow{grid-template-columns:1fr 1fr}#memoryRow select{grid-column:1/-1}.saveHero{grid-template-columns:1fr}.saveHero button{width:100%}}
-      @media(max-width:340px){#reload,#hideBrowser{display:none}}
-
-      /* Granblue condition assistant */
-      .granblueAssistant{margin-bottom:10px;padding:12px;border:1px solid rgba(111,124,255,.28);border-radius:15px;background:linear-gradient(135deg,rgba(111,124,255,.12),rgba(53,201,130,.055))}
-      .gbfAssistantHeader{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.gbfAssistantTitle{font-size:13px;font-weight:840}.gbfAssistantCopy{margin-top:3px;color:var(--muted);font-size:11px;line-height:1.45}.gbfAssistantHeader button{flex:0 0 auto;min-height:40px;padding:0 12px;border-radius:10px;color:#dfe2ff;background:rgba(111,124,255,.18);font-size:11px}
-      .gbfStatusGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:10px}.gbfStateCard{padding:10px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.14)}.gbfStateHead{display:flex;align-items:center;justify-content:space-between;gap:8px}.gbfStateName{font-size:11.5px;font-weight:800}.gbfStateBadge{padding:4px 7px;border-radius:999px;color:#dfe2ff;background:rgba(111,124,255,.17);font-size:10px;font-weight:800}.gbfStateCard[data-state="ready"] .gbfStateBadge,.gbfStateCard[data-state="on"] .gbfStateBadge{color:#a9ecc8;background:rgba(53,201,130,.14)}.gbfStateCard[data-state="off"] .gbfStateBadge,.gbfStateCard[data-state="blocked"] .gbfStateBadge{color:#f3d39d;background:rgba(227,168,77,.13)}.gbfStateCard[data-state="missing"] .gbfStateBadge{color:#c9ccd5;background:rgba(255,255,255,.08)}.gbfStateDetail{display:block;margin-top:6px;color:var(--muted);font-size:10.5px;line-height:1.45}
-      .conditionChoiceGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.conditionChoice{min-height:62px;padding:9px 10px;border:1px solid transparent;border-radius:12px;text-align:left}.conditionChoice strong{display:block;font-size:11.5px}.conditionChoice small{display:block;margin-top:3px;color:var(--muted);font-size:10px;line-height:1.35}.conditionChoice.active{border-color:rgba(111,124,255,.46);background:rgba(111,124,255,.16)}.conditionChoice.smart{grid-column:1/-1;color:#e3e6ff;background:rgba(111,124,255,.14)}
-      .conditionRecommendation{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:10px;margin-top:9px;padding:10px;border:1px solid rgba(53,201,130,.22);border-radius:12px;background:rgba(53,201,130,.065)}.conditionRecommendationTag{display:block;color:#91e5b7;font-size:9.5px;font-weight:850;letter-spacing:.06em}.conditionRecommendation strong{display:block;margin-top:2px;font-size:12px}.conditionRecommendation p{margin:4px 0 0;color:var(--muted);font-size:10.5px;line-height:1.45}.conditionRecommendation button{min-width:112px;padding:0 11px;border-radius:10px;color:#07170f;background:var(--green);font-size:11px}.conditionRecommendation.unavailable{border-color:var(--line);background:rgba(255,255,255,.025)}.conditionRecommendation.unavailable .conditionRecommendationTag{color:var(--subtle)}
-      .conditionGuide{margin-top:9px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.10)}.conditionGuide summary{min-height:44px;display:flex;align-items:center;justify-content:space-between;padding:10px 12px;color:var(--muted);cursor:pointer;font-size:11.5px;font-weight:780;list-style:none}.conditionGuide summary::-webkit-details-marker{display:none}.conditionGuide summary::after{content:'＋'}.conditionGuide[open] summary::after{content:'−'}.conditionGuideBody{display:grid;gap:7px;padding:0 10px 10px}.conditionGuideItem{padding:8px 9px;border-radius:10px;background:rgba(255,255,255,.035);font-size:10.5px;line-height:1.45}.conditionGuideItem b{color:#fff}.conditionGuideItem span{color:var(--muted)}
-      .granbluePresetRow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:0 9px 9px}.gbfPreset{min-height:54px;padding:8px 9px;border-radius:11px;text-align:left}.gbfPreset strong{display:block;font-size:11px}.gbfPreset small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px;line-height:1.35}.gbfPreset.active{box-shadow:inset 0 0 0 1px rgba(111,124,255,.48);background:rgba(111,124,255,.16)}
-      @media(max-width:480px){.gbfStatusGrid,.conditionChoiceGrid{grid-template-columns:1fr}.conditionChoice.smart{grid-column:auto}.conditionRecommendation{grid-template-columns:1fr}.conditionRecommendation button{width:100%}}
+      #browserBar{position:fixed;z-index:150;top:max(7px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(1080px,calc(100vw - 12px));display:grid;grid-template-columns:44px 44px 44px minmax(90px,1fr) 64px 44px;gap:5px;padding:5px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:0 12px 34px rgba(0,0,0,.36);backdrop-filter:blur(24px)}
+      #browserBar.hidden{display:none}#browserBar button{height:44px;padding:0}#loadUrl{background:var(--accent)}
+      #browserHandle{position:fixed;z-index:149;top:max(5px,env(safe-area-inset-top));left:50%;display:none;transform:translateX(-50%);width:58px;border-radius:0 0 14px 14px;background:var(--panel)}#browserHandle.visible{display:block}
+      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));height:min(820px,calc(100vh - 78px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}
+      #dock.compact{width:116px;height:52px;border-radius:27px}.compactOnly{display:none}#dock.compact .compactOnly{display:grid;grid-template-columns:58px 58px}#dock.compact .fullOnly{display:none!important}
+      #dockHeader{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;align-items:center;gap:5px;padding:6px;border-bottom:1px solid var(--line)}
+      #dockGrip{position:relative;background:transparent;touch-action:none;cursor:grab}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}
+      .title{min-width:0}.title strong{display:block;font-size:13px}.title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;margin-top:2px}
+      #mainTabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:7px;border-bottom:1px solid var(--line)}.mainTab.active{background:rgba(111,124,255,.22);border-color:rgba(111,124,255,.42)}
+      #pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain}.page.active{display:block}
+      .toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px}.toolbar .primary{background:var(--accent)}.toolbar .success{background:var(--green);color:#07170f}.toolbar .danger{background:rgba(240,100,109,.18);color:#ffbec2}.toolbar .warn{background:rgba(232,173,85,.15);color:#f7d49b}
+      .card{margin-bottom:9px;padding:11px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font-size:13px;font-weight:820}.hint{color:var(--muted);font-size:11px;line-height:1.5}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.field{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px;font-weight:690}.span2{grid-column:1/-1}
+      #workflowEditor{padding-bottom:100px}.empty{padding:28px 12px;border:1px dashed rgba(192,197,255,.35);border-radius:13px;color:var(--muted);text-align:center}.dropZone{height:15px;margin:1px 5px;border:1px dashed transparent;border-radius:7px}.dropZone.dragOver{border-color:#aeb5ff;background:rgba(111,124,255,.22)}
+      .blockCard{position:relative;margin:6px 0;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;background:rgba(9,10,15,.55);overflow:hidden}.blockCard.category-gbf{border-left-color:var(--green)}.blockCard.category-control{border-left-color:var(--purple)}.blockCard.category-wait{border-left-color:var(--amber)}.blockCard.category-frame{border-left-color:#62b7ff}.blockCard.running{box-shadow:0 0 0 2px rgba(56,207,135,.55),0 10px 28px rgba(0,0,0,.3)}.blockCard.dragging{opacity:.48}
+      .blockHead{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:5px;padding:6px;border-bottom:1px solid rgba(255,255,255,.08)}.blockHead button{min-height:38px;height:38px;padding:0 8px}.dragHandle{cursor:grab;touch-action:none}.blockName{min-width:0}.blockName strong{display:block;font-size:12px}.blockName small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.blockTools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}.blockTools button{min-width:38px;font-size:11px}.blockBody{padding:9px}.blockCard.collapsed .blockBody,.blockCard.collapsed .childArea{display:none}.childArea{margin:0 8px 9px 17px;padding:6px;border:1px dashed rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.018)}.childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;color:var(--muted);font-size:10px;font-weight:760}.progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border-radius:999px;background:rgba(56,207,135,.15);color:#a6edc8;font-size:10px}
+      .paletteGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.paletteButton{min-height:56px;padding:8px;text-align:left}.paletteButton strong{display:block;font-size:11px}.paletteButton small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px}.paletteButton.gbf{background:rgba(56,207,135,.10)}.paletteButton.control{background:rgba(160,131,255,.11)}.paletteButton.wait{background:rgba(232,173,85,.10)}.paletteButton.frame{background:rgba(98,183,255,.10)}
+      #runBar{position:sticky;bottom:-10px;z-index:5;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px -1px -10px;padding:10px 1px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(18,20,27,.98) 22%)}#runWorkflow{background:var(--green);color:#07170f}#stopWorkflow{background:var(--red)}
+      #legacyActionList{display:grid;gap:7px}.legacyRow{padding:9px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.16)}.legacyHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}.legacyTools{display:flex;gap:4px}.legacyTools button{min-width:40px;min-height:40px;padding:0 7px}
+      #markerLayer,#recordLayer{position:fixed;inset:0;pointer-events:none}#markerLayer{z-index:100}.marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;box-shadow:0 0 0 1px #fff,0 6px 18px rgba(0,0,0,.35)}.marker.selected{border-color:var(--green);background:rgba(56,207,135,.15)}#recordLayer.active{z-index:210;pointer-events:auto;background:rgba(255,60,90,.035);touch-action:none}.recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#ef4f68;font-size:10px;font-weight:850}
+      #toast{position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);display:none;max-width:calc(100vw - 24px);padding:10px 14px;border:1px solid var(--line);border-radius:999px;color:#fff;background:rgba(18,20,27,.97);font-size:12px;box-shadow:0 12px 34px rgba(0,0,0,.4)}#toast.show{display:block}
+      .logList{display:grid;gap:5px}.logEntry{display:grid;grid-template-columns:72px 80px minmax(0,1fr);gap:7px;padding:8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;line-height:1.45}.logEntry.error{color:#ffb7bc}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}.logTime{color:var(--muted);font-variant-numeric:tabular-nums}.errorBox{display:none;margin-bottom:8px;padding:10px;border:1px solid rgba(240,100,109,.38);border-radius:12px;background:rgba(240,100,109,.10);color:#ffc1c5;font-size:11px;line-height:1.5}.errorBox.show{display:block}
+      .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
+      @media(max-width:620px){#dock{height:min(860px,calc(100vh - 70px))}.grid2,.grid3{grid-template-columns:1fr}.span2{grid-column:auto}.paletteGrid{grid-template-columns:1fr}.blockHead{grid-template-columns:36px minmax(0,1fr)}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:41px}.logEntry{grid-template-columns:58px 64px minmax(0,1fr)}}
+      @media(max-width:430px){#browserBar{grid-template-columns:42px 42px minmax(70px,1fr) 56px 42px}#forwardFrame{display:none}.toolbar>*{flex-basis:90px}}
+      @media(hover:none) and (pointer:coarse){button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
     </style>
-
-    <div id="shell">
-      <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
-      <div id="markerLayer"></div><div id="recordLayer"></div><div id="targetHighlight"></div><div id="pickerLayer"><div class="pickerHint"><span id="pickerMessage">対象のボタンをタッチしてください</span><button id="cancelPicker" title="選択をやめる">×</button></div></div>
-      <div id="browserBar" role="navigation" aria-label="ページ操作"><button id="back" title="戻る" aria-label="戻る">←</button><button id="forward" title="進む" aria-label="進む">→</button><button id="reload" title="再読込" aria-label="再読込">↻</button><input id="url" type="text" inputmode="url" aria-label="表示するURL" placeholder="https://example.com" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="load" class="wide">表示</button><button id="hideBrowser" title="URLバーを収納" aria-label="URLバーを収納">⌃</button><button id="close" title="終了" aria-label="終了">×</button></div>
-      <button id="browserHandle" title="URLバーを表示" aria-label="URLバーを表示">⌄</button>
-      <div id="recordHud"><span class="recordPulse"></span><span id="recordCount">0 タッチ</span><button id="finishRecord">完了</button><button id="cancelRecord">中止</button></div>
-
-      <div id="dock">
-        <div id="topBar">
-          <button id="dockHandle" title="ドラッグして移動・ダブルタップで位置を戻す" aria-label="メニューを移動。矢印キーでも移動、ダブルタップで位置とサイズを戻す"></button>
-          <div class="brand"><span class="brandIcon">AF</span><span class="brandText"><span class="brandTitle">オートフロー <span id="autosaveBadge" class="saveStateBadge">保存済み</span></span><span id="status" class="brandStatus" role="status" aria-live="polite">アクションなし</span></span></div>
-          <button id="undo" class="iconButton undoButton" title="直前の削除・読込を元に戻す" aria-label="直前の削除または読込を元に戻す">↶</button>
-          <button id="minimize" class="iconButton" title="小さくする" aria-label="メニューを小さくする">—</button>
-          <button id="settingsToggle" class="iconButton" title="設定を開閉" aria-label="設定を開閉" aria-expanded="true" aria-controls="settingsPanel">⌄</button>
-        </div>
-        <div id="actionBar">
-          <button id="addMenuButton" class="mainAction" aria-expanded="false" aria-controls="addMenu">＋ 追加</button>
-          <button id="recordButton" class="mainAction secondary">● 記録</button>
-          <button id="single" class="mainAction secondary">選択を試す</button>
-          <button id="runToggle" class="mainAction">▶ 開始</button>
-        </div>
-        <div id="addMenu">
-          <button id="addPoint" class="addChoice clickChoice"><span class="choiceIcon">●</span><span><strong>クリック</strong><small>丸の場所を押す</small></span></button>
-          <button id="addNavigate" class="addChoice navigateChoice"><span class="choiceIcon">↗</span><span><strong>URLへ移動</strong><small>読込後に次へ進む</small></span></button>
-          <button id="addWait" class="addChoice waitChoice"><span class="choiceIcon">◇</span><span><strong>条件を待つ</strong><small>表示や状態変化を待つ</small></span></button>
-        </div>
-        <div id="sequenceArea">
-          <div class="sequenceHeader"><span>実行順</span><button id="clearPoints" title="すべての動作を消す">全消去</button></div>
-          <div id="pointStrip" class="pointStrip"></div>
-        </div>
-
-        <div id="settingsPanel">
-          <div id="tabBar" role="tablist" aria-label="設定カテゴリ" aria-orientation="horizontal">
-            <button id="tabActionButton" class="tabButton active" data-tab="action" role="tab" aria-selected="true" aria-controls="tabAction">動作</button>
-            <button id="tabConditionButton" class="tabButton" data-tab="condition" role="tab" aria-selected="false" aria-controls="tabCondition" tabindex="-1">条件</button>
-            <button id="tabGlobalButton" class="tabButton" data-tab="global" role="tab" aria-selected="false" aria-controls="tabGlobal" tabindex="-1">全体</button>
-            <button id="tabSaveButton" class="tabButton" data-tab="save" role="tab" aria-selected="false" aria-controls="tabSave" tabindex="-1">保存</button>
-          </div>
-
-          <div id="tabAction" class="tabPage active" role="tabpanel" aria-labelledby="tabActionButton">
-            <div class="card">
-              <div class="cardHeader"><div><div id="selectedTitle" class="cardTitle">アクション設定</div><div id="selectedTimingLabel" class="cardMeta">前から待機</div></div><div class="cardHeaderTools"><span id="actionTypePill" class="typePill">クリック</span><label class="useSwitch"><span>使う</span><input id="actionEnabled" type="checkbox" checked></label></div></div>
-              <div class="grid">
-                <label class="field">実行前に待つ時間（ms）<input id="pointDelay" type="number" min="0" max="${MAX_DELAY_MS}" step="10"></label>
-                <div class="field">実行順<div class="buttonRow"><button id="movePrev">← 前へ</button><button id="moveNext">後へ →</button></div></div>
-              </div>
-              <div id="clickEditor" class="editor">
-                <div class="grid" style="margin-top:8px"><label class="field">押している時間（ms）<input id="pointHold" type="number" min="0" max="${MAX_HOLD_MS}" step="5"></label><div class="field">押し方<div id="clickTargetMode" class="targetMode"><button type="button" data-mode="point" class="active">場所で押す</button><button type="button" data-mode="selector">ボタンを追う</button></div></div></div>
-                <div id="pointTargetEditor" style="margin-top:8px"><div class="buttonRow"><button id="pickPointTarget" class="primaryButton">画面から場所を選ぶ</button><button id="centerPoint">画面中央へ</button></div><div class="plainHelp">画面の同じ位置を押します。レイアウトが動かないページ向けです。</div></div>
-                <div id="selectorTargetEditor" class="hidden" style="margin-top:8px"><label class="field">押すボタンのclass / id<input id="clickSelector" type="text" placeholder=".start-button または #submit" spellcheck="false"></label><div class="buttonRow" style="margin-top:7px"><button id="pickClickTarget" class="primaryButton">画面からボタンを選ぶ</button><button id="testClickTarget">見つかるか確認</button></div><div id="clickTargetSummary" class="targetSummary"><span class="targetDot"></span><span>ボタンを選ぶと、ページが動いても同じボタンを追いかけます。</span></div><div class="grid" style="margin-top:8px"><label class="field inline"><span>ボタンが出るまで待つ</span><input id="waitForTarget" type="checkbox" checked></label><label class="field">最大待ち時間（ms）<input id="targetTimeout" type="number" min="0" max="${MAX_TARGET_TIMEOUT_MS}" step="500"></label><label class="field">見つからない時<select id="targetFailure"><option value="stop">停止する</option><option value="skip">この動作を飛ばす</option><option value="point">保存した場所を押す</option></select></label><label class="field inline"><span>画面外なら近くへ表示</span><input id="scrollTarget" type="checkbox" checked></label></div></div>
-              </div>
-              <div id="navigateEditor" class="editor hidden">
-                <div class="grid" style="margin-top:8px"><label class="field wide">移動先URL<input id="actionUrl" type="url" placeholder="https://example.com/path" autocomplete="off" spellcheck="false"></label><label class="field inline"><span>読込が終わるまで待つ</span><input id="waitForLoad" type="checkbox" checked></label><label class="field">最大待ち時間（ms）<input id="loadTimeout" type="number" min="1000" max="${MAX_NAVIGATION_TIMEOUT_MS}" step="500"></label><label class="field">読めなかった時<select id="navigationFailure"><option value="stop">停止する</option><option value="continue">次へ進む</option></select></label><div class="field wide"><div class="buttonRow"><button id="useCurrentUrl">今のURLを入れる</button><button id="navigateNow" class="primaryButton">今すぐ移動</button></div></div></div>
-              </div>
-              <div id="waitEditor" class="editor hidden"><div class="callout">このアクションは、設定した条件が合うまで待つだけです。「条件」タブで待つ内容を選んでください。</div></div>
-              <div class="buttonRow" style="margin-top:10px"><button id="runFromSelected" class="primaryButton">ここから開始</button><button id="duplicatePoint">複製</button><button id="deleteFromPanel" class="dangerButton">削除</button></div>
-            </div>
-          </div>
-
-          <div id="tabCondition" class="tabPage" role="tabpanel" aria-labelledby="tabConditionButton" aria-hidden="true">
-            <div class="card">
-              <div class="cardHeader"><div><div class="cardTitle">この動作をいつ実行する？</div><div class="cardMeta">コードを知らなくても、画面から選んで設定できます</div></div><label class="field inline" style="min-height:34px"><span>条件を使う</span><input id="conditionEnabled" type="checkbox"></label></div>
-              <div id="granblueAssistant" class="granblueAssistant">
-                <div class="gbfAssistantHeader"><div><div class="gbfAssistantTitle">グラブル状態診断</div><div class="gbfAssistantCopy">ボタンが「未出現・非表示・押せない・ON/OFF」のどれかを分けて表示します。</div></div><button id="scanGranblue">現在の画面を診断</button></div>
-                <div class="gbfStatusGrid">
-                  <div id="gbfFullAutoCard" class="gbfStateCard" data-state="missing"><div class="gbfStateHead"><span class="gbfStateName">フルオート</span><span id="gbfFullAutoState" class="gbfStateBadge">未診断</span></div><small id="gbfFullAutoDetail" class="gbfStateDetail">.btn-auto の状態を確認します</small></div>
-                  <div id="gbfAttackCard" class="gbfStateCard" data-state="missing"><div class="gbfStateHead"><span class="gbfStateName">攻撃ボタン</span><span id="gbfAttackState" class="gbfStateBadge">未診断</span></div><small id="gbfAttackDetail" class="gbfStateDetail">出現・表示・操作可能状態を確認します</small></div>
-                </div>
-              </div>
-              <div class="conditionStep">
-                <div class="stepTitle"><span class="stepNumber">1</span><span>どのボタンを見ますか？</span></div>
-                <div id="conditionTargetSummary" class="conditionTargetSummary"><span class="targetDot"></span><span><strong>未選択</strong><br>下のボタンを押して、画面上の監視したいボタンをタップします。</span></div>
-                <div class="buttonRow" style="margin-top:8px"><button id="pickConditionTarget" class="primaryButton">画面上のボタンを選ぶ</button><button id="inspectCondition">選んだボタンを見る</button></div>
-              </div>
-              <div class="conditionStep">
-                <div class="stepTitle"><span class="stepNumber">2</span><span>どうなったら進みますか？</span></div>
-                <div class="conditionChoiceGrid">
-                  <button class="conditionChoice" data-condition-preset="visible"><strong>表示されたら</strong><small>DOMにあるだけでなく、画面に見えた時</small></button>
-                  <button class="conditionChoice" data-condition-preset="enabled"><strong>押せるようになったら</strong><small>disabledが解除され、操作可能になった時</small></button>
-                  <button class="conditionChoice" data-condition-preset="state_on"><strong>ONになったら</strong><small>同じボタンの状態がONへ切り替わった時</small></button>
-                  <button class="conditionChoice" data-condition-preset="state_off"><strong>OFFになったら</strong><small>同じボタンの状態がOFFへ切り替わった時</small></button>
-                  <button class="conditionChoice" data-condition-preset="missing"><strong>消えたら</strong><small>ボタン自体がDOMからなくなった時</small></button>
-                  <button class="conditionChoice" data-condition-preset="page_ready"><strong>読込が終わったら</strong><small>ページ全体のロード完了を待つ時</small></button>
-                  <button id="autoCondition" class="conditionChoice smart"><strong>現在状態から自動で選ぶ</strong><small>選んだボタンを診断し、最適な条件を提案します</small></button>
-                </div>
-                <div id="conditionRecommendation" class="conditionRecommendation unavailable"><div><span class="conditionRecommendationTag">おすすめ</span><strong id="conditionRecommendationTitle">ボタンを選んでください</strong><p id="conditionRecommendationReason">現在の状態を確認すると、使うべき条件と理由を表示します。</p></div><button id="applyConditionRecommendation" disabled>この条件を使う</button></div>
-                <details class="conditionGuide"><summary>条件の違いを確認</summary><div class="conditionGuideBody">
-                  <div class="conditionGuideItem"><b>見つかった時</b><br><span>HTML上に生成された時。display:noneで見えなくても成立します。</span></div>
-                  <div class="conditionGuideItem"><b>表示された時</b><br><span>実際に画面へ見えた時。グラブルの出現待ちは通常これが最適です。</span></div>
-                  <div class="conditionGuideItem"><b>押せるようになった時</b><br><span>表示済みだがdisable中のボタンが操作可能になった時。</span></div>
-                  <div class="conditionGuideItem"><b>ON / OFFになった時</b><br><span>同じボタンが残ったままclassやaria属性だけ変化する切替状態用です。</span></div>
-                </div></details>
-                <details class="gamePresets"><summary>グラブル専用の条件</summary><div class="granbluePresetRow">
-                  <button class="gbfPreset" data-condition-preset="gbf_full_auto_on"><strong>フルオートがON</strong><small>.btn-auto の on 状態を判定</small></button>
-                  <button class="gbfPreset" data-condition-preset="gbf_full_auto_off"><strong>フルオートがOFF</strong><small>ボタンが存在し、onでない状態</small></button>
-                  <button class="gbfPreset" data-condition-preset="gbf_attack_ready"><strong>攻撃が押せる</strong><small>表示・有効・攻撃中でない状態</small></button>
-                  <button class="gbfPreset" data-condition-preset="gbf_attack_not_ready"><strong>攻撃できない</strong><small>未出現・無効・攻撃中をまとめて判定</small></button>
-                </div></details><div id="conditionSentence" class="conditionSentence">条件を選ぶと、実行内容をここへ文章で表示します。</div>
-              </div>
-              <div class="conditionStep">
-                <div class="stepTitle"><span class="stepNumber">3</span><span>設定できたか確認</span></div>
-                <button id="testCondition" class="primaryButton" style="width:100%;height:42px;border-radius:11px">この条件を確認する</button>
-                <div id="conditionResult" class="conditionResult" role="status" aria-live="polite"><span class="resultDot"></span><span>ここに「今すぐ進む」か「まだ待つ」かを表示します。コードの知識は不要です。</span></div>
-              </div>
-              <details class="advanced"><summary>細かく条件を指定する</summary><div class="advancedBody">
-                <div id="conditionBuilder" class="conditionBuilder">
-                  <div class="sentenceRow"><span class="sentenceLabel">どこを見る</span><select id="conditionTarget"><option value="action">この動作のボタン</option><option value="selector">class / idで探す</option><option value="page">ページ全体</option></select></div>
-                  <label id="selectorField" class="field conditionalField hidden">class または id<input id="conditionSelector" type="text" placeholder=".start-button または #submit" spellcheck="false"></label>
-                  <div class="sentenceRow"><span class="sentenceLabel">いつ動く</span><select id="conditionType"><option value="exists">見つかった時</option><option value="missing">消えた時</option><option value="visible">表示された時</option><option value="hidden">見えなくなった時</option><option value="state_on">オンになった時</option><option value="state_off">オフになった時</option><option value="enabled">押せるようになった時</option><option value="disabled">押せなくなった時</option><option value="gbf_full_auto_on">フルオートがONの時</option><option value="gbf_full_auto_off">フルオートがOFFの時</option><option value="gbf_attack_ready">攻撃ボタンが押せる時</option><option value="gbf_attack_not_ready">攻撃ボタンが押せない時</option><option value="class_has">classが付いた時</option><option value="class_missing">classが消えた時</option><option value="value_true">値が true になった時</option><option value="value_false">値が false になった時</option><option value="value_equals">値が一致した時</option><option value="value_not_equals">値が一致しなくなった時</option><option value="text_contains">文字を含んだ時</option><option value="text_not_contains">文字を含まなくなった時</option><option value="page_ready">ページの読込が終わった時</option><option value="url_contains">URLに文字を含んだ時</option><option value="url_not_contains">URLに文字を含まなくなった時</option></select></div>
-                  <label id="classField" class="field conditionalField hidden">class名<input id="conditionClass" type="text" placeholder="active または is-ready" spellcheck="false"></label>
-                  <div id="valueFields" class="grid conditionalField hidden"><label class="field">調べる名前<input id="conditionValueName" type="text" placeholder="aria-pressed / checked / state.ready" spellcheck="false"></label><label id="expectedField" class="field">合う値<input id="conditionExpected" type="text" placeholder="true / false / ready" spellcheck="false"></label></div>
-                  <label id="textField" class="field conditionalField hidden"><span id="conditionTextLabel">含まれる文字</span><input id="conditionText" type="text" placeholder="準備完了" spellcheck="false"></label>
-                  <div class="sentenceRow"><span class="sentenceLabel">待ち方</span><select id="conditionMode"><option value="wait">合うまで待つ</option><option value="check">今合っている時だけ実行</option></select></div>
-                  <div class="grid"><label class="field">最大待ち時間（ms）<input id="conditionTimeout" type="number" min="0" max="${MAX_CONDITION_TIMEOUT_MS}" step="500"></label><label class="field">時間切れの時<select id="conditionTimeoutAction"><option value="stop">停止する</option><option value="skip">この動作を飛ばす</option><option value="execute">そのまま実行する</option></select></label><label class="field">成立後の余裕（ms）<input id="conditionStable" type="number" min="0" max="${MAX_CONDITION_STABLE_MS}" step="20"></label></div>
-                </div>
-              </div></details>
-              <div class="sameOriginNote"><b>注意</b><span>別ドメインのページ内部はブラウザの制限で読めません。その場合もURL移動と読込完了待ちは使えます。</span></div>
-            </div>
-          </div>
-
-          <div id="tabGlobal" class="tabPage" role="tabpanel" aria-labelledby="tabGlobalButton" aria-hidden="true">
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">繰り返し</div><div class="cardMeta">全アクション共通</div></div></div><div class="grid"><label class="field">クリック方法<select id="method"><option value="tap">互換性優先</option><option value="click">通常クリック</option><option value="both">両方試す</option></select></label><label class="field">繰り返す回数<input id="count" type="number" min="1" max="999999" value="1"></label><label class="field inline"><span>止めるまで繰り返す</span><input id="loop" type="checkbox"></label></div></div>
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">自然なずれ</div><div class="cardMeta">毎回わずかに変える</div></div></div><div class="grid"><label class="field inline"><span>時間を少しずらす</span><input id="timeRandomEnabled" type="checkbox" checked></label><label class="field">時間の幅（ms）<input id="timeJitter" type="number" min="0" max="5000" step="10" value="${DEFAULT_TIME_JITTER_MS}"></label><label class="field inline"><span>押す位置を少しずらす</span><input id="positionRandomEnabled" type="checkbox" checked></label><label class="field">位置の幅（px）<input id="positionJitter" type="number" min="0" max="${MAX_POSITION_JITTER_PX}" step="0.5" value="${DEFAULT_POSITION_JITTER_PX}"></label></div></div>
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">タッチ記録</div><div class="cardMeta">指の位置・間隔・押した長さ</div></div></div><div class="grid"><label class="field">記録した結果<select id="recordMode"><option value="replace">今のクリックを置き換える</option><option value="append">後ろに追加する</option></select></label><div class="field"><div class="buttonRow"><button id="recordFromPanel" class="primaryButton">記録を始める</button></div></div></div></div>
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">メニュー表示</div><div class="cardMeta">ドラッグせずに位置と大きさを変更できます</div></div></div><div class="layoutGrid" role="group" aria-label="メニュー位置"><button data-dock-position="top-left">左上</button><button data-dock-position="top-center">上中央</button><button data-dock-position="top-right">右上</button><button data-dock-position="bottom-left">左下</button><button data-dock-position="bottom-center">下中央</button><button data-dock-position="bottom-right">右下</button></div><div class="sizePresetRow" role="group" aria-label="メニューサイズ"><button data-dock-size="small">小さめ</button><button data-dock-size="standard">標準</button><button data-dock-size="large">大きめ</button><button data-dock-size="reset">位置も初期化</button></div></div>
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">動作履歴</div><div class="cardMeta">どこまで進んだか確認できます</div></div><button id="clearLog" class="toolbarMini">消す</button></div><div id="runStats" class="runStats"><span>まだ実行していません</span><span>0 / 0</span></div><div id="logList" class="logList"><div class="logEmpty">実行すると、結果がここに残ります。</div></div></div>
-          </div>
-
-          <div id="tabSave" class="tabPage" role="tabpanel" aria-labelledby="tabSaveButton" aria-hidden="true">
-            <div class="card"><div class="cardHeader"><div><div class="cardTitle">名前を付けて保存</div><div class="cardMeta">普段の編集内容は常に自動保存されています</div></div></div>
-              <div class="saveHero"><label class="field">保存名<input id="presetName" type="text" maxlength="40" placeholder="例：周回1、ログイン後"></label><button id="savePreset">この内容を保存</button></div>
-              <div id="memoryRow" style="margin-top:8px"><select id="presetSlot"></select><button id="loadPreset">読込</button><button id="deletePreset">消去</button></div><div id="presetInfo" class="saveMeta">保存先を選んでください。</div>
-              <div class="saveTools"><button id="exportSettings">ファイルに保存</button><button id="importFile">ファイルから読込</button><button id="copySettings">設定をコピー</button><button id="importSettings">設定を貼り付け</button><button id="restoreRecovery" class="recoveryButton">直前の状態へ戻す</button></div><input id="settingsFile" type="file" accept="application/json,.json" hidden>
-            </div>
-          </div>
-        </div>
-
-        <button id="resizeLeft" class="resizeHandle left" title="ドラッグしてサイズ変更" aria-label="左下からサイズ変更。矢印キーでも変更"></button><button id="resizeRight" class="resizeHandle right" title="ドラッグしてサイズ変更" aria-label="右下からサイズ変更。矢印キーでも変更"></button>
-        <div id="compactBar"><button id="compactGrip" title="ドラッグ・タップで開く。ダブルタップで位置を戻す" aria-label="メニューを移動または開く。ダブルタップで位置とサイズを戻す"></button><button id="compactRun" aria-label="実行または停止">▶</button></div>
+    <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <div id="markerLayer"></div><div id="recordLayer"></div>
+    <div id="browserBar"><button id="backFrame" aria-label="戻る">←</button><button id="forwardFrame" aria-label="進む">→</button><button id="reloadFrame" aria-label="再読込">↻</button><input id="urlInput" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す">⌃</button></div>
+    <button id="browserHandle" aria-label="URLバーを表示">⌄</button>
+    <div id="dock">
+      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く">⠿</button><button id="compactRun" aria-label="実行">▶</button></div>
+      <div class="fullOnly" id="dockHeader"><button id="dockGrip" aria-label="メニューを移動"></button><div class="title"><strong>Scratch風オートフロー</strong><small id="statusText">準備完了</small></div><button id="toggleCompact" aria-label="小さくする">—</button><button id="closeApp" aria-label="終了">×</button></div>
+      <div class="fullOnly" id="mainTabs"><button class="mainTab active" data-page="workflow">ワークフロー</button><button class="mainTab" data-page="legacy">旧マクロ</button><button class="mainTab" data-page="logs">ログ</button></div>
+      <div class="fullOnly" id="pages">
+        <section id="page-workflow" class="page active">
+          <div id="workflowError" class="errorBox"></div>
+          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
+          <div class="card"><div class="cardTitle"><span>完成テンプレート</span><span class="hint">読込後は自由に編集可能</span></div><div class="grid2"><label class="field span2">テンプレート<select id="templateSelect"></select></label></div><div class="toolbar" style="margin-top:8px"><button id="replaceTemplate" class="primary">現在内容を置換</button><button id="appendTemplate">末尾へ追加</button></div></div>
+          <details class="card" open><summary class="cardTitle" style="cursor:pointer;margin:0">ブロックを追加</summary><div class="hint" id="insertHint" style="margin:8px 0">末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。</div><div id="palette" class="paletteGrid"></div></details>
+          <div class="card"><div class="cardTitle"><span>ブロック</span><span id="workflowStats" class="hint"></span></div><div id="workflowEditor"></div></div>
+          <div id="runBar"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>
+        </section>
+        <section id="page-legacy" class="page">
+          <div class="card"><div class="cardTitle"><span>旧固定マクロ</span><span class="hint">v1〜v12保存データ互換</span></div><div class="toolbar"><button id="legacyAddClick">クリック</button><button id="legacyAddNavigate">URL移動</button><button id="legacyAddWait">条件待ち</button><button id="legacyRecord" class="warn">タッチ記録</button></div></div>
+          <div class="card"><div class="grid3"><label class="field">回数<input id="legacyCount" type="number" min="1" max="999999"></label><label class="field">時間ずれms<input id="legacyJitter" type="number" min="0" max="5000"></label><label class="field">位置ずれpx<input id="legacyPositionJitter" type="number" min="0" max="30" step="0.5"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacyRun" class="success">▶ 実行</button><button id="legacyStop" class="danger" disabled>■ 停止</button></div></div>
+          <div class="card"><div class="cardTitle"><span>保存スロット</span><span class="hint">既存プリセット互換</span></div><div class="grid3"><label class="field">スロット<select id="legacyPresetSlot"></select></label><label class="field span2">名前<input id="legacyPresetName" maxlength="40"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacySavePreset">保存</button><button id="legacyLoadPreset">読込</button><button id="legacyDeletePreset" class="danger">削除</button></div></div>
+          <div id="legacyActionList"></div>
+        </section>
+        <section id="page-logs" class="page"><div class="card"><div class="cardTitle"><span>実行ログ</span><button id="clearLogs">消去</button></div><div id="logList" class="logList"></div></div></section>
       </div>
-    </div>`;
+    </div>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
+  `;
 
-  const $ = id => shadow.getElementById(id);
-  const shell=$('shell'),iframe=$('frame'),markerLayer=$('markerLayer'),recordLayer=$('recordLayer'),pickerLayer=$('pickerLayer'),pickerMessage=$('pickerMessage'),targetHighlight=$('targetHighlight');
-  const browserBar=$('browserBar'),browserHandle=$('browserHandle'),urlInput=$('url');
-  const dock=$('dock'),dockHandle=$('dockHandle'),compactGrip=$('compactGrip'),resizeLeft=$('resizeLeft'),resizeRight=$('resizeRight'),settingsPanel=$('settingsPanel'),status=$('status'),autosaveBadge=$('autosaveBadge'),addMenu=$('addMenu');
-  const controls={back:$('back'),forward:$('forward'),reload:$('reload'),load:$('load'),hideBrowser:$('hideBrowser'),close:$('close'),undo:$('undo'),addMenu:$('addMenuButton'),add:$('addPoint'),addNavigate:$('addNavigate'),addWait:$('addWait'),single:$('single'),record:$('recordButton'),run:$('runToggle'),minimize:$('minimize'),settings:$('settingsToggle'),compactRun:$('compactRun'),finishRecord:$('finishRecord'),cancelRecord:$('cancelRecord'),recordPanel:$('recordFromPanel'),clear:$('clearPoints'),movePrev:$('movePrev'),moveNext:$('moveNext'),duplicate:$('duplicatePoint'),center:$('centerPoint'),savePreset:$('savePreset'),loadPreset:$('loadPreset'),deletePreset:$('deletePreset'),deletePanel:$('deleteFromPanel'),useCurrentUrl:$('useCurrentUrl'),navigateNow:$('navigateNow'),inspectCondition:$('inspectCondition'),testCondition:$('testCondition'),autoCondition:$('autoCondition'),pickConditionTarget:$('pickConditionTarget'),pickPointTarget:$('pickPointTarget'),pickClickTarget:$('pickClickTarget'),testClickTarget:$('testClickTarget'),runFromSelected:$('runFromSelected'),cancelPicker:$('cancelPicker'),clearLog:$('clearLog'),copySettings:$('copySettings'),importSettings:$('importSettings'),exportSettings:$('exportSettings'),importFile:$('importFile'),restoreRecovery:$('restoreRecovery'),scanGranblue:$('scanGranblue'),applyConditionRecommendation:$('applyConditionRecommendation')};
-  const pointStrip=$('pointStrip'),selectedTitle=$('selectedTitle'),selectedTimingLabel=$('selectedTimingLabel'),actionTypePill=$('actionTypePill'),actionEnabled=$('actionEnabled'),pointDelay=$('pointDelay'),pointHold=$('pointHold'),clickEditor=$('clickEditor'),navigateEditor=$('navigateEditor'),waitEditor=$('waitEditor'),actionUrl=$('actionUrl'),waitForLoad=$('waitForLoad'),loadTimeout=$('loadTimeout'),navigationFailure=$('navigationFailure'),clickTargetMode=$('clickTargetMode'),pointTargetEditor=$('pointTargetEditor'),selectorTargetEditor=$('selectorTargetEditor'),clickSelector=$('clickSelector'),waitForTarget=$('waitForTarget'),targetTimeout=$('targetTimeout'),targetFailure=$('targetFailure'),scrollTarget=$('scrollTarget'),clickTargetSummary=$('clickTargetSummary');
-  const conditionEnabled=$('conditionEnabled'),conditionTarget=$('conditionTarget'),conditionSelector=$('conditionSelector'),conditionType=$('conditionType'),conditionClass=$('conditionClass'),conditionValueName=$('conditionValueName'),conditionExpected=$('conditionExpected'),conditionText=$('conditionText'),conditionMode=$('conditionMode'),conditionTimeout=$('conditionTimeout'),conditionTimeoutAction=$('conditionTimeoutAction'),conditionStable=$('conditionStable'),conditionResult=$('conditionResult'),selectorField=$('selectorField'),classField=$('classField'),valueFields=$('valueFields'),expectedField=$('expectedField'),textField=$('textField'),conditionTextLabel=$('conditionTextLabel'),conditionBuilder=$('conditionBuilder'),conditionTargetSummary=$('conditionTargetSummary'),conditionSentence=$('conditionSentence'),conditionRecommendation=$('conditionRecommendation'),conditionRecommendationTitle=$('conditionRecommendationTitle'),conditionRecommendationReason=$('conditionRecommendationReason'),gbfFullAutoCard=$('gbfFullAutoCard'),gbfFullAutoState=$('gbfFullAutoState'),gbfFullAutoDetail=$('gbfFullAutoDetail'),gbfAttackCard=$('gbfAttackCard'),gbfAttackState=$('gbfAttackState'),gbfAttackDetail=$('gbfAttackDetail');
-  const method=$('method'),count=$('count'),loop=$('loop'),timeRandomEnabled=$('timeRandomEnabled'),timeJitter=$('timeJitter'),positionRandomEnabled=$('positionRandomEnabled'),positionJitter=$('positionJitter'),recordMode=$('recordMode'),presetSlot=$('presetSlot'),presetName=$('presetName'),presetInfo=$('presetInfo'),settingsFile=$('settingsFile'),recordHud=$('recordHud'),recordCount=$('recordCount'),runStats=$('runStats'),logList=$('logList');
-  const tabButtons=[...shadow.querySelectorAll('.tabButton')],tabPages=[...shadow.querySelectorAll('.tabPage')],clickModeButtons=[...clickTargetMode.querySelectorAll('button[data-mode]')],conditionPresetButtons=[...shadow.querySelectorAll('[data-condition-preset]')];
-  const dockPositionButtons=[...shadow.querySelectorAll('[data-dock-position]')],dockSizeButtons=[...shadow.querySelectorAll('[data-dock-size]')];
+  const byId = id => shadow.getElementById(id);
+  const iframe = byId('frame');
+  const urlInput = byId('urlInput');
+  const dock = byId('dock');
+  const workflowEditor = byId('workflowEditor');
+  const markerLayer = byId('markerLayer');
+  const recordLayer = byId('recordLayer');
+  const importFile = byId('importFile');
 
-  const state={points:[],selectedId:null,nextId:1,running:false,runToken:0,timer:null,waitResolver:null,settingsOpen:true,browserHidden:false,compact:false,dockX:null,dockY:null,dockWidth:DEFAULT_DOCK_WIDTH,dockHeight:DEFAULT_DOCK_HEIGHT,dockAnchorX:'left',dockAnchorY:'top',dockGapX:null,dockGapY:null,lastSavedAt:0,destroyed:false,recording:false,recordStartedAt:0,recordings:[],activeRecordPointers:new Map(),navigationCancel:null,conditionCancel:null,targetCancel:null,addMenuOpen:false,activeTab:'action',picking:null,highlightTimer:null,logs:[],runCycle:0,currentActionIndex:-1,runStartIndex:0,keyboardOpen:false,keyboardTarget:null,keyboardFocusTimer:null,conditionRecommendation:null};
-  const cleanup=new Set(); const onCleanup=fn=>(cleanup.add(fn),fn);
-  const clamp=(v,min,max)=>Math.min(Math.max(v,min),max);
-  const finite=(v,f=0)=>Number.isFinite(Number(v))?Number(v):f;
-  const int=(v,f=0)=>Math.round(finite(v,f));
-  const normalizeDelay=(v,f=DEFAULT_POINT_DELAY_MS)=>clamp(int(v,f),0,MAX_DELAY_MS);
-  const normalizeHold=(v,f=DEFAULT_HOLD_MS)=>clamp(int(v,f),0,MAX_HOLD_MS);
-  const normalizeNavigationTimeout=(v,f=DEFAULT_NAVIGATION_TIMEOUT_MS)=>clamp(int(v,f),1000,MAX_NAVIGATION_TIMEOUT_MS);
-  const normalizeTargetTimeout=(v,f=DEFAULT_TARGET_TIMEOUT_MS)=>clamp(int(v,f),0,MAX_TARGET_TIMEOUT_MS);
-  const normalizeUrl=v=>{const raw=String(v||'').trim();if(!raw)return'';if(/^(https?:|about:blank)/i.test(raw))return raw;try{if(/^([/?#]|\.\.?\/)/.test(raw)){const base=currentIframeUrl?.()||urlInput?.value||location.href;return new URL(raw,base).href}}catch{}return `https://${raw}`};
-  const normalizeConditionTimeout=(v,f=DEFAULT_CONDITION_TIMEOUT_MS)=>clamp(int(v,f),0,MAX_CONDITION_TIMEOUT_MS);
-  const normalizeConditionStable=(v,f=DEFAULT_CONDITION_STABLE_MS)=>clamp(int(v,f),0,MAX_CONDITION_STABLE_MS);
-  function defaultCondition(actionType='click') { return {enabled:actionType==='wait',mode:'wait',target:actionType==='click'?'action':'selector',selector:'',type:'exists',className:'',valueName:'aria-pressed',expected:'false',text:'',timeoutMs:DEFAULT_CONDITION_TIMEOUT_MS,timeoutAction:'stop',stableMs:DEFAULT_CONDITION_STABLE_MS}; }
-  function normalizeCondition(value,actionType='click') { const c=value&&typeof value==='object'?value:{};let target=c.target==='point'?'action':c.target;const allowedTargets=actionType==='click'?['action','selector','page']:['selector','page'];if(!allowedTargets.includes(target))target=actionType==='click'?'action':'selector';const types=['exists','missing','visible','hidden','state_on','state_off','enabled','disabled','gbf_full_auto_on','gbf_full_auto_off','gbf_attack_ready','gbf_attack_not_ready','class_has','class_missing','value_true','value_false','value_equals','value_not_equals','text_contains','text_not_contains','page_ready','url_contains','url_not_contains'];const migratedType=c.type==='gbf_attack_on'?'gbf_attack_ready':c.type==='gbf_attack_off'?'gbf_attack_not_ready':c.type;return {enabled:actionType==='wait'?c.enabled!==false:Boolean(c.enabled),mode:c.mode==='check'?'check':'wait',target,selector:String(c.selector||''),type:types.includes(migratedType)?migratedType:'exists',className:String(c.className||''),valueName:String(c.valueName||'aria-pressed'),expected:String(c.expected??'false'),text:String(c.text||''),timeoutMs:normalizeConditionTimeout(c.timeoutMs),timeoutAction:['skip','execute'].includes(c.timeoutAction)?c.timeoutAction:'stop',stableMs:normalizeConditionStable(c.stableMs)}; }
-  const cloneCondition=(condition,type)=>normalizeCondition(JSON.parse(JSON.stringify(condition||{})),type);
-  const selectedPoint=()=>state.points.find(p=>p.id===state.selectedId)||null;
-  const isNavigate=p=>p?.type==='navigate';
-  const isWait=p=>p?.type==='wait';
-  const actionName=(p,i=pointIndex(p))=>isNavigate(p)?`URL移動${i+1}`:isWait(p)?`条件待ち${i+1}`:`クリック${i+1}`;
-  const displayUrl=v=>{try{const u=new URL(normalizeUrl(v));if(u.protocol==='about:')return u.href;return `${u.hostname}${u.pathname==='/'?'':u.pathname}`.slice(0,28)}catch{return String(v||'URL未設定').slice(0,28)}};
-  const pointIndex=p=>state.points.indexOf(p);
-  const formatMs=ms=>ms<1000?`${ms}ms`:`${Number.isInteger(ms/1000)?ms/1000:(ms/1000).toFixed(2)}s`;
-  const signed=ms=>`${ms>0?'+':''}${ms||0}ms`;
-  const prefersReducedMotion=()=>Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
-  const motionBehavior=()=>prefersReducedMotion()?'auto':'smooth';
-  const updateStatus=s=>{const text=String(s??'');if(status.textContent!==text)status.textContent=text};
-  function renderLogs(){if(!logList)return;logList.textContent='';if(!state.logs.length){const empty=document.createElement('div');empty.className='logEmpty';empty.textContent='実行すると、結果がここに残ります。';logList.append(empty);return}for(const item of state.logs){const row=document.createElement('div');row.className=`logEntry ${item.level||''}`;const t=document.createElement('span');t.className='logTime';t.textContent=item.time;const m=document.createElement('span');m.textContent=item.message;row.append(t,m);logList.append(row)}logList.scrollTop=logList.scrollHeight}
-  function appendLog(message,level=''){const now=new Date(),time=now.toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'});state.logs.push({time,message:String(message),level});if(state.logs.length>60)state.logs.splice(0,state.logs.length-60);renderLogs()}
-  function updateRunStats(text=null){const total=state.points.length,done=state.currentActionIndex>=0?state.currentActionIndex+1:0;runStats.firstElementChild.textContent=text||(state.running?`${state.runCycle+1}周目を実行中`:'停止中');runStats.lastElementChild.textContent=`${done} / ${total}`;renderPointStrip()}
+  const ui = {
+    status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'),
+    browserBar: byId('browserBar'), browserHandle: byId('browserHandle'), workflowSelect: byId('workflowSelect'), workflowName: byId('workflowName'),
+    templateSelect: byId('templateSelect'), palette: byId('palette'), insertHint: byId('insertHint'), workflowStats: byId('workflowStats'),
+    runWorkflow: byId('runWorkflow'), stopWorkflow: byId('stopWorkflow'), legacyList: byId('legacyActionList'), legacyCount: byId('legacyCount'),
+    legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
+    legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList')
+  };
 
-  function clampPoint(p){p.cx=clamp(finite(p.cx),-EDGE_OVERSHOOT_PX,window.innerWidth+EDGE_OVERSHOOT_PX);p.cy=clamp(finite(p.cy),-EDGE_OVERSHOOT_PX,window.innerHeight+EDGE_OVERSHOOT_PX)}
-  function clickCoordinates(p){return{x:clamp(p.cx,.5,Math.max(.5,window.innerWidth-.5)),y:clamp(p.cy,.5,Math.max(.5,window.innerHeight-.5))}}
-  function setMarkerPosition(p){if(p.element)p.element.style.transform=`translate3d(${p.cx-MARKER_HIT_SIZE/2}px,${p.cy-MARKER_HIT_SIZE/2}px,0)`}
-  function viewportBox(){const viewport=window.visualViewport;return{left:finite(viewport?.offsetLeft,0),top:finite(viewport?.offsetTop,0),width:Math.max(1,finite(viewport?.width,window.innerWidth)),height:Math.max(1,finite(viewport?.height,window.innerHeight))}}
-  function dockLimits(){const margin=5,box=viewportBox(),maxWidth=Math.max(1,Math.min(MAX_DOCK_WIDTH,box.width-margin*2)),maxHeight=Math.max(1,Math.min(MAX_DOCK_HEIGHT,box.height-margin*2));return{margin,box,minWidth:Math.min(MIN_DOCK_WIDTH,maxWidth),minHeight:Math.min(MIN_DOCK_HEIGHT,maxHeight),maxWidth,maxHeight}}
-  function applyDockSize(){const limits=dockLimits(),preferredWidth=clamp(finite(state.dockWidth,DEFAULT_DOCK_WIDTH),MIN_DOCK_WIDTH,MAX_DOCK_WIDTH),preferredHeight=clamp(finite(state.dockHeight,DEFAULT_DOCK_HEIGHT),MIN_DOCK_HEIGHT,MAX_DOCK_HEIGHT),width=clamp(preferredWidth,limits.minWidth,limits.maxWidth),height=clamp(preferredHeight,limits.minHeight,limits.maxHeight);state.dockWidth=preferredWidth;state.dockHeight=preferredHeight;dock.style.setProperty('--dock-width',`${width}px`);dock.style.setProperty('--dock-height',`${height}px`);return{width,height,limits}}
-  function normalizeDockPosition(){const size=applyDockSize(),limits=size.limits,box=limits.box,width=state.compact?Math.min(COMPACT_DOCK_WIDTH,box.width-limits.margin*2):size.width,height=state.compact?Math.min(COMPACT_DOCK_HEIGHT,box.height-limits.margin*2):size.height,minX=box.left+limits.margin,minY=box.top+limits.margin,maxX=Math.max(minX,box.left+box.width-width-limits.margin),maxY=Math.max(minY,box.top+box.height-height-limits.margin);state.dockX=clamp(finite(state.dockX,box.left+(box.width-width)/2),minX,maxX);state.dockY=clamp(finite(state.dockY,box.top+box.height-height-12),minY,maxY);if(!state.browserHidden&&!browserBar.classList.contains('hidden')){const bar=browserBar.getBoundingClientRect(),overlapX=state.dockX<bar.right+6&&state.dockX+width>bar.left-6,below=bar.bottom+6;if(overlapX&&state.dockY<below&&below<=maxY)state.dockY=below}dock.style.left=`${state.dockX}px`;dock.style.top=`${state.dockY}px`}
-  function updateDockAnchors(){const r=dock.getBoundingClientRect(),box=viewportBox(),right=box.left+box.width,bottom=box.top+box.height;state.dockAnchorX=r.left+r.width/2>box.left+box.width/2?'right':'left';state.dockAnchorY=r.top+r.height/2>box.top+box.height/2?'bottom':'top';state.dockGapX=Math.max(5,state.dockAnchorX==='right'?right-r.right:r.left-box.left);state.dockGapY=Math.max(5,state.dockAnchorY==='bottom'?bottom-r.bottom:r.top-box.top)}
-  function positionDock({defaultIfMissing=false,useAnchor=false}={}){const size=applyDockSize(),box=size.limits.box,width=state.compact?Math.min(COMPACT_DOCK_WIDTH,box.width-size.limits.margin*2):size.width,height=state.compact?Math.min(COMPACT_DOCK_HEIGHT,box.height-size.limits.margin*2):size.height,right=box.left+box.width,bottom=box.top+box.height;if(defaultIfMissing&&(state.dockX==null||state.dockY==null)){state.dockX=box.left+(box.width-width)/2;state.dockY=bottom-height-12}else if(useAnchor){if(Number.isFinite(state.dockGapX))state.dockX=state.dockAnchorX==='right'?right-width-state.dockGapX:box.left+state.dockGapX;if(Number.isFinite(state.dockGapY))state.dockY=state.dockAnchorY==='bottom'?bottom-height-state.dockGapY:box.top+state.dockGapY}normalizeDockPosition();if(!useAnchor||!Number.isFinite(state.dockGapX)||!Number.isFinite(state.dockGapY))updateDockAnchors()}
+  const state = {
+    destroyed: false,
+    page: 'workflow',
+    logs: [],
+    toastTimer: null,
+    autosaveTimer: null,
+    workflows: null,
+    selectedWorkflowId: null,
+    insertion: null,
+    dragBlockId: null,
+    running: null,
+    blockProgress: new Map(),
+    collapsed: new Set(),
+    legacy: null,
+    legacyRunning: null,
+    selectedLegacyId: null,
+    nextLegacyId: 1,
+    recording: false,
+    recordedPoints: [],
+    recordStartedAt: 0,
+    activeRecordPointers: new Map(),
+    dockX: null,
+    dockY: null
+  };
 
-  function snapshot(){return{version:12,markerHitSize:MARKER_HIT_SIZE,url:urlInput.value,actions:state.points.map(p=>{const common={id:p.id,type:p.type,enabled:p.enabled!==false,delayMs:p.delayMs,condition:cloneCondition(p.condition,p.type)};if(isNavigate(p))return{...common,url:p.url,waitForLoad:p.waitForLoad,loadTimeoutMs:p.loadTimeoutMs,failureMode:p.failureMode};if(isWait(p))return common;return{...common,cx:p.cx,cy:p.cy,holdMs:p.holdMs,targetMode:p.targetMode,selector:p.selector,waitForTarget:p.waitForTarget,targetTimeoutMs:p.targetTimeoutMs,targetFailureMode:p.targetFailureMode,scrollTarget:p.scrollTarget,targetLabel:p.targetLabel}}),selectedId:state.selectedId,nextId:state.nextId,method:method.value,count:count.value,loop:loop.checked,timeRandomEnabled:timeRandomEnabled.checked,timeJitterMs:timeJitter.value,positionRandomEnabled:positionRandomEnabled.checked,positionJitterPx:positionJitter.value,recordMode:recordMode.value,settingsOpen:state.settingsOpen,browserHidden:state.browserHidden,compact:state.compact,dockX:state.dockX,dockY:state.dockY,dockWidth:state.dockWidth,dockHeight:state.dockHeight,dockAnchorX:state.dockAnchorX,dockAnchorY:state.dockAnchorY,dockGapX:state.dockGapX,dockGapY:state.dockGapY,activeTab:state.activeTab}}
-  function markSaveStatus(kind='saved'){if(!autosaveBadge)return;autosaveBadge.classList.toggle('saving',kind==='saving');autosaveBadge.classList.toggle('error',kind==='error');autosaveBadge.textContent=kind==='saving'?'保存中':kind==='error'?'保存失敗':'保存済み'}
-  function saveState(){if(state.destroyed)return false;markSaveStatus('saving');try{localStorage.setItem(STORAGE_KEY,JSON.stringify(snapshot()));state.lastSavedAt=Date.now();markSaveStatus('saved');return true}catch(e){markSaveStatus('error');console.warn('[Iframe AutoClicker] save failed',e);updateStatus('自動保存できませんでした');return false}}
-  function readJson(k){try{return JSON.parse(localStorage.getItem(k)||'null')}catch{return null}}
-  const hasRecovery=()=>Boolean(readJson(RECOVERY_KEY)?.snapshot);
-  function createRecoveryPoint(label='変更前'){try{localStorage.setItem(RECOVERY_KEY,JSON.stringify({label,createdAt:Date.now(),snapshot:snapshot()}));queueMicrotask(()=>updateButtons());return true}catch{return false}}
-  function restoreRecovery(){const data=readJson(RECOVERY_KEY);if(!data?.snapshot)return updateStatus('戻せる直前の状態がありません');const current=snapshot();stopSequence('復元中');clearMarkers();if(!applySnapshot(data.snapshot))return updateStatus('直前の状態を読めませんでした');rebuildMarkers();applyVisibility();updateUi();positionDock({defaultIfMissing:true});saveState();try{localStorage.setItem(RECOVERY_KEY,JSON.stringify({label:'復元前',createdAt:Date.now(),snapshot:current}))}catch{}const u=normalizeUrl(urlInput.value);if(u)iframe.src=u;updateStatus(`${data.label||'直前の状態'}へ戻しました`);updateButtons()}
-  function findSaved(){const cur=readJson(STORAGE_KEY);if(cur)return{data:cur,key:STORAGE_KEY};for(const key of LEGACY_STORAGE_KEYS){const data=readJson(key);if(data)return{data,key}}return null}
-  function applySnapshot(s,{legacyKey=''}={}){
-    if(!s||typeof s!=='object')return false;
-    if(typeof s.url==='string')urlInput.value=s.url;
-    const version=int(s.version,legacyKey.includes('v5')?5:legacyKey.includes('v4')?4:legacyKey.includes('v3')?3:1);
-    const sourceSize=finite(s.markerHitSize,version<=1?64:version<=3?46:44);
-    const raw=Array.isArray(s.actions)?s.actions:Array.isArray(s.points)?s.points:[];
-    state.points=raw.map((item,i)=>{
-      const id=int(item.id,i+1),delayMs=normalizeDelay(item.delayMs,i===0?0:normalizeDelay(s.interval,DEFAULT_POINT_DELAY_MS));
-      if(item.type==='navigate')return{id,type:'navigate',enabled:item.enabled!==false,url:String(item.url||''),delayMs,waitForLoad:item.waitForLoad!==false,loadTimeoutMs:normalizeNavigationTimeout(item.loadTimeoutMs),failureMode:item.failureMode==='continue'?'continue':'stop',condition:normalizeCondition(item.condition,'navigate'),element:null};
-      if(item.type==='wait')return{id,type:'wait',enabled:item.enabled!==false,delayMs,condition:normalizeCondition(item.condition,'wait'),element:null};
-      let cx,cy;
-      if(item.cx!=null||item.cy!=null){cx=finite(item.cx);cy=finite(item.cy)}
-      else if(version>=4){cx=finite(item.x);cy=finite(item.y)}
-      else{cx=finite(item.x)+sourceSize/2;cy=finite(item.y)+sourceSize/2}
-      const action={id,type:'click',enabled:item.enabled!==false,cx,cy,delayMs,holdMs:normalizeHold(item.holdMs),targetMode:item.targetMode==='selector'?'selector':'point',selector:String(item.selector||''),waitForTarget:item.waitForTarget!==false,targetTimeoutMs:normalizeTargetTimeout(item.targetTimeoutMs),targetFailureMode:['skip','point'].includes(item.targetFailureMode)?item.targetFailureMode:'stop',scrollTarget:item.scrollTarget!==false,targetLabel:String(item.targetLabel||''),condition:normalizeCondition(item.condition,'click'),element:null};
-      clampPoint(action);
-      return action;
+  const cleanup = new Set();
+  const addCleanup = fn => (cleanup.add(fn), fn);
+  const deepClone = value => JSON.parse(JSON.stringify(value));
+  const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  const int = (value, fallback = 0) => Math.round(finite(value, fallback));
+  const nowId = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  const sleepMicrotask = () => new Promise(resolve => queueMicrotask(resolve));
+
+  function normalizePopupText(value) {
+    return String(value ?? '').replace(/\s+/g, '').trim();
+  }
+
+  const NORMALIZED_ERRORS = Object.fromEntries(
+    Object.entries(ERROR_MESSAGES).map(([key, value]) => [key, normalizePopupText(value)])
+  );
+
+  function setStatus(message) {
+    ui.status.textContent = String(message ?? '');
+  }
+
+  function toast(message) {
+    clearTimeout(state.toastTimer);
+    ui.toast.textContent = String(message ?? '');
+    ui.toast.classList.add('show');
+    state.toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 2200);
+  }
+
+  function appendLog(message, level = '', blockName = '') {
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    state.logs.push({ time, level, blockName, message: String(message) });
+    if (state.logs.length > MAX_LOGS) state.logs.splice(0, state.logs.length - MAX_LOGS);
+    renderLogs();
+  }
+
+  function renderLogs() {
+    ui.logList.textContent = '';
+    if (!state.logs.length) {
+      const empty = document.createElement('div');
+      empty.className = 'hint';
+      empty.textContent = '実行するとここに記録されます。';
+      ui.logList.append(empty);
+      return;
+    }
+    for (const log of state.logs) {
+      const row = document.createElement('div');
+      row.className = `logEntry ${log.level || ''}`;
+      const time = document.createElement('span');
+      time.className = 'logTime';
+      time.textContent = log.time;
+      const name = document.createElement('span');
+      name.textContent = log.blockName || '全体';
+      const body = document.createElement('span');
+      body.textContent = log.message;
+      row.append(time, name, body);
+      ui.logList.append(row);
+    }
+    ui.logList.scrollTop = ui.logList.scrollHeight;
+  }
+
+  function showWorkflowError(error, block = null) {
+    const workflow = currentWorkflow();
+    const screen = safeDetectScreenState();
+    const message = error?.message || String(error);
+    ui.error.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
+    ui.error.classList.add('show');
+    appendLog(message, 'error', block ? blockLabel(block.type) : '実行');
+  }
+
+  function clearWorkflowError() {
+    ui.error.classList.remove('show');
+    ui.error.textContent = '';
+  }
+
+  const CONDITION_OPTIONS = Object.freeze([
+    ['gbfFullAutoOn', 'フルオートがON'],
+    ['gbfFullAutoOff', 'フルオートがOFF'],
+    ['gbfAttacking', 'フルオート攻撃中'],
+    ['gbfAttackWaiting', '攻撃待機中'],
+    ['gbfBattle', 'バトル画面である'],
+    ['gbfAssist', '救援一覧である'],
+    ['gbfUnclaimedEmpty', '未確認バトルが0件'],
+    ['selectorVisible', '指定セレクタが表示'],
+    ['selectorHidden', '指定セレクタが非表示'],
+    ['selectorExists', '指定セレクタが存在'],
+    ['selectorMissing', '指定セレクタが消失'],
+    ['pageReady', 'ページ読込完了'],
+    ['urlContains', 'URLに文字を含む']
+  ]);
+
+  const BLOCK_DEFINITIONS = Object.freeze({
+    gbfAssistSelect: { category: 'gbf', label: '救援を評価して参加する', description: 'HPと人数を評価し、例外・サポーター・編成確認まで処理' },
+    gbfSupporterAuto: { category: 'gbf', label: 'サポーターを自動選択する', description: 'ゲーム側の自動選択ボタンをtap' },
+    gbfSupporterConditional: { category: 'gbf', label: 'サポーターを条件選択する', description: '第1〜第3候補と最高レベルフォールバック' },
+    gbfDeckConfirm: { category: 'gbf', label: '編成確認OKを押す', description: '前面エラーを優先して編成開始を確認' },
+    gbfUnclaimedAll: { category: 'gbf', label: '未確認バトルをすべて確認する', description: '1ページ目の最上段を0件まで処理' },
+    gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、OFFなら1回だけtap' },
+    gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃ボタンは押さず状態変化だけを監視' },
+    gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
+    repeat: { category: 'control', label: '指定回数繰り返す', description: '子ブロックを指定回数実行', container: true },
+    repeatUntil: { category: 'control', label: '条件成立まで繰り返す', description: '前判定型。成立済みなら0回', container: true },
+    if: { category: 'control', label: '条件分岐', description: '成立時と不成立時の子ブロックを分岐', container: true, elseBranch: true },
+    stop: { category: 'control', label: '処理を停止する', description: '正常な意図的停止' },
+    fixedWait: { category: 'wait', label: '固定時間待機', description: '停止可能な固定待機' },
+    randomWait: { category: 'wait', label: '指定区間をランダム待機', description: '最小〜最大の一様乱数' },
+    watch: { category: 'wait', label: '要素または状態を監視する', description: 'MutationObserver中心で条件成立を待機' },
+    iframeReload: { category: 'frame', label: 'iframeを再読み込みする', description: '操作前からloadとDOM変化を監視' },
+    iframeBack: { category: 'frame', label: 'iframeの履歴を1つ戻る', description: 'リロードせず履歴を戻る' },
+    iframeRoute: { category: 'frame', label: '指定したゲーム内ルートへ移動する', description: 'hash/ゲーム内ルートへ移動して完了待機' },
+    iframeReady: { category: 'frame', label: 'ページ読込完了まで待つ', description: 'readyState・loading・主要DOM・安定化を確認' }
+  });
+
+  const CATEGORY_LABELS = Object.freeze({ gbf: 'グラブル', control: '制御', wait: '待機', frame: 'iframe' });
+
+  function blockLabel(type) {
+    return BLOCK_DEFINITIONS[type]?.label || `不明ブロック (${type})`;
+  }
+
+  function defaultSupporterCandidates() {
+    return [
+      { name: 'ルシフェル', minimumLevel: 220 },
+      { name: '', minimumLevel: 0 },
+      { name: '', minimumLevel: 0 }
+    ];
+  }
+
+  function defaultBlockConfig(type) {
+    switch (type) {
+      case 'gbfAssistSelect':
+        return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, supporterCandidates: defaultSupporterCandidates() };
+      case 'gbfSupporterAuto':
+        return { timeoutSec: 15 };
+      case 'gbfSupporterConditional':
+        return { timeoutSec: 15, supporterCandidates: defaultSupporterCandidates() };
+      case 'gbfDeckConfirm':
+        return { timeoutSec: 30, refreshBaseDelaySec: 0.6, refreshJitterSec: 0 };
+      case 'gbfUnclaimedAll':
+        return { timeoutSec: 30, maxItems: 10000 };
+      case 'gbfEnsureFullAuto':
+      case 'gbfWaitAutoAttack':
+        return { timeoutSec: 15 };
+      case 'gbfRefreshAssist':
+        return { baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15 };
+      case 'repeat':
+        return { count: 5 };
+      case 'repeatUntil':
+        return { condition: { type: 'gbfBattle', selector: '', value: '' }, maxIterations: 10000, maxDurationSec: 600 };
+      case 'if':
+        return { condition: { type: 'gbfBattle', selector: '', value: '' } };
+      case 'stop':
+        return { reason: '停止ブロックに到達しました' };
+      case 'fixedWait':
+        return { seconds: 1 };
+      case 'randomWait':
+        return { minSeconds: 0.5, maxSeconds: 0.8 };
+      case 'watch':
+        return { condition: { type: 'selectorVisible', selector: '', value: '' }, timeoutSec: 30, stableMs: 100 };
+      case 'iframeReload':
+      case 'iframeBack':
+        return { timeoutSec: 30, expectedScreen: 'auto' };
+      case 'iframeRoute':
+        return { route: '#quest/assist/multi/0', timeoutSec: 30, expectedScreen: 'assist' };
+      case 'iframeReady':
+        return { timeoutSec: 30, expectedScreen: 'auto' };
+      default:
+        return {};
+    }
+  }
+
+  function createBlock(type, overrides = {}) {
+    const definition = BLOCK_DEFINITIONS[type];
+    if (!definition) throw new Error(`未対応のブロックです: ${type}`);
+    const block = {
+      type,
+      id: nowId('block'),
+      config: { ...defaultBlockConfig(type), ...(overrides.config || {}) }
+    };
+    if (definition.container) block.children = Array.isArray(overrides.children) ? overrides.children.map(normalizeBlock) : [];
+    if (definition.elseBranch) block.elseChildren = Array.isArray(overrides.elseChildren) ? overrides.elseChildren.map(normalizeBlock) : [];
+    return block;
+  }
+
+  function normalizeCandidates(value) {
+    const raw = Array.isArray(value) ? value : [];
+    return [0, 1, 2].map(index => ({
+      name: String(raw[index]?.name || '').trim(),
+      minimumLevel: clamp(int(raw[index]?.minimumLevel, 0), 0, 9999)
+    }));
+  }
+
+  function normalizeConditionConfig(value) {
+    const condition = value && typeof value === 'object' ? value : {};
+    const allowed = CONDITION_OPTIONS.map(option => option[0]);
+    return {
+      type: allowed.includes(condition.type) ? condition.type : 'gbfBattle',
+      selector: String(condition.selector || '').trim(),
+      value: String(condition.value || '')
+    };
+  }
+
+  function normalizeBlock(raw) {
+    if (!raw || typeof raw !== 'object') return createBlock('fixedWait');
+    const type = BLOCK_DEFINITIONS[raw.type] ? raw.type : 'stop';
+    const block = createBlock(type);
+    block.id = String(raw.id || nowId('block'));
+    const config = raw.config && typeof raw.config === 'object' ? raw.config : {};
+    switch (type) {
+      case 'gbfAssistSelect':
+        block.config = {
+          minimumHp: clamp(finite(config.minimumHp, 50), 0, 100),
+          baseDelaySec: clamp(finite(config.baseDelaySec, 0.6), 0, 600),
+          jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
+          timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
+          maxAttempts: clamp(int(config.maxAttempts, 10000), 1, 100000),
+          supporterCandidates: normalizeCandidates(config.supporterCandidates)
+        };
+        break;
+      case 'gbfSupporterConditional':
+        block.config = { timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600), supporterCandidates: normalizeCandidates(config.supporterCandidates) };
+        break;
+      case 'gbfSupporterAuto':
+      case 'gbfEnsureFullAuto':
+      case 'gbfWaitAutoAttack':
+        block.config = { timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600) };
+        break;
+      case 'gbfDeckConfirm':
+        block.config = {
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600),
+          refreshBaseDelaySec: clamp(finite(config.refreshBaseDelaySec, 0.6), 0, 600),
+          refreshJitterSec: clamp(finite(config.refreshJitterSec, 0), 0, 600)
+        };
+        break;
+      case 'gbfUnclaimedAll':
+        block.config = { timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600), maxItems: clamp(int(config.maxItems, 10000), 1, 100000) };
+        break;
+      case 'gbfRefreshAssist':
+        block.config = {
+          baseDelaySec: clamp(finite(config.baseDelaySec, 0.6), 0, 600),
+          jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
+          timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600)
+        };
+        break;
+      case 'repeat':
+        block.config = { count: clamp(int(config.count, 5), 0, MAX_REPEAT_COUNT) };
+        break;
+      case 'repeatUntil':
+        block.config = {
+          condition: normalizeConditionConfig(config.condition),
+          maxIterations: clamp(int(config.maxIterations, MAX_CONDITION_ITERATIONS), 1, 100000),
+          maxDurationSec: clamp(finite(config.maxDurationSec, 600), 1, 86400)
+        };
+        break;
+      case 'if':
+        block.config = { condition: normalizeConditionConfig(config.condition) };
+        break;
+      case 'stop':
+        block.config = { reason: String(config.reason || '停止ブロックに到達しました').slice(0, 300) };
+        break;
+      case 'fixedWait':
+        block.config = { seconds: clamp(finite(config.seconds, 1), 0, 86400) };
+        break;
+      case 'randomWait':
+        block.config = {
+          minSeconds: clamp(finite(config.minSeconds, 0.5), 0, 86400),
+          maxSeconds: clamp(finite(config.maxSeconds, 0.8), 0, 86400)
+        };
+        break;
+      case 'watch':
+        block.config = {
+          condition: normalizeConditionConfig(config.condition),
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 0, 86400),
+          stableMs: clamp(int(config.stableMs, 100), 0, 5000)
+        };
+        break;
+      case 'iframeReload':
+      case 'iframeBack':
+      case 'iframeReady':
+        block.config = {
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600),
+          expectedScreen: normalizeExpectedScreen(config.expectedScreen)
+        };
+        break;
+      case 'iframeRoute':
+        block.config = {
+          route: String(config.route || '#quest/assist/multi/0').trim(),
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600),
+          expectedScreen: normalizeExpectedScreen(config.expectedScreen)
+        };
+        break;
+    }
+    if (BLOCK_DEFINITIONS[type].container) block.children = (Array.isArray(raw.children) ? raw.children : []).map(normalizeBlock);
+    if (BLOCK_DEFINITIONS[type].elseBranch) block.elseChildren = (Array.isArray(raw.elseChildren) ? raw.elseChildren : []).map(normalizeBlock);
+    return block;
+  }
+
+  function normalizeExpectedScreen(value) {
+    const allowed = ['auto', 'assist', 'supporter', 'unclaimed', 'battle', 'result'];
+    return allowed.includes(value) ? value : 'auto';
+  }
+
+  function normalizeWorkflow(raw, index = 0) {
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+      version: 1,
+      id: String(source.id || nowId('workflow')),
+      name: String(source.name || `ワークフロー ${index + 1}`).trim().slice(0, 60) || `ワークフロー ${index + 1}`,
+      blocks: (Array.isArray(source.blocks) ? source.blocks : []).map(normalizeBlock),
+      createdAt: finite(source.createdAt, Date.now()),
+      updatedAt: finite(source.updatedAt, Date.now())
+    };
+  }
+
+  function defaultWorkflow() {
+    return normalizeWorkflow({
+      name: '救援フルオート',
+      blocks: [
+        createBlock('gbfAssistSelect'),
+        createBlock('gbfEnsureFullAuto'),
+        createBlock('gbfWaitAutoAttack')
+      ]
     });
-    state.nextId=Math.max(int(s.nextId,1),...state.points.map(p=>p.id+1),1);
-    state.selectedId=state.points.some(p=>p.id===int(s.selectedId))?int(s.selectedId):state.points[0]?.id??null;
-    method.value=['tap','click','both'].includes(s.method)?s.method:'tap';count.value=clamp(int(s.count,1),1,999999);loop.checked=Boolean(s.loop);timeRandomEnabled.checked=s.timeRandomEnabled??s.randomEnabled??true;timeJitter.value=clamp(int(s.timeJitterMs??s.jitterMs,DEFAULT_TIME_JITTER_MS),0,5000);positionRandomEnabled.checked=s.positionRandomEnabled!==false;positionJitter.value=clamp(finite(s.positionJitterPx,DEFAULT_POSITION_JITTER_PX),0,MAX_POSITION_JITTER_PX);recordMode.value=['replace','append'].includes(s.recordMode)?s.recordMode:'replace';state.settingsOpen=s.settingsOpen!==false;state.browserHidden=Boolean(s.browserHidden);state.compact=Boolean(s.compact);state.dockX=Number.isFinite(Number(s.dockX))?Number(s.dockX):null;state.dockY=Number.isFinite(Number(s.dockY))?Number(s.dockY):null;state.dockWidth=clamp(finite(s.dockWidth,DEFAULT_DOCK_WIDTH),MIN_DOCK_WIDTH,MAX_DOCK_WIDTH);state.dockHeight=clamp(finite(s.dockHeight,DEFAULT_DOCK_HEIGHT),MIN_DOCK_HEIGHT,MAX_DOCK_HEIGHT);state.dockAnchorX=s.dockAnchorX==='right'?'right':'left';state.dockAnchorY=s.dockAnchorY==='bottom'?'bottom':'top';state.dockGapX=Number.isFinite(Number(s.dockGapX))?Math.max(5,Number(s.dockGapX)):null;state.dockGapY=Number.isFinite(Number(s.dockGapY))?Math.max(5,Number(s.dockGapY)):null;state.activeTab=['action','condition','global','save'].includes(s.activeTab)?s.activeTab:'action';state.logs=[];state.currentActionIndex=-1;return true
-  }
-  function loadInitial(){const f=findSaved();if(f&&applySnapshot(f.data,{legacyKey:f.key}))saveState()}
-  const presetKey=n=>`${PRESET_PREFIX}_${n}`;
-  function readPreset(n){let d=readJson(presetKey(n));if(d)return d;for(const pre of LEGACY_PRESET_PREFIXES){d=readJson(`${pre}_${n}`);if(d)return d}return null}
-  function presetLabel(n,data){const meta=data?.presetMeta||{},name=String(meta.name||'').trim()||`保存 ${n}`;return`${name}${data?'  ✓':''}`}
-  function updatePresetInfo(){const n=presetSlot.value||'1',data=readPreset(n),meta=data?.presetMeta||{};presetName.value=String(meta.name||'');if(!data){presetInfo.textContent='この保存先は空です。名前を付けて保存できます。';return}const when=meta.savedAt?new Date(meta.savedAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'日時不明';const count=Array.isArray(data.actions)?data.actions.length:Array.isArray(data.points)?data.points.length:0;presetInfo.textContent=`${count}件の動作 · ${when}`}
-  function refreshPresets(){const selected=presetSlot.value||'1';presetSlot.textContent='';for(let n=1;n<=PRESET_SLOTS;n++){const data=readPreset(n),o=document.createElement('option');o.value=String(n);o.textContent=presetLabel(n,data);presetSlot.append(o)}presetSlot.value=[...presetSlot.options].some(o=>o.value===selected)?selected:'1';updatePresetInfo()}
-  function savePreset({quiet=false}={}){const n=presetSlot.value||'1',name=String(presetName.value||'').trim()||`保存 ${n}`,data={...snapshot(),presetMeta:{name,savedAt:Date.now()}};try{localStorage.setItem(presetKey(n),JSON.stringify(data));refreshPresets();presetSlot.value=n;presetName.value=name;updatePresetInfo();if(!quiet)updateStatus(`「${name}」を保存しました`);return true}catch(error){updateStatus('保存先へ保存できませんでした');return false}}
-  function loadPreset(){const n=presetSlot.value,s=readPreset(n);if(!s)return updateStatus('この保存先は空です');createRecoveryPoint('保存データ読込前');stopSequence('読込中');clearMarkers();applySnapshot(s);rebuildMarkers();applyVisibility();updateUi();requestAnimationFrame(()=>positionDock({defaultIfMissing:true}));saveState();const u=normalizeUrl(urlInput.value);if(u)iframe.src=u;updateStatus(`「${s.presetMeta?.name||`保存 ${n}`}」を読み込みました`)}
-  function deletePreset(){const n=presetSlot.value,s=readPreset(n);if(!s)return updateStatus('この保存先は空です');const name=s.presetMeta?.name||`保存 ${n}`;if(!confirm(`「${name}」を消しますか？`))return;localStorage.removeItem(presetKey(n));for(const pre of LEGACY_PRESET_PREFIXES)localStorage.removeItem(`${pre}_${n}`);refreshPresets();presetSlot.value=n;updatePresetInfo();updateStatus(`「${name}」を消しました`)}
-
-  function updateMarkerMeta(p,i){if(!p.element)return;p.element.querySelector('.markerNumber').textContent=String(i+1);p.element.querySelector('.markerDelay').textContent=`${formatMs(p.delayMs)} · ${p.holdMs}ms${p.targetMode==='selector'?' · 追跡':''}${p.condition?.enabled?' · 条件':''}`;p.element.setAttribute('aria-label',`${i+1}番目のクリック地点。矢印キーで1px、Shift＋矢印で10px移動`)}
-  function createMarker(p){const el=document.createElement('div');el.className='marker';el.tabIndex=0;el.setAttribute('role','button');el.innerHTML='<div class="markerVisual"></div><span class="markerNumber"></span><span class="markerDelay"></span>';markerLayer.append(el);p.element=el;const d={active:false,id:null,sx:0,sy:0,pcx:0,pcy:0,lx:0,ly:0,moved:false,raf:0,suppress:0};
-    const render=()=>{d.raf=0;if(!d.active)return;const dx=d.lx-d.sx,dy=d.ly-d.sy;if(!d.moved&&Math.hypot(dx,dy)>=DRAG_THRESHOLD_PX)d.moved=true;if(!d.moved)return;p.cx=d.pcx+dx;p.cy=d.pcy+dy;clampPoint(p);setMarkerPosition(p)};
-    const move=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();const a=e.getCoalescedEvents?.(),q=a?.length?a[a.length-1]:e;d.lx=q.clientX;d.ly=q.clientY;if(!d.raf)d.raf=requestAnimationFrame(render)};
-    const remove=()=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',end,true);window.removeEventListener('pointercancel',end,true)};
-    const end=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();d.lx=e.clientX;d.ly=e.clientY;if(d.raf){cancelAnimationFrame(d.raf);d.raf=0}render();d.active=false;el.classList.remove('dragging');remove();try{el.releasePointerCapture(e.pointerId)}catch{}if(d.moved){d.suppress=performance.now()+350;saveState()}d.id=null};
-    el.addEventListener('pointerdown',e=>{if(state.running||state.recording||e.button!==0)return;e.preventDefault();e.stopPropagation();selectPoint(p.id,{persist:false});d.active=true;d.id=e.pointerId;d.sx=d.lx=e.clientX;d.sy=d.ly=e.clientY;d.pcx=p.cx;d.pcy=p.cy;d.moved=false;el.classList.add('dragging');try{el.setPointerCapture(e.pointerId)}catch{}window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',end,{capture:true,passive:false});window.addEventListener('pointercancel',end,{capture:true,passive:false})},{passive:false});
-    el.addEventListener('keydown',e=>{if(state.running||state.recording)return;const step=e.shiftKey?10:1,moves={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]},moveBy=moves[e.key];if(moveBy){e.preventDefault();selectPoint(p.id,{persist:false});p.cx+=moveBy[0];p.cy+=moveBy[1];clampPoint(p);setMarkerPosition(p);saveState();return}if(e.key==='Enter'||e.key===' '){e.preventDefault();selectPoint(p.id)}});
-    el.addEventListener('click',e=>{e.stopPropagation();if(performance.now()<d.suppress)return;selectPoint(p.id)});p.cleanup=()=>{if(d.raf)cancelAnimationFrame(d.raf);remove()};setMarkerPosition(p);return el}
-  function clearMarkers(){for(const p of state.points){p.cleanup?.();p.element?.remove();p.element=null}markerLayer.textContent=''}
-  function rebuildMarkers(){clearMarkers();state.points.forEach((p,i)=>{if(!isNavigate(p)&&!isWait(p))createMarker(p);updateMarkerMeta(p,i)});selectPoint(state.selectedId,{persist:false,announce:false})}
-  function refreshMarkers(){state.points.forEach(updateMarkerMeta);renderPointStrip();updateEditor()}
-  function addPoint({cx=window.innerWidth/2,cy=window.innerHeight/2,delayMs,holdMs=DEFAULT_HOLD_MS,condition,targetMode='point',selector='',waitForTarget=true,targetTimeoutMs=DEFAULT_TARGET_TIMEOUT_MS,targetFailureMode='stop',scrollTarget=true,targetLabel='',enabled=true,select=true}={}){if(state.running||state.recording)return null;const i=state.points.length,p={id:state.nextId++,type:'click',enabled:enabled!==false,cx,cy,delayMs:normalizeDelay(delayMs,i===0?0:DEFAULT_POINT_DELAY_MS),holdMs:normalizeHold(holdMs),targetMode:targetMode==='selector'?'selector':'point',selector:String(selector||''),waitForTarget:waitForTarget!==false,targetTimeoutMs:normalizeTargetTimeout(targetTimeoutMs),targetFailureMode:['skip','point'].includes(targetFailureMode)?targetFailureMode:'stop',scrollTarget:scrollTarget!==false,targetLabel:String(targetLabel||''),condition:normalizeCondition(condition,'click'),element:null};clampPoint(p);state.points.push(p);createMarker(p);refreshMarkers();if(select)selectPoint(p.id);else saveState();return p}
-  function addNavigation({url='',delayMs,wait=true,timeout=DEFAULT_NAVIGATION_TIMEOUT_MS,failureMode='stop',condition,select=true}={}){if(state.running||state.recording)return null;const i=state.points.length,p={id:state.nextId++,type:'navigate',enabled:true,url:String(url||''),delayMs:normalizeDelay(delayMs,i===0?0:DEFAULT_POINT_DELAY_MS),waitForLoad:wait!==false,loadTimeoutMs:normalizeNavigationTimeout(timeout),failureMode:failureMode==='continue'?'continue':'stop',condition:normalizeCondition(condition,'navigate'),element:null};state.points.push(p);refreshMarkers();if(select)selectPoint(p.id);else saveState();return p}
-  function addWait({delayMs,condition,select=true}={}){if(state.running||state.recording)return null;const i=state.points.length,p={id:state.nextId++,type:'wait',enabled:true,delayMs:normalizeDelay(delayMs,i===0?0:DEFAULT_POINT_DELAY_MS),condition:normalizeCondition(condition,'wait'),element:null};state.points.push(p);refreshMarkers();if(select){selectPoint(p.id);setActiveTab('condition')}else saveState();return p}
-  function deleteSelected(){if(state.running||state.recording)return;const p=selectedPoint();if(!p)return;createRecoveryPoint('削除前');const i=pointIndex(p);p.cleanup?.();p.element?.remove();state.points.splice(i,1);state.selectedId=(state.points[i]||state.points[i-1])?.id??null;refreshMarkers();selectPoint(state.selectedId)}
-  function clearPoints(){if(state.running||state.recording)return;if(state.points.length&&!confirm('すべての動作を消しますか？'))return;createRecoveryPoint('全消去前');clearMarkers();state.points=[];state.selectedId=null;updateUi();saveState();updateStatus('すべての動作を消しました')}
-  function duplicatePoint(){const p=selectedPoint();if(!p)return;let copy;if(isNavigate(p))copy=addNavigation({url:p.url,delayMs:p.delayMs,wait:p.waitForLoad,timeout:p.loadTimeoutMs,failureMode:p.failureMode,condition:cloneCondition(p.condition,'navigate')});else if(isWait(p))copy=addWait({delayMs:p.delayMs,condition:cloneCondition(p.condition,'wait')});else addPoint({cx:p.cx+14,cy:p.cy+14,delayMs:p.delayMs,holdMs:p.holdMs,targetMode:p.targetMode,selector:p.selector,waitForTarget:p.waitForTarget,targetTimeoutMs:p.targetTimeoutMs,targetFailureMode:p.targetFailureMode,scrollTarget:p.scrollTarget,targetLabel:p.targetLabel,enabled:p.enabled,condition:cloneCondition(p.condition,'click')});if(copy)copy.enabled=p.enabled!==false;saveState();updateUi()}
-  function centerPoint(){const p=selectedPoint();if(!p||isNavigate(p)||isWait(p))return;p.cx=window.innerWidth/2;p.cy=window.innerHeight/2;setMarkerPosition(p);saveState();updateStatus('選択地点を中央へ移動')}
-  function moveSelected(dir){const p=selectedPoint(),i=p?pointIndex(p):-1,j=i+dir;if(!p||j<0||j>=state.points.length||state.running||state.recording)return;[state.points[i],state.points[j]]=[state.points[j],state.points[i]];refreshMarkers();selectPoint(p.id)}
-  function selectPoint(id,{persist=true,announce=true}={}){state.selectedId=id;state.points.forEach(p=>p.element?.classList.toggle('selected',p.id===id));renderPointStrip();updateEditor();updateButtons();const p=selectedPoint();if(announce)updateStatus(p?`${actionName(p)}を選択`:'アクションなし');requestAnimationFrame(()=>pointStrip.querySelector('.pointChip.selected')?.scrollIntoView({block:'nearest',inline:'center',behavior:motionBehavior()}));if(persist)saveState()}
-  function renderPointStrip(){
-    pointStrip.textContent='';pointStrip.setAttribute('aria-label','実行する動作');
-    if(!state.points.length){const empty=document.createElement('button'),icon=document.createElement('span'),copy=document.createElement('span'),title=document.createElement('strong'),help=document.createElement('small');empty.className='emptyFlow';icon.className='emptyFlowIcon';icon.textContent='＋';title.textContent='最初の動作を選ぶ';help.textContent='クリック・URL移動・条件待ちから選べます';copy.append(title,help);empty.append(icon,copy);empty.addEventListener('click',()=>{setAddMenu(true);controls.add.focus()});pointStrip.append(empty);return}
-    state.points.forEach((p,i)=>{const b=document.createElement('button');b.className='pointChip';b.classList.toggle('navigate',isNavigate(p));b.classList.toggle('wait',isWait(p));b.classList.toggle('selected',p.id===state.selectedId);b.classList.toggle('disabledAction',p.enabled===false);b.classList.toggle('selectorTarget',!isNavigate(p)&&!isWait(p)&&p.targetMode==='selector');b.classList.toggle('currentRun',state.running&&state.currentActionIndex===i);b.setAttribute('aria-pressed',String(p.id===state.selectedId));const icon=document.createElement('span');icon.className='chipIcon';icon.textContent=isNavigate(p)?'↗':isWait(p)?'◇':p.targetMode==='selector'?'◎':'●';const text=document.createElement('span');text.className='chipText';text.textContent=isNavigate(p)?`${i+1}  ${displayUrl(p.url)}`:isWait(p)?`${i+1}  条件を待つ`:`${i+1}  ${p.targetMode==='selector'?(p.targetLabel||p.selector||'ボタンを追う'):formatMs(p.delayMs)}`;b.setAttribute('aria-label',`${i+1}番目、${actionName(p,i)}${p.enabled===false?'、使用しない':''}${p.condition?.enabled?'、条件あり':''}`);b.append(icon,text);if(p.condition?.enabled){const dot=document.createElement('span');dot.className='conditionDot';dot.title='条件あり';b.append(dot)}b.disabled=state.running||state.recording;b.addEventListener('click',()=>selectPoint(p.id));pointStrip.append(b)})
-  }
-  function setActiveTab(name,{persist=true}={}){state.activeTab=['action','condition','global','save'].includes(name)?name:'action';const panelId=`tab${state.activeTab[0].toUpperCase()}${state.activeTab.slice(1)}`;tabButtons.forEach(b=>{const active=b.dataset.tab===state.activeTab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active));b.tabIndex=active?0:-1});tabPages.forEach(p=>{const active=p.id===panelId;p.classList.toggle('active',active);p.setAttribute('aria-hidden',String(!active))});if(state.activeTab==='condition')requestAnimationFrame(refreshGranblueAssistant);if(persist)saveState()}
-  function setAddMenu(open){state.addMenuOpen=Boolean(open);addMenu.classList.toggle('open',state.addMenuOpen);addMenu.toggleAttribute('inert',!state.addMenuOpen);addMenu.setAttribute('aria-hidden',String(!state.addMenuOpen));controls.addMenu.textContent=state.addMenuOpen?'− 閉じる':'＋ 追加';controls.addMenu.setAttribute('aria-expanded',String(state.addMenuOpen));requestAnimationFrame(()=>positionDock())}
-  function updateConditionFields(){const p=selectedPoint(),c=p?.condition||defaultCondition(p?.type),actionAllowed=p&&!isNavigate(p)&&!isWait(p);conditionEnabled.checked=Boolean(c.enabled);conditionTarget.querySelector('option[value=action]').disabled=!actionAllowed;conditionTarget.value=actionAllowed&&c.target==='action'?'action':c.target==='page'?'page':'selector';conditionSelector.value=c.selector;let type=c.type;const gameCondition=isGranblueConditionType(type);if(!gameCondition&&conditionTarget.value==='page'&&!['page_ready','url_contains','url_not_contains'].includes(type))type='page_ready';if(!gameCondition&&conditionTarget.value!=='page'&&['page_ready','url_contains','url_not_contains'].includes(type))type='exists';conditionType.value=type;conditionClass.value=c.className;conditionValueName.value=c.valueName;conditionExpected.value=c.expected;conditionText.value=c.text;conditionMode.value=c.mode;conditionTimeout.value=c.timeoutMs;conditionTimeoutAction.value=c.timeoutAction;conditionStable.value=c.stableMs;const usesSelector=conditionTarget.value==='selector'&&!gameCondition,usesClass=['class_has','class_missing'].includes(type),usesValue=['value_true','value_false','value_equals','value_not_equals'].includes(type),usesExpected=['value_equals','value_not_equals'].includes(type),usesText=['text_contains','text_not_contains','url_contains','url_not_contains'].includes(type);selectorField.classList.toggle('hidden',!usesSelector);classField.classList.toggle('hidden',!usesClass);valueFields.classList.toggle('hidden',!usesValue);expectedField.classList.toggle('hidden',!usesExpected);textField.classList.toggle('hidden',!usesText);conditionTextLabel.textContent=['url_contains','url_not_contains'].includes(type)?'URLに含まれる文字':'調べる文字';conditionText.placeholder=['url_contains','url_not_contains'].includes(type)?'/result または example.com':'準備完了';conditionBuilder.style.opacity=conditionEnabled.checked?'1':'.52';conditionPresetButtons.forEach(b=>{const active=b.dataset.conditionPreset===type;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))});updateConditionTargetSummary()}
-  function setClickTargetMode(mode,{persist=true}={}){const p=selectedPoint();if(!p||isNavigate(p)||isWait(p))return;p.targetMode=mode==='selector'?'selector':'point';clickModeButtons.forEach(b=>{const active=b.dataset.mode===p.targetMode;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))});pointTargetEditor.classList.toggle('hidden',p.targetMode!=='point');selectorTargetEditor.classList.toggle('hidden',p.targetMode!=='selector');if(p.targetMode==='selector'&&p.condition?.target==='action')p.condition.selector='';if(persist){saveState();renderPointStrip()}updateClickTargetSummary()}
-  function updateClickTargetSummary(result=null){const p=selectedPoint();if(!p||isNavigate(p)||isWait(p)){clickTargetSummary.classList.remove('ok','bad');clickTargetSummary.lastElementChild.textContent='ボタンを選ぶと、ページが動いても同じボタンを追いかけます。';return}if(result){clickTargetSummary.classList.toggle('ok',Boolean(result.ok));clickTargetSummary.classList.toggle('bad',!result.ok);clickTargetSummary.lastElementChild.textContent=result.message;return}clickTargetSummary.classList.remove('ok','bad');clickTargetSummary.lastElementChild.textContent=p.selector?`${p.targetLabel||'ボタン'} · ${p.selector}`:'「画面からボタンを選ぶ」を押してください。'}
-  function updateEditor(){
-    const p=selectedPoint(),i=p?pointIndex(p):-1,busy=state.running||state.recording,nav=isNavigate(p),waiting=isWait(p);
-    selectedTitle.textContent=p?(nav?`URLへ移動 · ${i+1}`:waiting?`条件を待つ · ${i+1}`:`クリック · ${i+1}`):'アクションを選択';
-    selectedTimingLabel.textContent=i===0?'開始後の待ち時間':'前の動作が終わった後の待ち時間';
-    actionTypePill.textContent=nav?'URLへ移動':waiting?'条件を待つ':'クリック';actionTypePill.classList.toggle('navigate',nav);actionTypePill.classList.toggle('wait',waiting);
-    actionEnabled.checked=p?.enabled!==false;actionEnabled.disabled=!p||busy;pointDelay.value=p?.delayMs??0;pointDelay.disabled=!p||busy;
-    clickEditor.classList.toggle('hidden',!p||nav||waiting);navigateEditor.classList.toggle('hidden',!p||!nav);waitEditor.classList.toggle('hidden',!p||!waiting);
-    pointHold.value=!nav&&!waiting&&p?p.holdMs:0;pointHold.disabled=!p||nav||waiting||busy;if(p&&!nav&&!waiting){clickSelector.value=p.selector||'';waitForTarget.checked=p.waitForTarget!==false;targetTimeout.value=p.targetTimeoutMs;targetFailure.value=p.targetFailureMode;scrollTarget.checked=p.scrollTarget!==false;clickModeButtons.forEach(b=>{const active=b.dataset.mode===p.targetMode;b.classList.toggle('active',active);b.setAttribute('aria-pressed',String(active))});pointTargetEditor.classList.toggle('hidden',p.targetMode!=='point');selectorTargetEditor.classList.toggle('hidden',p.targetMode!=='selector');updateClickTargetSummary()}
-    actionUrl.value=nav?p.url:'';waitForLoad.checked=nav?p.waitForLoad:true;loadTimeout.value=nav?p.loadTimeoutMs:DEFAULT_NAVIGATION_TIMEOUT_MS;navigationFailure.value=nav?p.failureMode:'stop';
-    for(const c of [actionUrl,waitForLoad,loadTimeout,navigationFailure,controls.useCurrentUrl,controls.navigateNow])c.disabled=!p||!nav||busy;
-    controls.deletePanel.disabled=!p||busy;controls.runFromSelected.disabled=!p||busy;controls.movePrev.disabled=!p||busy||i<=0;controls.moveNext.disabled=!p||busy||i>=state.points.length-1;controls.duplicate.disabled=!p||busy;controls.center.disabled=!p||nav||waiting||busy;
-    for(const c of [conditionEnabled,conditionTarget,conditionSelector,conditionType,conditionClass,conditionValueName,conditionExpected,conditionText,conditionMode,conditionTimeout,conditionTimeoutAction,conditionStable,controls.inspectCondition,controls.testCondition,controls.autoCondition,controls.pickConditionTarget])c.disabled=!p||busy;
-    for(const c of [clickSelector,waitForTarget,targetFailure,scrollTarget,controls.pickPointTarget,controls.pickClickTarget,controls.testClickTarget])c.disabled=!p||nav||waiting||busy;targetTimeout.disabled=!p||nav||waiting||busy||!waitForTarget.checked;loadTimeout.disabled=!p||!nav||busy||!waitForLoad.checked;conditionTimeout.disabled=!p||busy||!conditionEnabled.checked||conditionMode.value==='check';conditionTimeoutAction.disabled=conditionTimeout.disabled;conditionStable.disabled=!p||busy||!conditionEnabled.checked||conditionMode.value==='check';updateConditionFields();refreshGranblueAssistant();
   }
 
-  function placeDockForKeyboard(){if(!state.keyboardOpen||state.keyboardTarget==='url')return;const box=viewportBox(),margin=4,r=dock.getBoundingClientRect(),left=clamp(r.left,box.left+margin,Math.max(box.left+margin,box.left+box.width-r.width-margin));dock.style.left=`${left}px`;dock.style.top=`${box.top+margin}px`}
-  function enterKeyboardMode(target){clearTimeout(state.keyboardFocusTimer);state.keyboardOpen=true;state.keyboardTarget=target===urlInput?'url':'dock';shell.classList.add('keyboardOpen');shell.classList.toggle('urlKeyboardOpen',state.keyboardTarget==='url');if(state.keyboardTarget==='url')return;setAddMenu(false);requestAnimationFrame(()=>{placeDockForKeyboard();const panelRect=settingsPanel.getBoundingClientRect(),targetRect=target.getBoundingClientRect(),delta=targetRect.top-panelRect.top-10;if(Number.isFinite(delta))settingsPanel.scrollTop=Math.max(0,settingsPanel.scrollTop+delta)})}
-  function exitKeyboardMode(){clearTimeout(state.keyboardFocusTimer);if(!state.keyboardOpen)return;state.keyboardOpen=false;state.keyboardTarget=null;shell.classList.remove('keyboardOpen','urlKeyboardOpen');requestAnimationFrame(()=>positionDock({defaultIfMissing:true,useAnchor:true}))}
-  function revealEditor(tab='action'){if(!state.settingsOpen)setSettings(true,{persist:false});setActiveTab(tab,{persist:false});saveState();requestAnimationFrame(()=>positionDock())}
-  function resetDockLayout(){state.dockWidth=DEFAULT_DOCK_WIDTH;state.dockHeight=DEFAULT_DOCK_HEIGHT;state.dockX=null;state.dockY=null;state.dockGapX=null;state.dockGapY=null;state.compact=false;dock.classList.remove('compact');controls.minimize.textContent='—';controls.minimize.setAttribute('aria-label','メニューを小さくする');controls.minimize.setAttribute('aria-expanded','true');applyDockSize();positionDock({defaultIfMissing:true});saveState();updateStatus('メニュー位置とサイズを標準に戻しました')}
-
-  function setSettings(open,{persist=true}={}){state.settingsOpen=Boolean(open);settingsPanel.classList.toggle('closed',!state.settingsOpen);settingsPanel.toggleAttribute('inert',!state.settingsOpen);settingsPanel.setAttribute('aria-hidden',String(!state.settingsOpen));dock.classList.toggle('settingsClosed',!state.settingsOpen);controls.settings.classList.toggle('active',state.settingsOpen);controls.settings.textContent=state.settingsOpen?'⌄':'⚙';controls.settings.setAttribute('aria-expanded',String(state.settingsOpen));requestAnimationFrame(()=>positionDock());if(persist)saveState()}
-  function setBrowserHidden(hidden,{persist=true}={}){state.browserHidden=Boolean(hidden);browserBar.classList.toggle('hidden',state.browserHidden);browserBar.toggleAttribute('inert',state.browserHidden);browserBar.setAttribute('aria-hidden',String(state.browserHidden));browserHandle.classList.toggle('visible',state.browserHidden);browserHandle.setAttribute('aria-expanded',String(!state.browserHidden));if(!state.browserHidden)requestAnimationFrame(()=>normalizeDockPosition());if(persist)saveState()}
-  function setCompact(compact,{persist=true}={}){const before=dock.getBoundingClientRect(),box=viewportBox(),right=box.left+box.width,bottom=box.top+box.height,rightGap=right-before.right,bottomGap=bottom-before.bottom;updateDockAnchors();state.compact=Boolean(compact);dock.classList.toggle('compact',state.compact);controls.minimize.textContent=state.compact?'□':'—';controls.minimize.setAttribute('aria-label',state.compact?'メニューを開く':'メニューを小さくする');controls.minimize.setAttribute('aria-expanded',String(!state.compact));requestAnimationFrame(()=>{const after=dock.getBoundingClientRect();state.dockX=state.dockAnchorX==='right'?right-rightGap-after.width:before.left;state.dockY=state.dockAnchorY==='bottom'?bottom-bottomGap-after.height:before.top;normalizeDockPosition();if(persist)saveState()})}
-  function applyVisibility(){applyDockSize();setSettings(state.settingsOpen,{persist:false});setBrowserHidden(state.browserHidden,{persist:false});dock.classList.toggle('compact',state.compact);controls.minimize.textContent=state.compact?'□':'—';controls.minimize.setAttribute('aria-label',state.compact?'メニューを開く':'メニューを小さくする');controls.minimize.setAttribute('aria-expanded',String(!state.compact));setActiveTab(state.activeTab,{persist:false});setAddMenu(false)}
-
-  function updateButtons(){const p=selectedPoint(),has=state.points.length>0,busy=state.running||state.recording;controls.addMenu.disabled=busy;controls.add.disabled=busy;controls.addNavigate.disabled=busy;controls.addWait.disabled=busy;controls.single.disabled=!p||busy;controls.runFromSelected.disabled=!p||busy;controls.record.disabled=busy;controls.recordPanel.disabled=busy;controls.run.disabled=state.recording||(!has&&!state.running);controls.compactRun.disabled=state.recording||(!has&&!state.running);controls.clear.disabled=!has||busy;for(const control of [...dockPositionButtons,...dockSizeButtons])control.disabled=busy;for(const c of [method,loop,timeRandomEnabled,positionRandomEnabled,recordMode,presetSlot,presetName,controls.savePreset,controls.loadPreset,controls.deletePreset,controls.exportSettings,controls.importFile])c.disabled=busy;count.disabled=busy||loop.checked;timeJitter.disabled=busy||!timeRandomEnabled.checked;positionJitter.disabled=busy||!positionRandomEnabled.checked;const recoverable=hasRecovery();controls.undo.disabled=busy||!recoverable;controls.restoreRecovery.disabled=busy||!recoverable;shell.classList.toggle('running',state.running);shell.classList.toggle('recording',state.recording);controls.run.textContent=state.running?'■ 停止':'▶ 開始';controls.run.classList.toggle('stopping',state.running);controls.run.setAttribute('aria-pressed',String(state.running));controls.run.setAttribute('aria-label',state.running?'実行を停止':'すべての動作を開始');controls.compactRun.textContent=state.running?'■':'▶';controls.compactRun.classList.toggle('stopping',state.running);controls.compactRun.setAttribute('aria-pressed',String(state.running));renderPointStrip();updateEditor();updateRunStats()}
-  function updateUi(){refreshMarkers();updateButtons()}
-
-  function deepest(doc,x,y){let el=doc.elementFromPoint(x,y);if(!el)return null;while(el.shadowRoot?.elementFromPoint){const n=el.shadowRoot.elementFromPoint(x,y);if(!n||n===el)break;el=n}if(el.tagName==='IFRAME'){try{const r=el.getBoundingClientRect(),inner=el.contentDocument&&deepest(el.contentDocument,x-r.left,y-r.top);if(inner)return inner}catch{}}return{element:el,document:doc,x,y}}
-  function hitAt(vx,vy){const r=iframe.getBoundingClientRect();if(vx<r.left||vy<r.top||vx>r.right||vy>r.bottom)return{error:'地点がiframe外'};try{const d=iframe.contentDocument;if(!d)return{error:'iframe未読込'};return deepest(d,vx-r.left,vy-r.top)||{error:'対象なし'}}catch{return{error:'別ドメインiframeの内部は操作不可'}}}
-  function clickable(el){if(!el||el.nodeType!==1||!el.closest)return el;return el.closest('button,a[href],input:not([type=hidden]),select,textarea,label,summary,[role=button],[role=link],[onclick],[tabindex]:not([tabindex="-1"])')||el}
-  function rootDocument(){try{return iframe.contentDocument||null}catch{return null}}
-  function queryDeep(root,selector,visited=new Set()){if(!root||visited.has(root))return null;visited.add(root);let found;try{found=root.querySelector?.(selector)}catch(error){return{selectorError:error}}if(found)return{element:found};const all=root.querySelectorAll?.('*')||[];for(const el of all){if(el.shadowRoot){const nested=queryDeep(el.shadowRoot,selector,visited);if(nested)return nested}if(el.tagName==='IFRAME'){try{const nested=queryDeep(el.contentDocument,selector,visited);if(nested)return nested}catch{}}}return null}
-  function collectWatchRoots(root,roots=[],visited=new Set()){if(!root||visited.has(root))return roots;visited.add(root);const node=root.nodeType===9?root.documentElement:root;if(node)roots.push(node);const all=root.querySelectorAll?.('*')||[];for(const el of all){if(el.shadowRoot)collectWatchRoots(el.shadowRoot,roots,visited);if(el.tagName==='IFRAME'){try{collectWatchRoots(el.contentDocument,roots,visited)}catch{}}}return roots}
-  const cssEscape=value=>window.CSS?.escape?window.CSS.escape(String(value)):String(value).replace(/[^a-zA-Z0-9_-]/g,ch=>`\\${ch}`);
-  const attrEscape=value=>String(value).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-  function selectorIsUnique(doc,selector,element){try{const list=doc.querySelectorAll(selector);return list.length===1&&list[0]===element}catch{return false}}
-  function stableClasses(element){const unstable=/^(active|inactive|on|off|open|closed|show|hide|hidden|visible|selected|disabled|enabled|checked|focus|hover|pressed|ready|loading|current|is-|has-)/i;return [...element.classList||[]].filter(name=>name&&name.length<60&&!unstable.test(name)).slice(0,3)}
-  function selectorForElement(element){if(!element||element.nodeType!==1)return'';const doc=element.ownerDocument;if(element.id){const selector=`#${cssEscape(element.id)}`;if(selectorIsUnique(doc,selector,element))return selector}for(const name of ['data-testid','data-test','data-action','name','aria-label','title']){const value=element.getAttribute?.(name);if(!value||value.length>120)continue;const selector=`${String(element.tagName||'').toLowerCase()}[${name}="${attrEscape(value)}"]`;if(selectorIsUnique(doc,selector,element))return selector}const tag=String(element.tagName||'').toLowerCase(),classes=stableClasses(element);for(let count=classes.length;count>0;count--){const selector=`${tag}.${classes.slice(0,count).map(cssEscape).join('.')}`;if(selectorIsUnique(doc,selector,element))return selector}const parts=[];let current=element;for(let depth=0;current&&current.nodeType===1&&depth<6;depth++,current=current.parentElement){let part=String(current.tagName||'').toLowerCase();if(current.id){part+=`#${cssEscape(current.id)}`;parts.unshift(part);break}const siblings=current.parentElement?[...current.parentElement.children].filter(el=>el.tagName===current.tagName):[];if(siblings.length>1)part+=`:nth-of-type(${siblings.indexOf(current)+1})`;parts.unshift(part);const selector=parts.join(' > ');if(selectorIsUnique(doc,selector,element))return selector}return parts.join(' > ')}
-  function findSelectorElement(selector){const doc=rootDocument();if(!doc)return{error:'ページ内部を確認できません（別ドメインの可能性）',fatal:true};const value=String(selector||'').trim();if(!value)return{error:'class または idを入力してください',fatal:true};const found=queryDeep(doc,value);if(found?.selectorError)return{error:'class / idの書き方が正しくありません',fatal:true};return{element:found?.element||null}}
-  function findGranblueElement(selector){const doc=rootDocument();if(!doc)return{error:'ページ内部を確認できません（別ドメインの可能性）',fatal:true};try{return{element:doc.querySelector(selector)}}catch(error){return{error:'グラブルのボタンを確認できません',fatal:true}}}
-  const GRANBLUE_CONDITION_TYPES=['gbf_full_auto_on','gbf_full_auto_off','gbf_attack_ready','gbf_attack_not_ready','gbf_attack_on','gbf_attack_off'];
-  const isGranblueConditionType=type=>GRANBLUE_CONDITION_TYPES.includes(type);
-  function granblueKindForElement(element){const target=element?.closest?.('.btn-auto,.btn-attack-start')||element;if(target?.matches?.('.btn-auto'))return'full_auto';if(target?.matches?.('.btn-attack-start'))return'attack';return null}
-  function inspectElementState(element){if(!element)return{exists:false,visible:false,enabled:false,toggle:null,evidence:'DOMにまだ生成されていません'};const view=element.ownerDocument?.defaultView||window,style=view.getComputedStyle?.(element),visible=isVisibleElement(element),enabled=!isDisabledElement(element),toggle=booleanState(element),evidence=[];if(element.classList?.contains('on'))evidence.push('class: on');for(const name of ['aria-pressed','aria-checked','aria-selected','aria-expanded','aria-disabled']){const value=element.getAttribute?.(name);if(value!==null)evidence.push(`${name}: ${value}`)}if(style?.display==='none')evidence.push('display: none');else if(style?.visibility==='hidden')evidence.push('visibility: hidden');else evidence.push(visible?'画面に表示':'画面外またはサイズ0');return{exists:true,visible,enabled,toggle,evidence:evidence.join(' / ')}}
-  function readGranblueFullAutoState(){const found=findGranblueElement('.btn-auto');if(found.error)return{known:false,exists:false,visible:false,error:found.error,fatal:found.fatal,current:'判定不可',status:'missing'};const element=found.element;if(!element)return{known:false,exists:false,visible:false,current:'未出現',status:'missing',description:'フルオートボタンはまだDOMに生成されていません'};const observed=inspectElementState(element),on=element.classList.contains('on')||observed.toggle===true,current=!observed.visible?`非表示・${on?'ON':'OFF'}`:on?'表示・ON':'表示・OFF';return{known:true,exists:true,visible:observed.visible,enabled:observed.enabled,on,element,current,status:on?'on':'off',evidence:observed.evidence,description:`フルオート: ${current}`}}
-  function readGranblueAttackState(){const found=findGranblueElement('.btn-attack-start');if(found.error)return{known:false,exists:false,visible:false,error:found.error,fatal:found.fatal,current:'判定不可',status:'missing'};const element=found.element;if(!element)return{known:false,exists:false,visible:false,current:'未出現',status:'missing',description:'攻撃ボタンはまだDOMに生成されていません'};const doc=element.ownerDocument,cancel=queryDeep(doc,'.btn-attack-cancel')?.element||null,dummy=queryDeep(doc,'.prt-attack-start-dummy')?.element||null,shown=target=>Boolean(target)&&target.classList.contains('display-on')&&isVisibleElement(target),observed=inspectElementState(element),displayOn=element.classList.contains('display-on')||observed.visible,cancelVisible=shown(cancel),dummyVisible=shown(dummy),disabled=!observed.enabled||element.classList.contains('disable'),ready=displayOn&&observed.visible&&!disabled&&!cancelVisible&&!dummyVisible;let current,status;if(!observed.visible){current='非表示';status='missing'}else if(cancelVisible){current='攻撃中';status='blocked'}else if(dummyVisible){current='操作切替中';status='blocked'}else if(disabled){current='表示・押せない';status='blocked'}else if(ready){current='表示・押せる';status='ready'}else{current='表示・待機中';status='blocked'}return{known:true,exists:true,visible:observed.visible,enabled:observed.enabled,ready,on:ready,element,current,status,cancelVisible,dummyVisible,evidence:observed.evidence,description:`攻撃ボタン: ${current}`}}
-  function selectorHintsGranblue(selector){const value=String(selector||'');if(value.includes('btn-auto'))return'full_auto';if(value.includes('btn-attack-start'))return'attack';return null}
-  function conditionRecommendationFor(action){if(!action)return{available:false,title:'動作を選んでください',reason:'条件を設定する動作が選択されていません。'};const condition=normalizeCondition(action.condition,action.type);if(condition.target==='page')return{available:true,type:'page_ready',target:'page',title:'「読込が終わったら」がおすすめ',reason:'ページ全体を対象にしているため、要素の表示やON/OFFではなくロード完了を待つのが安全です。'};const target=baseConditionTarget(action,condition),selector=condition.target==='selector'?condition.selector:(!isNavigate(action)&&!isWait(action)&&action.targetMode==='selector'?action.selector:'');if(target.error&&!selector)return{available:false,title:'対象を選んでください',reason:target.error};const element=target.element||null,kind=granblueKindForElement(element)||selectorHintsGranblue(selector);if(kind==='full_auto'){const state=readGranblueFullAutoState();if(!state.exists||!state.visible)return{available:true,type:'visible',target:'selector',selector:'.btn-auto',title:'「表示されたら」がおすすめ',reason:state.exists?'フルオートボタンはDOMにありますが非表示です。ON/OFFより先に、画面へ表示されるのを待つ必要があります。':'フルオートボタンはまだ未出現です。グラブルでは表示タイミングが変わるため、.btn-auto が見えるまで待つのが安定します。'};return{available:true,type:state.on?'gbf_full_auto_off':'gbf_full_auto_on',target:'selector',selector:'.btn-auto',title:`「フルオートが${state.on?'OFF':'ON'}」がおすすめ`,reason:`現在は${state.current}です。同じボタンのclassが切り替わるため、一般的な表示条件ではなく専用のON/OFF判定が最適です。`}}if(kind==='attack'){const state=readGranblueAttackState();return{available:true,type:state.ready?'gbf_attack_not_ready':'gbf_attack_ready',target:'selector',selector:'.btn-attack-start',title:`「攻撃が${state.ready?'押せない':'押せる'}」がおすすめ`,reason:`現在は「${state.current}」です。攻撃ボタンは表示だけでなく、disable・攻撃中表示・ダミー表示を合わせて判定します。`}}if(!element)return{available:true,type:'exists',target:'selector',selector,title:'「見つかった時」がおすすめ',reason:'対象はまだDOMにありません。まずボタン自体が生成されるのを待ちます。'};const observed=inspectElementState(element);if(!observed.visible)return{available:true,type:'visible',target:condition.target,selector,title:'「表示されたら」がおすすめ',reason:'対象はDOMにありますが画面には見えていません。存在条件はすでに成立してしまうため、表示条件を使います。'};if(!observed.enabled)return{available:true,type:'enabled',target:condition.target,selector,title:'「押せるようになったら」がおすすめ',reason:'対象は表示されていますが操作不可です。表示ではなくdisabled解除を待つのが適切です。'};if(observed.toggle!==null)return{available:true,type:observed.toggle?'state_off':'state_on',target:condition.target,selector,title:`「${observed.toggle?'OFF':'ON'}になったら」がおすすめ`,reason:`現在は${observed.toggle?'ON':'OFF'}として判定できます。同じボタンの状態変化を待つ条件が最適です。`};return{available:true,type:'visible',target:condition.target,selector,title:'「表示されたら」がおすすめ',reason:'対象は表示・操作可能ですが明確なON/OFF属性がありません。最も誤判定しにくい表示条件を使います。'}}
-  function renderConditionRecommendation(){if(!conditionRecommendation)return;const rec=conditionRecommendationFor(selectedPoint());state.conditionRecommendation=rec;conditionRecommendation.classList.toggle('unavailable',!rec.available);conditionRecommendationTitle.textContent=rec.title;conditionRecommendationReason.textContent=rec.reason;controls.applyConditionRecommendation.disabled=!rec.available}
-  function applyConditionRecommendation(rec=state.conditionRecommendation){const p=selectedPoint();if(!p||!rec?.available)return;conditionEnabled.checked=true;conditionType.value=rec.type;if(rec.target)conditionTarget.value=rec.target;if(rec.selector!==undefined)conditionSelector.value=rec.selector;saveConditionFromUi();updateEditor();const result=evaluateCondition(p);showConditionResult(result);updateStatus(`${rec.title}を設定しました`)}
-  function setGranblueCard(card,badge,detail,result,kind){if(!card)return;card.dataset.state=result.status||'missing';badge.textContent=result.current||'判定不可';if(result.error)detail.textContent=result.error;else if(!result.exists)detail.textContent=kind==='full_auto'?'.btn-auto はまだ未出現です':'.btn-attack-start はまだ未出現です';else if(kind==='full_auto')detail.textContent=`${result.visible?'画面に表示':'DOMには存在・画面では非表示'} / ${result.evidence||'状態属性なし'}`;else detail.textContent=`${result.ready?'今すぐ押せます':'今は押せません'} / ${result.evidence||'状態属性なし'}`}
-  function refreshGranblueAssistant(){if(!state.settingsOpen||state.activeTab!=='condition')return;const fullAuto=readGranblueFullAutoState(),attack=readGranblueAttackState();setGranblueCard(gbfFullAutoCard,gbfFullAutoState,gbfFullAutoDetail,fullAuto,'full_auto');setGranblueCard(gbfAttackCard,gbfAttackState,gbfAttackDetail,attack,'attack');renderConditionRecommendation()}
-  function elementRectInViewport(element){if(!element)return null;let rect=element.getBoundingClientRect(),doc=element.ownerDocument;let left=rect.left,top=rect.top,width=rect.width,height=rect.height;while(doc&&doc!==document){const frame=doc.defaultView?.frameElement;if(!frame)break;const frameRect=frame.getBoundingClientRect();left+=frameRect.left;top+=frameRect.top;doc=frame.ownerDocument}return{left,top,width,height,right:left+width,bottom:top+height}}
-  function flashTarget(element,message='対象を見つけました'){const rect=elementRectInViewport(element);if(!rect||rect.width<=0||rect.height<=0)return;clearTimeout(state.highlightTimer);Object.assign(targetHighlight.style,{left:`${rect.left}px`,top:`${rect.top}px`,width:`${rect.width}px`,height:`${rect.height}px`});targetHighlight.classList.add('visible');state.highlightTimer=setTimeout(()=>targetHighlight.classList.remove('visible'),1400);updateStatus(message)}
-  function endPicker(message='選択を終了'){state.picking=null;pickerLayer.classList.remove('active');pickerMessage.textContent='対象のボタンをタッチしてください';updateStatus(message)}
-  function startPicker(kind){const p=selectedPoint();if(!p||state.running||state.recording)return;const doc=rootDocument();if(!doc){updateStatus('このページでは内部のボタンを選べません');return}state.picking={kind};pickerMessage.textContent=kind==='point'?'押したい場所をタッチしてください':kind==='condition'?'監視したいボタンをタッチしてください':'押したいボタンをタッチしてください';pickerLayer.classList.add('active');updateStatus('画面上から対象を選択中')}
-  function applyPickedTarget(event){const p=selectedPoint(),pick=state.picking;if(!p||!pick)return;const hit=hitAt(event.clientX,event.clientY);if(hit.error){updateStatus(hit.error);return}const element=clickable(hit.element),selector=selectorForElement(element);if(pick.kind==='point'){p.cx=event.clientX;p.cy=event.clientY;clampPoint(p);setMarkerPosition(p)}else if(pick.kind==='click'){p.cx=event.clientX;p.cy=event.clientY;clampPoint(p);setMarkerPosition(p);p.targetMode='selector';p.selector=selector;p.targetLabel=label(element);p.waitForTarget=true;p.condition=normalizeCondition(p.condition,'click');if(p.condition.target==='action')p.condition.selector=''}else{p.condition=normalizeCondition(p.condition,p.type);p.condition.enabled=true;p.condition.target='selector';p.condition.selector=selector}flashTarget(element,`選択: ${label(element)}`);endPicker(`選択しました · ${label(element)}`);updateUi();saveState()}
-  function clickElementStatus(action){const found=findSelectorElement(action.selector);if(found.error)return{ok:false,message:found.error,fatal:found.fatal};const element=clickable(found.element);if(!element)return{ok:false,message:'ボタンはまだ見つかっていません'};if(!isVisibleElement(element))return{ok:false,message:'ボタンはまだ表示されていません'};if(isDisabledElement(element))return{ok:false,message:'ボタンはまだ押せません'};return{ok:true,element,message:`見つかりました · ${label(element)}`}}
-  function cancelTargetWait(){const cancel=state.targetCancel;state.targetCancel=null;cancel?.()}
-  function waitForClickTarget(action,{token=null}={}){const immediate=clickElementStatus(action);if(immediate.ok||!action.waitForTarget)return Promise.resolve(immediate);if(immediate.fatal)return Promise.resolve(immediate);return new Promise(resolve=>{cancelTargetWait();let done=false,observers=[],interval=null,timeout=null,last='';const cleanupWatch=()=>{observers.forEach(o=>o.disconnect());observers=[];if(interval)clearInterval(interval);if(timeout)clearTimeout(timeout);iframe.removeEventListener('load',rebind)};const finish=result=>{if(done)return;done=true;cleanupWatch();if(state.targetCancel===cancel)state.targetCancel=null;resolve(result)};const cancel=()=>finish({ok:false,stopped:true,message:'停止'});state.targetCancel=cancel;const check=()=>{if(done)return;if(token!=null&&(!state.running||token!==state.runToken))return cancel();const result=clickElementStatus(action);if(result.message!==last){last=result.message;updateStatus(`${actionName(action)}: ${result.message}`)}if(result.ok||result.fatal)finish(result)};const bind=()=>{observers.forEach(o=>o.disconnect());observers=[];const doc=rootDocument();if(!doc)return;for(const watchRoot of collectWatchRoots(doc)){try{const observer=new MutationObserver(check);observer.observe(watchRoot,{subtree:true,childList:true,attributes:true,characterData:true});observers.push(observer)}catch{}}};const rebind=()=>{bind();check()};bind();iframe.addEventListener('load',rebind);interval=setInterval(check,120);if(action.targetTimeoutMs>0)timeout=setTimeout(()=>finish({ok:false,timeout:true,message:`ボタン待ちが時間切れです (${formatMs(action.targetTimeoutMs)})`}),action.targetTimeoutMs);check()})}
-  function baseConditionTarget(action,condition){if(condition.target==='page'){const doc=rootDocument();return doc?{page:true,document:doc}:{error:'ページ内部を確認できません（別ドメインの可能性）',fatal:true}}if(condition.target==='action'&&!isNavigate(action)&&!isWait(action)){if(action.targetMode==='selector')return findSelectorElement(action.selector);const base=clickCoordinates(action),hit=hitAt(base.x,base.y);if(hit.error)return{error:hit.error};return{element:clickable(hit.element)}}return findSelectorElement(condition.selector)}
-  function isVisibleElement(el){if(!el||!el.isConnected)return false;const view=el.ownerDocument?.defaultView||window,style=view.getComputedStyle?.(el);if(style&&(style.display==='none'||style.visibility==='hidden'||Number(style.opacity)===0))return false;const r=el.getBoundingClientRect?.();return Boolean(r&&r.width>0&&r.height>0&&el.getClientRects?.().length)}
-  function isDisabledElement(el){if(!el)return true;if('disabled'in el&&Boolean(el.disabled))return true;if(String(el.getAttribute?.('aria-disabled')||'').toLowerCase()==='true')return true;return el.classList?.contains('disabled')||el.classList?.contains('is-disabled')||false}
-  function readElementValue(el,name){const key=String(name||'').trim();if(!el||!key)return undefined;let value=el;for(const part of key.split('.')){if(value==null||!(part in Object(value))){value=undefined;break}value=value[part]}if(value!==undefined&&typeof value!=='object'&&typeof value!=='function')return value;const attr=el.getAttribute?.(key);return attr!==null?attr:undefined}
-  function toBoolean(value){if(typeof value==='boolean')return value;if(typeof value==='number')return value!==0;if(value==null)return null;const text=String(value).trim().toLowerCase();if(['true','1','on','active','selected','checked','open','enabled','ready','yes'].includes(text))return true;if(['false','0','off','inactive','unselected','unchecked','closed','disabled','not-ready','no',''].includes(text))return false;return null}
-  function booleanState(el){if(!el)return null;for(const key of ['aria-pressed','aria-checked','aria-selected','aria-expanded','data-active','data-enabled','data-state']){const value=toBoolean(el.getAttribute?.(key));if(value!==null)return value}if('checked'in el&&['checkbox','radio'].includes(String(el.type||'').toLowerCase()))return Boolean(el.checked);const classes=[...el.classList||[]].map(v=>v.toLowerCase());if(classes.some(v=>['off','inactive','is-off','is-inactive','disabled','is-disabled'].includes(v)))return false;if(classes.some(v=>['on','active','is-on','is-active','selected','is-selected'].includes(v)))return true;return null}
-  function conditionElementDescription(el){if(!el)return'対象はまだ見つかっていません';const tag=String(el.tagName||'element').toLowerCase(),id=el.id?`#${el.id}`:'',classes=[...el.classList||[]].slice(0,3).map(v=>`.${v}`).join('');return`${tag}${id}${classes} · ${label(el)}`.slice(0,100)}
-  function plainElementState(el){if(!el)return'まだ見つかっていません';const parts=[];parts.push(isVisibleElement(el)?'表示中':'非表示');parts.push(isDisabledElement(el)?'押せない':'押せる');const stateValue=booleanState(el);if(stateValue!==null)parts.push(stateValue?'状態はON':'状態はOFF');return parts.join('・')}
-  function conditionTypeLabel(type){return({exists:'見つかったら',missing:'消えたら',visible:'表示されたら',hidden:'見えなくなったら',state_on:'ONになったら',state_off:'OFFになったら',enabled:'押せるようになったら',disabled:'押せなくなったら',gbf_full_auto_on:'フルオートがONなら',gbf_full_auto_off:'フルオートがOFFなら',gbf_attack_ready:'攻撃ボタンが押せるなら',gbf_attack_not_ready:'攻撃ボタンが押せないなら',gbf_attack_on:'攻撃ボタンが押せるなら',gbf_attack_off:'攻撃ボタンが押せないなら',class_has:'指定classが付いたら',class_missing:'指定classが消えたら',value_true:'値がtrueになったら',value_false:'値がfalseになったら',value_equals:'値が一致したら',value_not_equals:'値が変わったら',text_contains:'指定文字が出たら',text_not_contains:'指定文字が消えたら',page_ready:'ページの読込が終わったら',url_contains:'URLに文字が入ったら',url_not_contains:'URLから文字が消えたら'})[type]||'条件が合ったら'}
-  function updateConditionSentence(){if(!conditionSentence)return;const p=selectedPoint();if(!p){conditionSentence.textContent='動作を選ぶと、ここに条件を文章で表示します。';return}const c=normalizeCondition(p.condition,p.type);if(!c.enabled){conditionSentence.textContent='条件は使っていません。この動作は待たずに実行されます。';return}let target='選んだ対象';if(isGranblueConditionType(c.type))target='グラブルのバトル画面';else if(c.target==='page')target='ページ';else if(c.selector)target=c.selector;else if(p.targetLabel)target=p.targetLabel;else if(c.target==='action')target='このクリックのボタン';const action=isWait(p)?'次の動作へ進みます':isNavigate(p)?'ページ移動します':'この動作を実行します';conditionSentence.textContent=`${target}が「${conditionTypeLabel(c.type)}」になったら、${action}。`}
-  function setConditionTargetSummary(title,detail){const text=conditionTargetSummary?.lastElementChild;if(!text)return;text.textContent='';const strong=document.createElement('strong');strong.textContent=String(title||'対象未選択');text.append(strong,document.createElement('br'),document.createTextNode(String(detail||'')))}
-  function updateConditionTargetSummary(){const p=selectedPoint();if(!p||!conditionTargetSummary)return;const c=normalizeCondition(p.condition,p.type);if(isGranblueConditionType(c.type)){const result=evaluateCondition(p);setConditionTargetSummary('グラブルのバトル画面',`${conditionTypeLabel(c.type)} · 現在: ${result.current||'判定不可'}`);updateConditionSentence();return}const target=baseConditionTarget(p,c);if(c.target==='page')setConditionTargetSummary('ページ全体',conditionTypeLabel(c.type));else if(target.error)setConditionTargetSummary(c.selector||'対象未選択',target.error);else if(!target.element)setConditionTargetSummary(c.selector||p.targetLabel||'対象未選択','まだ見つかっていません');else setConditionTargetSummary(label(target.element),`${plainElementState(target.element)} · ${conditionTypeLabel(c.type)}`);updateConditionSentence()}
-  function evaluateCondition(action){const condition=normalizeCondition(action.condition,action.type),type=condition.type;if(isGranblueConditionType(type)){const fullAuto=type.startsWith('gbf_full_auto_'),observed=fullAuto?readGranblueFullAutoState():readGranblueAttackState();if(observed.error)return{matched:false,error:observed.error,fatal:observed.fatal,current:observed.current,description:observed.error};if(!observed.exists)return{matched:type==='gbf_attack_not_ready'||type==='gbf_attack_off',current:observed.current||'未出現',description:observed.description||'対象ボタンはまだ未出現です'};const expected=fullAuto?type.endsWith('_on'):type==='gbf_attack_ready'||type==='gbf_attack_on',actual=fullAuto?observed.on:observed.ready,matched=actual===expected;return{matched,element:observed.element,current:observed.current,description:`${matched?'条件に合っています':'まだ条件に合いません'} · ${fullAuto?'フルオート':'攻撃ボタン'}: ${observed.current}`}}const target=baseConditionTarget(action,condition);if(target.error)return{matched:false,error:target.error,fatal:target.fatal,description:target.error};if(target.page){const url=currentIframeUrl(),ready=target.document.readyState==='complete';let matched=false,current='';if(type==='page_ready'){matched=ready;current=target.document.readyState}else if(type==='url_contains'||type==='url_not_contains'){current=url;const contains=url.includes(condition.text);matched=type==='url_contains'?contains:!contains}else return{matched:false,error:'ページ全体では、この条件は使えません',fatal:true,description:'ページ全体では、この条件は使えません'};return{matched,current,description:`${matched?'条件に合っています':'まだ条件に合いません'} · ${type==='page_ready'?`読込状態: ${current}`:`現在URL: ${current}`}`}}const el=target.element;let matched=false,current='';if(type==='exists')matched=Boolean(el);else if(type==='missing')matched=!el;else if(type==='visible')matched=isVisibleElement(el);else if(type==='hidden')matched=!el||!isVisibleElement(el);else if(type==='enabled')matched=Boolean(el)&&!isDisabledElement(el);else if(type==='disabled')matched=Boolean(el)&&isDisabledElement(el);else if(type==='class_has')matched=Boolean(el)&&String(condition.className).trim().split(/\s+/).filter(Boolean).every(v=>el.classList?.contains(v));else if(type==='class_missing')matched=!el||String(condition.className).trim().split(/\s+/).filter(Boolean).some(v=>!el.classList?.contains(v));else if(['value_true','value_false','value_equals','value_not_equals'].includes(type)){const raw=readElementValue(el,condition.valueName);current=raw===undefined?'未設定':String(raw);if(type==='value_true'||type==='value_false'){const bool=toBoolean(raw);matched=bool!==null&&(type==='value_true'?bool:!bool)}else{const equal=raw!==undefined&&String(raw).trim().toLowerCase()===String(condition.expected).trim().toLowerCase();matched=type==='value_equals'?equal:!equal}}else if(type==='text_contains'||type==='text_not_contains'){current=String(el?.textContent||'').trim().replace(/\s+/g,' ').slice(0,120);const contains=Boolean(el)&&current.includes(condition.text);matched=type==='text_contains'?contains:!contains}else if(type==='state_on'||type==='state_off'){const value=booleanState(el);current=value===null?'判定できない':value?'オン':'オフ';matched=value!==null&&(type==='state_on'?value:!value)}return{matched,element:el,current,description:`${matched?'条件に合っています':'まだ条件に合いません'} · ${conditionElementDescription(el)}${current?` · 現在: ${current}`:''}`}}
-  function cancelConditionWait(){const cancel=state.conditionCancel;state.conditionCancel=null;cancel?.()}
-  function conditionTimeoutOutcome(condition,message){if(condition.timeoutAction==='skip')return{outcome:'skip',message};if(condition.timeoutAction==='execute')return{outcome:'execute',message};return{outcome:'stop',message}}
-  function waitForCondition(action,ctx={}){const condition=normalizeCondition(action.condition,action.type);if(!condition.enabled)return Promise.resolve({outcome:'execute'});const initial=evaluateCondition(action);if(condition.mode==='check')return Promise.resolve(initial.matched?{outcome:'execute',message:initial.description}:{outcome:'skip',message:initial.description});return new Promise(resolve=>{cancelConditionWait();let done=false,observerList=[],interval=null,timeout=null,matchedSince=null,lastText='';const cleanupWatch=()=>{observerList.forEach(o=>o.disconnect());observerList=[];if(interval)clearInterval(interval);if(timeout)clearTimeout(timeout);iframe.removeEventListener('load',rebind)};const finish=result=>{if(done)return;done=true;cleanupWatch();if(state.conditionCancel===cancel)state.conditionCancel=null;resolve(result)};const cancel=()=>finish({outcome:'stopped',message:'停止'});state.conditionCancel=cancel;const bindObservers=()=>{observerList.forEach(o=>o.disconnect());observerList=[];const doc=rootDocument();if(!doc)return;for(const watchRoot of collectWatchRoots(doc)){try{const observer=new MutationObserver(check);observer.observe(watchRoot,{subtree:true,childList:true,attributes:true,characterData:true});observerList.push(observer)}catch{}}};const rebind=()=>{bindObservers();check()};const check=()=>{if(done)return;if(ctx.token!=null&&(!state.running||ctx.token!==state.runToken))return cancel();const result=evaluateCondition(action);if(result.description!==lastText){lastText=result.description;updateStatus(`${actionName(action)}: ${result.description}`)}if(result.error&&result.fatal)return finish(conditionTimeoutOutcome(condition,result.error));if(result.matched){if(matchedSince==null)matchedSince=performance.now();if(performance.now()-matchedSince>=condition.stableMs)return finish({outcome:'execute',message:result.description})}else matchedSince=null};bindObservers();iframe.addEventListener('load',rebind);interval=setInterval(check,100);if(condition.timeoutMs>0)timeout=setTimeout(()=>finish(conditionTimeoutOutcome(condition,`条件の待ち時間を超えました (${formatMs(condition.timeoutMs)})`)),condition.timeoutMs);check()})}
-  function label(el){return String(el?.getAttribute?.('aria-label')||el?.getAttribute?.('title')||el?.textContent||el?.tagName||'対象').trim().replace(/\s+/g,' ').slice(0,22)}
-  function positionalJitter(radiusLimit=Infinity){if(!positionRandomEnabled.checked)return{dx:0,dy:0};const radius=Math.min(clamp(finite(positionJitter.value,DEFAULT_POSITION_JITTER_PX),0,MAX_POSITION_JITTER_PX),radiusLimit);if(!radius||radius<=0)return{dx:0,dy:0};const angle=Math.random()*Math.PI*2,r=Math.sqrt(Math.random())*radius;return{dx:Math.cos(angle)*r,dy:Math.sin(angle)*r}}
-  function resolvePointTarget(action){const base=clickCoordinates(action),j=positionalJitter(),x=clamp(base.x+j.dx,.5,window.innerWidth-.5),y=clamp(base.y+j.dy,.5,window.innerHeight-.5),hit=hitAt(x,y);if(hit.error)return{error:hit.error};const target=clickable(hit.element);return target?{target,x:hit.x,y:hit.y,dx:x-base.x,dy:y-base.y,mode:'point'}:{error:'対象なし'}}
-  function resolveElementTarget(action,element){const target=clickable(element);if(!target)return{error:'対象なし'};if(action.scrollTarget!==false){try{const rect=target.getBoundingClientRect(),view=target.ownerDocument?.defaultView;if(rect.bottom<0||rect.top>(view?.innerHeight||0)||rect.right<0||rect.left>(view?.innerWidth||0))target.scrollIntoView({block:'center',inline:'center',behavior:'instant'})}catch{}}const rect=target.getBoundingClientRect();if(rect.width<=0||rect.height<=0)return{error:'ボタンが表示されていません'};const limit=Math.max(0,Math.min(rect.width,rect.height)/2-1),j=positionalJitter(limit),x=clamp(rect.left+rect.width/2+j.dx,rect.left+.5,rect.right-.5),y=clamp(rect.top+rect.height/2+j.dy,rect.top+.5,rect.bottom-.5);return{target,x,y,dx:j.dx,dy:j.dy,mode:'selector'}}
-  function jqTap(target,x,y){const v=target.ownerDocument?.defaultView||window,j=v.jQuery?.fn?.jquery?v.jQuery:v.$?.fn?.jquery?v.$:null;if(!j)return false;j(target).trigger(j.Event('tap',{clientX:x,clientY:y,pageX:x+(v.scrollX||0),pageY:y+(v.scrollY||0),which:1,button:0}));return true}
-  function pointerOptions(v,x,y,buttons=1){return{bubbles:true,cancelable:true,composed:true,view:v,clientX:x,clientY:y,screenX:x,screenY:y,button:0,buttons}}
-  function pressDown(target,x,y){const v=target.ownerDocument?.defaultView||window,o=pointerOptions(v,x,y,1);try{target.focus?.({preventScroll:true})}catch{}if(v.PointerEvent)target.dispatchEvent(new v.PointerEvent('pointerdown',{...o,pointerId:1,pointerType:'touch',isPrimary:true,pressure:.5}));target.dispatchEvent(new v.MouseEvent('mousedown',o))}
-  function releasePress(target,x,y){const v=target.ownerDocument?.defaultView||window,o=pointerOptions(v,x,y,0);if(v.PointerEvent)target.dispatchEvent(new v.PointerEvent('pointerup',{...o,pointerId:1,pointerType:'touch',isPrimary:true,pressure:0}));target.dispatchEvent(new v.MouseEvent('mouseup',o))}
-  function pressUp(target,x,y){releasePress(target,x,y);const v=target.ownerDocument?.defaultView||window,o=pointerOptions(v,x,y,0);if(target.click)target.click();else target.dispatchEvent(new v.MouseEvent('click',o))}
-  function animateMarker(p){p.element?.classList.remove('running');if(p.element){void p.element.offsetWidth;p.element.classList.add('running')}}
-  function currentIframeUrl(){try{return iframe.contentWindow.location.href}catch{return urlInput.value||iframe.src||''}}
-  function cancelNavigationWait(){const cancel=state.navigationCancel;state.navigationCancel=null;cancel?.()}
-  function navigateAndWait(action,{token=null}={}){cancelNavigationWait();const url=normalizeUrl(action.url);if(!url)return Promise.resolve({ok:false,message:'URL未設定'});return new Promise(resolve=>{let done=false,timer=null;const finish=result=>{if(done)return;done=true;if(timer)clearTimeout(timer);iframe.removeEventListener('load',loaded);iframe.removeEventListener('error',failed);if(state.navigationCancel===cancel)state.navigationCancel=null;resolve(result)};const loaded=()=>finish({ok:true,message:`移動完了: ${displayUrl(url)}`});const failed=()=>finish({ok:false,message:'URL読込エラー'});const cancel=()=>finish({ok:false,stopped:true,message:'停止'});state.navigationCancel=cancel;if(action.waitForLoad){iframe.addEventListener('load',loaded,{once:true});iframe.addEventListener('error',failed,{once:true});timer=setTimeout(()=>finish({ok:false,message:`読込タイムアウト (${formatMs(action.loadTimeoutMs)})`}),action.loadTimeoutMs)}urlInput.value=url;iframe.src=url;saveState();if(!action.waitForLoad)finish({ok:true,message:`移動開始: ${displayUrl(url)}`});if(token!=null&&(!state.running||token!==state.runToken))cancel()})}
-  async function executeNavigation(action,{token=null}={}){return navigateAndWait(action,{token})}
-  async function executePoint(action,{token=null}={}){let resolved;if(action.targetMode==='selector'){const waited=await waitForClickTarget(action,{token});if(waited.stopped)return{ok:false,stopped:true,message:'停止'};if(waited.ok)resolved=resolveElementTarget(action,waited.element);else if(action.targetFailureMode==='point')resolved=resolvePointTarget(action);else if(action.targetFailureMode==='skip')return{ok:false,skipped:true,message:waited.message};else return{ok:false,message:waited.message}}else resolved=resolvePointTarget(action);if(resolved.error)return{ok:false,message:resolved.error};const{target,x,y,dx,dy}=resolved,m=method.value,jqAvailable=Boolean((target.ownerDocument?.defaultView||window).jQuery?.fn?.jquery||(target.ownerDocument?.defaultView||window).$?.fn?.jquery),usePress=m==='click'||m==='both'||(m==='tap'&&!jqAvailable);animateMarker(action);if(usePress)pressDown(target,x,y);if(action.holdMs>0&&token!=null){if(!await wait(action.holdMs,token)){if(usePress)releasePress(target,x,y);return{ok:false,stopped:true,message:'停止'}}}else if(action.holdMs>0)await new Promise(resolve=>setTimeout(resolve,action.holdMs));if(token!=null&&(!state.running||token!==state.runToken)){if(usePress)releasePress(target,x,y);return{ok:false,stopped:true,message:'停止'}};if((m==='tap'||m==='both')&&jqAvailable)jqTap(target,x,y);if(usePress)pressUp(target,x,y);return{ok:true,message:label(target),dx,dy,mode:resolved.mode}}
-  const randomInt=(a,b)=>Math.floor(Math.random()*(b-a+1))+a;
-  function getTimeJitter(index){if(!timeRandomEnabled.checked||index===0)return 0;const r=clamp(int(timeJitter.value,DEFAULT_TIME_JITTER_MS),0,5000);return randomInt(-r,r)}
-  function wait(ms,token){return new Promise(resolve=>{if(!state.running||token!==state.runToken)return resolve(false);let done=false;const finish=v=>{if(done)return;done=true;if(state.timer!=null){clearTimeout(state.timer);state.timer=null}if(state.waitResolver===finish)state.waitResolver=null;resolve(v)};state.waitResolver=finish;state.timer=setTimeout(()=>finish(state.running&&token===state.runToken),ms)})}
-  async function evaluatePointDecision(p,ctx){return waitForCondition(p,ctx)}
-  async function runPoint(p,ctx){
-    const name=actionName(p,ctx.index);state.currentActionIndex=ctx.index;updateRunStats();if(p.enabled===false){appendLog(`${name}は使わない設定のため飛ばしました`,'skip');return'skipped'}
-    const j=getTimeJitter(ctx.index),actual=Math.max(0,p.delayMs+j);ctx.cumulative+=actual-p.delayMs;
-    updateStatus(`${name} · ${formatMs(actual)}待機 (${signed(j)} / 累積${signed(ctx.cumulative)})`);
-    if(!await wait(actual,ctx.token))return'stopped';
-    const decision=await evaluatePointDecision(p,ctx);if(decision.outcome==='stopped')return'stopped';if(decision.outcome==='skip'){updateStatus(`${name}: 条件が合わないため飛ばしました`);appendLog(`${name}: 条件が合わないため飛ばしました`,'skip');return'skipped'}if(decision.outcome==='stop'){updateStatus(`${name}: ${decision.message}`);appendLog(`${name}: ${decision.message}`,'error');return'failed-stop'}
-    if(isWait(p)){updateStatus(`${name}: 条件成立`);appendLog(`${name}: 条件成立`,'success');return'executed'}
-    const r=isNavigate(p)?await executeNavigation(p,{token:ctx.token}):await executePoint(p,{token:ctx.token});
-    if(r.stopped)return'stopped';if(r.skipped){updateStatus(`${name}: ${r.message}`);appendLog(`${name}: ${r.message}`,'skip');return'skipped'}
-    if(r.ok)updateStatus(isNavigate(p)?`${name}: ${r.message}`:`${name}: ${r.message} 位置Δ${r.dx.toFixed(1)},${r.dy.toFixed(1)}px`);else updateStatus(`${name}: ${r.message}`);
-    if(r.ok)appendLog(`${name}: ${r.message}`,'success');else appendLog(`${name}: ${r.message}`,'error');if(!r.ok&&((isNavigate(p)&&p.failureMode==='stop')||(!isNavigate(p)&&!isWait(p)&&p.targetFailureMode==='stop')))return'failed-stop';
-    return r.ok?'executed':'failed'
+  function migrateWorkflowStore(raw) {
+    if (!raw) {
+      const workflow = defaultWorkflow();
+      return { version: 1, currentId: workflow.id, workflows: [workflow] };
+    }
+    if (Array.isArray(raw)) {
+      const workflows = raw.map(normalizeWorkflow);
+      const fallback = workflows[0] || defaultWorkflow();
+      return { version: 1, currentId: fallback.id, workflows: workflows.length ? workflows : [fallback] };
+    }
+    if (Array.isArray(raw.blocks)) {
+      const workflow = normalizeWorkflow(raw);
+      return { version: 1, currentId: workflow.id, workflows: [workflow] };
+    }
+    const workflows = (Array.isArray(raw.workflows) ? raw.workflows : []).map(normalizeWorkflow);
+    if (!workflows.length) workflows.push(defaultWorkflow());
+    const currentId = workflows.some(workflow => workflow.id === raw.currentId) ? raw.currentId : workflows[0].id;
+    return { version: 1, currentId, workflows };
   }
-  async function startSequence({startIndex=0}={}){
-    if(state.running||state.recording||!state.points.length)return;
-    state.running=true;state.runToken+=1;state.runStartIndex=clamp(int(startIndex,0),0,Math.max(0,state.points.length-1));state.currentActionIndex=-1;state.runCycle=0;
-    const token=state.runToken,points=state.points.slice(),limit=clamp(int(count.value,1),1,999999);
-    saveState();updateButtons();appendLog(`実行開始 · ${state.runStartIndex+1}番目から`);updateRunStats('実行を開始しました');
-    try{
-      let cycle=0;
-      while(state.running&&token===state.runToken){
-        state.runCycle=cycle;let cumulative=0;
-        for(let i=state.runStartIndex;i<points.length;i++){
-          const ctx={token,index:i,cycle,cumulative};
-          const out=await runPoint(points[i],ctx);
-          cumulative=ctx.cumulative;
-          if(out==='stopped')return;if(out==='failed-stop'){stopSequence(`${actionName(points[i],i)}で停止`,{increment:false});return;}
-        }
-        cycle+=1;
-        if(!loop.checked&&cycle>=limit){stopSequence(`${cycle}回完了`,{increment:false});return}
+
+  function readJson(key) {
+    try {
+      return JSON.parse(localStorage.getItem(key) || 'null');
+    } catch {
+      return null;
+    }
+  }
+
+  function loadWorkflowStore() {
+    const primary = readJson(WORKFLOW_STORAGE_KEY);
+    const autosave = readJson(WORKFLOW_AUTOSAVE_KEY);
+    const source = autosave?.updatedAt > (primary?.updatedAt || 0) ? autosave.store : primary;
+    state.workflows = migrateWorkflowStore(source);
+    state.selectedWorkflowId = state.workflows.currentId;
+  }
+
+  function workflowStoreSnapshot() {
+    return {
+      version: 1,
+      currentId: state.selectedWorkflowId,
+      workflows: state.workflows.workflows.map(workflow => normalizeWorkflow(workflow)),
+      updatedAt: Date.now()
+    };
+  }
+
+  function saveWorkflowStore({ immediate = false } = {}) {
+    ui.autosave.textContent = '保存中';
+    clearTimeout(state.autosaveTimer);
+    const perform = () => {
+      try {
+        const snapshot = workflowStoreSnapshot();
+        localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
+        localStorage.setItem(WORKFLOW_AUTOSAVE_KEY, JSON.stringify({ updatedAt: snapshot.updatedAt, store: snapshot }));
+        ui.autosave.textContent = '保存済み';
+      } catch (error) {
+        ui.autosave.textContent = '保存失敗';
+        appendLog(`ワークフロー保存失敗: ${error.message}`, 'error');
       }
-    }catch(e){console.error('[Iframe AutoClicker]',e);appendLog(`実行エラー: ${e?.message||e}`,'error');stopSequence('実行エラー')}
+    };
+    if (immediate) perform();
+    else state.autosaveTimer = setTimeout(perform, 180);
   }
-  function stopSequence(message='停止',{increment=true}={}){if(increment)state.runToken+=1;state.running=false;cancelNavigationWait();cancelConditionWait();cancelTargetWait();if(state.timer!=null){clearTimeout(state.timer);state.timer=null}const r=state.waitResolver;state.waitResolver=null;r?.(false);state.currentActionIndex=-1;updateButtons();updateStatus(message);updateRunStats(message);appendLog(message,message.includes('完了')?'success':'')}
 
-  function createRecordDot(x,y,n){const d=document.createElement('div');d.className='recordDot';d.textContent=String(n);d.style.left=`${x}px`;d.style.top=`${y}px`;recordLayer.append(d);return d}
-  function updateRecordCount(){recordCount.textContent=`${state.recordings.length} タッチ`}
-  function startRecording(){if(state.running||state.recording)return;state.recording=true;state.recordStartedAt=performance.now();state.recordings=[];state.activeRecordPointers.clear();recordLayer.textContent='';recordLayer.classList.add('active');recordHud.classList.add('active');updateRecordCount();updateButtons();updateStatus('記録中：押したい場所を順番にタッチ')}
-  function stopRecording({apply=true}={}){if(!state.recording)return;state.recording=false;state.activeRecordPointers.clear();recordLayer.classList.remove('active');recordHud.classList.remove('active');if(apply&&state.recordings.length){createRecoveryPoint('記録適用前');const recs=state.recordings.slice().sort((a,b)=>a.startAt-b.startAt);if(recordMode.value==='replace')clearMarkers(),state.points=[],state.selectedId=null;let previousStart=0;for(let i=0;i<recs.length;i++){const r=recs[i],delay=i===0?r.startAt:r.startAt-previousStart;previousStart=r.startAt;addPoint({cx:r.x,cy:r.y,delayMs:Math.max(0,int(delay)),holdMs:Math.max(0,int(r.hold)),select:false})}state.selectedId=state.points.at(-1)?.id??null;refreshMarkers();selectPoint(state.selectedId,{announce:false});updateStatus(`${recs.length}タッチを地点へ変換`)}else updateStatus(apply?'記録なし':'記録を中止');recordLayer.textContent='';state.recordings=[];updateButtons();saveState()}
-  function recordPointerDown(e){if(!state.recording)return;e.preventDefault();e.stopPropagation();const a=e.getCoalescedEvents?.(),q=a?.length?a[a.length-1]:e,now=performance.now(),item={pointerId:e.pointerId,startAbsolute:now,startAt:now-state.recordStartedAt,x:q.clientX,y:q.clientY,hold:0,dot:createRecordDot(q.clientX,q.clientY,state.recordings.length+state.activeRecordPointers.size+1)};state.activeRecordPointers.set(e.pointerId,item);try{recordLayer.setPointerCapture(e.pointerId)}catch{}}
-  function recordPointerMove(e){const item=state.activeRecordPointers.get(e.pointerId);if(!item)return;e.preventDefault();const a=e.getCoalescedEvents?.(),q=a?.length?a[a.length-1]:e;item.x=q.clientX;item.y=q.clientY;item.dot.style.left=`${item.x}px`;item.dot.style.top=`${item.y}px`}
-  function recordPointerEnd(e){const item=state.activeRecordPointers.get(e.pointerId);if(!item)return;e.preventDefault();recordPointerMove(e);item.hold=clamp(performance.now()-item.startAbsolute,0,MAX_HOLD_MS);state.activeRecordPointers.delete(e.pointerId);state.recordings.push({startAt:item.startAt,x:item.x,y:item.y,hold:item.hold});item.dot.textContent=String(state.recordings.length);updateRecordCount();try{recordLayer.releasePointerCapture(e.pointerId)}catch{}}
+  function currentWorkflow() {
+    return state.workflows?.workflows.find(workflow => workflow.id === state.selectedWorkflowId) || null;
+  }
 
-  function installDockDrag(handle,{tapToOpen=false}={}){const d={active:false,id:null,sx:0,sy:0,ox:0,oy:0,lx:0,ly:0,moved:false,raf:0,suppress:0};const render=()=>{d.raf=0;if(!d.active)return;const dx=d.lx-d.sx,dy=d.ly-d.sy;if(!d.moved&&Math.hypot(dx,dy)>=DRAG_THRESHOLD_PX)d.moved=true;if(!d.moved)return;state.dockX=d.ox+dx;state.dockY=d.oy+dy;normalizeDockPosition()};const move=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();const a=e.getCoalescedEvents?.(),q=a?.length?a[a.length-1]:e;d.lx=q.clientX;d.ly=q.clientY;if(!d.raf)d.raf=requestAnimationFrame(render)};const remove=()=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',end,true);window.removeEventListener('pointercancel',end,true)};const end=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();d.lx=e.clientX;d.ly=e.clientY;if(d.raf){cancelAnimationFrame(d.raf);d.raf=0}render();d.active=false;handle.classList.remove('dragging');remove();if(d.moved){d.suppress=performance.now()+350;updateDockAnchors();saveState()}else if(tapToOpen)setCompact(false);try{handle.releasePointerCapture(e.pointerId)}catch{}};handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();d.active=true;d.id=e.pointerId;d.sx=d.lx=e.clientX;d.sy=d.ly=e.clientY;d.ox=state.dockX??dock.getBoundingClientRect().left;d.oy=state.dockY??dock.getBoundingClientRect().top;d.moved=false;handle.classList.add('dragging');try{handle.setPointerCapture(e.pointerId)}catch{}window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',end,{capture:true,passive:false});window.addEventListener('pointercancel',end,{capture:true,passive:false})},{passive:false});handle.addEventListener('keydown',e=>{const step=e.shiftKey?48:12,moves={ArrowLeft:[-step,0],ArrowRight:[step,0],ArrowUp:[0,-step],ArrowDown:[0,step]},moveBy=moves[e.key];if(moveBy){e.preventDefault();state.dockX=(state.dockX??dock.getBoundingClientRect().left)+moveBy[0];state.dockY=(state.dockY??dock.getBoundingClientRect().top)+moveBy[1];normalizeDockPosition();updateDockAnchors();saveState()}else if(tapToOpen&&(e.key==='Enter'||e.key===' ')){e.preventDefault();setCompact(false)}});onCleanup(remove)}
+  function touchWorkflow() {
+    const workflow = currentWorkflow();
+    if (workflow) workflow.updatedAt = Date.now();
+    saveWorkflowStore();
+  }
 
-  function installDockResize(handle,side){const d={active:false,id:null,sx:0,sy:0,lx:0,ly:0,startX:0,startY:0,startW:0,startH:0,right:0,raf:0};const render=()=>{d.raf=0;if(!d.active)return;const dx=d.lx-d.sx,dy=d.ly-d.sy,limits=dockLimits();let width=side==='left'?d.startW-dx:d.startW+dx;let height=d.startH+dy;width=clamp(width,MIN_DOCK_WIDTH,limits.maxWidth);height=clamp(height,MIN_DOCK_HEIGHT,limits.maxHeight);state.dockWidth=width;state.dockHeight=height;if(side==='left')state.dockX=d.right-width;else state.dockX=d.startX;state.dockY=d.startY;applyDockSize();normalizeDockPosition()};const move=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();const list=e.getCoalescedEvents?.(),q=list?.length?list[list.length-1]:e;d.lx=q.clientX;d.ly=q.clientY;render()};const remove=()=>{window.removeEventListener('pointermove',move,true);window.removeEventListener('pointerup',end,true);window.removeEventListener('pointercancel',end,true)};const end=e=>{if(!d.active||e.pointerId!==d.id)return;e.preventDefault();d.lx=e.clientX;d.ly=e.clientY;render();d.active=false;dock.classList.remove('resizing');remove();updateDockAnchors();saveState();try{handle.releasePointerCapture(e.pointerId)}catch{}};handle.addEventListener('pointerdown',e=>{if(e.button!==0||state.compact||!state.settingsOpen||state.running||state.recording)return;e.preventDefault();e.stopPropagation();const r=dock.getBoundingClientRect();d.active=true;d.id=e.pointerId;d.sx=d.lx=e.clientX;d.sy=d.ly=e.clientY;d.startX=r.left;d.startY=r.top;d.startW=r.width;d.startH=r.height;d.right=r.right;dock.classList.add('resizing');try{handle.setPointerCapture(e.pointerId)}catch{}window.addEventListener('pointermove',move,{capture:true,passive:false});window.addEventListener('pointerup',end,{capture:true,passive:false});window.addEventListener('pointercancel',end,{capture:true,passive:false})},{passive:false});handle.addEventListener('keydown',e=>{const step=e.shiftKey?80:16;if(!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home'].includes(e.key))return;e.preventDefault();if(e.key==='Home'){state.dockWidth=DEFAULT_DOCK_WIDTH;state.dockHeight=DEFAULT_DOCK_HEIGHT}else{const r=dock.getBoundingClientRect(),limits=dockLimits(),right=r.right;if(e.key==='ArrowLeft')state.dockWidth=clamp(r.width-step,limits.minWidth,limits.maxWidth);if(e.key==='ArrowRight')state.dockWidth=clamp(r.width+step,limits.minWidth,limits.maxWidth);if(e.key==='ArrowUp')state.dockHeight=clamp(r.height-step,limits.minHeight,limits.maxHeight);if(e.key==='ArrowDown')state.dockHeight=clamp(r.height+step,limits.minHeight,limits.maxHeight);if(side==='left')state.dockX=right-state.dockWidth}applyDockSize();normalizeDockPosition();updateDockAnchors();saveState()});handle.addEventListener('dblclick',e=>{e.preventDefault();state.dockWidth=DEFAULT_DOCK_WIDTH;state.dockHeight=DEFAULT_DOCK_HEIGHT;applyDockSize();normalizeDockPosition();saveState();updateStatus('メニューサイズを標準に戻しました')});onCleanup(remove)}
+  const TEMPLATES = Object.freeze([
+    ['gbf-assist', 'グラブル：救援を評価して参加', () => [createBlock('gbfAssistSelect')]],
+    ['gbf-unclaimed', 'グラブル：未確認バトルをすべて確認', () => [createBlock('gbfUnclaimedAll')]],
+    ['gbf-supporter', 'グラブル：サポーター条件選択', () => [createBlock('gbfSupporterConditional')]],
+    ['gbf-fullauto', 'グラブル：フルオートをON', () => [createBlock('gbfEnsureFullAuto')]],
+    ['gbf-attack-wait', 'グラブル：フルオート攻撃開始まで待つ', () => [createBlock('gbfWaitAutoAttack')]],
+    ['gbf-full-flow', 'グラブル：救援参加フルフロー', () => [createBlock('gbfAssistSelect'), createBlock('gbfEnsureFullAuto'), createBlock('gbfWaitAutoAttack')]],
+    ['control-repeat', '制御：指定回数繰り返す', () => [createBlock('repeat', { children: [createBlock('gbfEnsureFullAuto'), createBlock('gbfWaitAutoAttack'), createBlock('randomWait', { config: { minSeconds: 0.5, maxSeconds: 0.8 } })] })]],
+    ['control-until', '制御：条件成立まで繰り返す', () => [createBlock('repeatUntil')]],
+    ['wait-random', '待機：指定区間をランダム待機', () => [createBlock('randomWait')]],
+    ['frame-reload', 'iframe：再読み込み', () => [createBlock('iframeReload')]],
+    ['frame-back', 'iframe：履歴を1つ戻る', () => [createBlock('iframeBack')]]
+  ]);
 
+  function findTemplate(id) {
+    return TEMPLATES.find(template => template[0] === id) || TEMPLATES[0];
+  }
 
-  function placeDockPreset(position){if(state.running||state.recording)return;state.compact=false;dock.classList.remove('compact');const size=applyDockSize(),box=size.limits.box,margin=12,right=box.left+box.width-size.width-margin,bottom=box.top+box.height-size.height-margin,centerX=box.left+(box.width-size.width)/2;const positions={topLeft:[box.left+margin,box.top+margin],topCenter:[centerX,box.top+margin],topRight:[right,box.top+margin],bottomLeft:[box.left+margin,bottom],bottomCenter:[centerX,bottom],bottomRight:[right,bottom]},key=String(position||'').replace(/-([a-z])/g,(_,c)=>c.toUpperCase()),next=positions[key]||positions.bottomCenter;state.dockX=next[0];state.dockY=next[1];normalizeDockPosition();updateDockAnchors();controls.minimize.textContent='—';controls.minimize.setAttribute('aria-label','メニューを小さくする');controls.minimize.setAttribute('aria-expanded','true');saveState();updateStatus('メニュー位置を変更しました')}
-  function setDockSizePreset(size){if(state.running||state.recording)return;if(size==='reset')return resetDockLayout();const presets={small:[480,440],standard:[DEFAULT_DOCK_WIDTH,DEFAULT_DOCK_HEIGHT],large:[900,860]},next=presets[size]||presets.standard;state.compact=false;dock.classList.remove('compact');state.dockWidth=next[0];state.dockHeight=next[1];applyDockSize();normalizeDockPosition();updateDockAnchors();controls.minimize.textContent='—';controls.minimize.setAttribute('aria-label','メニューを小さくする');controls.minimize.setAttribute('aria-expanded','true');saveState();updateStatus(`メニューを${size==='small'?'小さめ':size==='large'?'大きめ':'標準'}にしました`)}
+  function walkBlocks(blocks, visitor, parent = null, branch = 'blocks') {
+    for (let index = 0; index < blocks.length; index++) {
+      const block = blocks[index];
+      const result = visitor(block, blocks, index, parent, branch);
+      if (result) return result;
+      if (Array.isArray(block.children)) {
+        const nested = walkBlocks(block.children, visitor, block, 'children');
+        if (nested) return nested;
+      }
+      if (Array.isArray(block.elseChildren)) {
+        const nested = walkBlocks(block.elseChildren, visitor, block, 'elseChildren');
+        if (nested) return nested;
+      }
+    }
+    return null;
+  }
 
-  function applyImportedSnapshot(data,label='設定'){if(!data||typeof data!=='object')throw new Error('形式が違います');createRecoveryPoint(`${label}読込前`);stopSequence('設定を読込中');clearMarkers();if(!applySnapshot(data))throw new Error('形式が違います');rebuildMarkers();applyVisibility();updateUi();positionDock({defaultIfMissing:true});saveState();const u=normalizeUrl(urlInput.value);if(u)iframe.src=u;updateStatus(`${label}を読み込みました`)}
-  function exportSettingsFile(){const data={...snapshot(),exportMeta:{name:String(presetName.value||'オートフロー').trim()||'オートフロー',exportedAt:new Date().toISOString()}};const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a'),safe=String(data.exportMeta.name).replace(/[\\/:*?"<>|]+/g,'_').slice(0,40)||'autoflow';a.href=url;a.download=`${safe}.autoflow.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);updateStatus('設定ファイルを保存しました')}
+  function findBlockLocation(id) {
+    const workflow = currentWorkflow();
+    if (!workflow) return null;
+    return walkBlocks(workflow.blocks, (block, list, index, parent, branch) =>
+      block.id === id ? { block, list, index, parent, branch } : null
+    );
+  }
 
-  function loadUrl(){const u=normalizeUrl(urlInput.value);if(!u)return urlInput.focus();urlInput.value=u;iframe.src=u;saveState();updateStatus('読込中')}
-  async function singleClick(){const p=selectedPoint();if(!p||state.running||state.recording)return;state.running=true;state.runToken+=1;const token=state.runToken;updateButtons();appendLog(`${actionName(p)}を1回試します`);try{const decision=await waitForCondition(p,{token});if(decision.outcome==='stopped')return;if(decision.outcome==='skip'){updateStatus('条件が合わないため実行しませんでした');appendLog('条件が合わないため実行しませんでした','skip');return}if(decision.outcome==='stop'){updateStatus(decision.message);appendLog(decision.message,'error');return}if(isWait(p)){updateStatus('条件が合いました');appendLog('条件が合いました','success');return}const r=isNavigate(p)?await executeNavigation(p,{token}):await executePoint(p,{token});if(r.skipped){updateStatus(r.message);appendLog(r.message,'skip')}else{updateStatus(r.ok?(isNavigate(p)?`試し実行: ${r.message}`:`試し実行: ${r.message} 位置Δ${r.dx.toFixed(1)},${r.dy.toFixed(1)}px`):r.message);appendLog(r.message,r.ok?'success':'error')}}finally{if(token===state.runToken){state.running=false;cancelNavigationWait();cancelConditionWait();cancelTargetWait();state.currentActionIndex=-1;updateButtons()}}}
-  function onResize(){state.points.forEach(p=>{if(!isNavigate(p)&&!isWait(p)){clampPoint(p);setMarkerPosition(p)}});if(state.keyboardOpen){if(state.keyboardTarget!=='url')requestAnimationFrame(placeDockForKeyboard);return}applyDockSize();requestAnimationFrame(()=>positionDock({defaultIfMissing:true,useAnchor:true}))}
+  function regenerateBlockIds(block) {
+    block.id = nowId('block');
+    block.children?.forEach(regenerateBlockIds);
+    block.elseChildren?.forEach(regenerateBlockIds);
+    return block;
+  }
 
-  controls.load.addEventListener('click',loadUrl);urlInput.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();loadUrl()}});
-  iframe.addEventListener('load',()=>{try{urlInput.value=iframe.contentWindow.location.href;if(!state.running)updateStatus('読込完了');saveState();refreshGranblueAssistant()}catch{if(!state.running)updateStatus('読込完了・別ドメイン');refreshGranblueAssistant()}});
-  controls.back.addEventListener('click',()=>{try{iframe.contentWindow.history.back()}catch{updateStatus('戻る操作不可')}});
-  controls.forward.addEventListener('click',()=>{try{iframe.contentWindow.history.forward()}catch{updateStatus('進む操作不可')}});
-  controls.reload.addEventListener('click',()=>{try{iframe.contentWindow.location.reload()}catch{iframe.src=iframe.src}});
-  controls.hideBrowser.addEventListener('click',()=>setBrowserHidden(true));browserHandle.addEventListener('click',()=>setBrowserHidden(false));controls.close.addEventListener('click',destroy);
-  controls.addMenu.addEventListener('click',()=>setAddMenu(!state.addMenuOpen));
-  controls.add.addEventListener('click',()=>{addPoint();revealEditor('action');setAddMenu(false)});controls.addNavigate.addEventListener('click',()=>{addNavigation();revealEditor('action');setAddMenu(false)});controls.addWait.addEventListener('click',()=>{addWait();revealEditor('condition');setAddMenu(false)});
-  controls.deletePanel.addEventListener('click',deleteSelected);controls.single.addEventListener('click',singleClick);controls.runFromSelected.addEventListener('click',()=>startSequence({startIndex:Math.max(0,pointIndex(selectedPoint()))}));controls.record.addEventListener('click',startRecording);controls.run.addEventListener('click',()=>state.running?stopSequence():startSequence());controls.compactRun.addEventListener('click',()=>state.running?stopSequence():startSequence());
-  controls.settings.addEventListener('click',()=>setSettings(!state.settingsOpen));controls.undo.addEventListener('click',restoreRecovery);dockPositionButtons.forEach(button=>button.addEventListener('click',()=>placeDockPreset(button.dataset.dockPosition)));dockSizeButtons.forEach(button=>button.addEventListener('click',()=>setDockSizePreset(button.dataset.dockSize)));controls.minimize.addEventListener('click',()=>setCompact(!state.compact));controls.movePrev.addEventListener('click',()=>moveSelected(-1));controls.moveNext.addEventListener('click',()=>moveSelected(1));controls.duplicate.addEventListener('click',duplicatePoint);controls.center.addEventListener('click',centerPoint);controls.pickPointTarget.addEventListener('click',()=>startPicker('point'));controls.pickClickTarget.addEventListener('click',()=>startPicker('click'));controls.clear.addEventListener('click',clearPoints);
-  pointDelay.addEventListener('change',()=>{const p=selectedPoint();if(!p)return;p.delayMs=normalizeDelay(pointDelay.value,p.delayMs);pointDelay.value=p.delayMs;refreshMarkers();saveState();updateStatus(`${actionName(p)}: ${formatMs(p.delayMs)}`)});
-  pointHold.addEventListener('change',()=>{const p=selectedPoint();if(!p)return;p.holdMs=normalizeHold(pointHold.value,p.holdMs);pointHold.value=p.holdMs;refreshMarkers();saveState();updateStatus(`地点${pointIndex(p)+1}: 保持${p.holdMs}ms`)});
-  actionEnabled.addEventListener('change',()=>{const p=selectedPoint();if(!p)return;p.enabled=actionEnabled.checked;saveState();renderPointStrip();updateStatus(`${actionName(p)}を${p.enabled?'使う':'使わない'}設定にしました`)});
-  clickModeButtons.forEach(button=>button.addEventListener('click',()=>setClickTargetMode(button.dataset.mode)));
-  function saveClickTargetFromUi(){const p=selectedPoint();if(!p||isNavigate(p)||isWait(p))return;p.selector=String(clickSelector.value||'').trim();p.waitForTarget=waitForTarget.checked;p.targetTimeoutMs=normalizeTargetTimeout(targetTimeout.value,p.targetTimeoutMs);p.targetFailureMode=['skip','point'].includes(targetFailure.value)?targetFailure.value:'stop';p.scrollTarget=scrollTarget.checked;targetTimeout.value=p.targetTimeoutMs;saveState();renderPointStrip();updateClickTargetSummary()}
-  for(const control of [clickSelector,targetTimeout,targetFailure,scrollTarget])control.addEventListener('change',saveClickTargetFromUi);waitForTarget.addEventListener('change',()=>{saveClickTargetFromUi();updateEditor()});clickSelector.addEventListener('input',saveClickTargetFromUi);
-  controls.testClickTarget.addEventListener('click',()=>{const p=selectedPoint();if(!p)return;saveClickTargetFromUi();const result=clickElementStatus(p);if(result.ok){flashTarget(result.element,`見つかりました · ${label(result.element)}`);p.targetLabel=label(result.element);saveState();renderPointStrip()}updateClickTargetSummary({ok:result.ok,message:result.message})});
-  actionUrl.addEventListener('change',()=>{const p=selectedPoint();if(!isNavigate(p))return;p.url=String(actionUrl.value||'').trim();actionUrl.value=p.url;saveState();renderPointStrip();updateStatus(`${actionName(p)}: URL更新`)});
-  waitForLoad.addEventListener('change',()=>{const p=selectedPoint();if(!isNavigate(p))return;p.waitForLoad=waitForLoad.checked;saveState();updateEditor()});
-  loadTimeout.addEventListener('change',()=>{const p=selectedPoint();if(!isNavigate(p))return;p.loadTimeoutMs=normalizeNavigationTimeout(loadTimeout.value,p.loadTimeoutMs);loadTimeout.value=p.loadTimeoutMs;saveState()});
-  navigationFailure.addEventListener('change',()=>{const p=selectedPoint();if(!isNavigate(p))return;p.failureMode=navigationFailure.value==='continue'?'continue':'stop';saveState()});
-  function saveConditionFromUi(){const p=selectedPoint();if(!p)return;p.condition=normalizeCondition({enabled:conditionEnabled.checked,mode:conditionMode.value,target:conditionTarget.value,selector:conditionSelector.value,type:conditionType.value,className:conditionClass.value,valueName:conditionValueName.value,expected:conditionExpected.value,text:conditionText.value,timeoutMs:conditionTimeout.value,timeoutAction:conditionTimeoutAction.value,stableMs:conditionStable.value},p.type);updateConditionFields();renderPointStrip();saveState()}
-  for(const control of [conditionEnabled,conditionTarget,conditionSelector,conditionType,conditionClass,conditionValueName,conditionExpected,conditionText,conditionMode,conditionTimeout,conditionTimeoutAction,conditionStable])control.addEventListener('change',()=>{if(!isGranblueConditionType(conditionType.value)&&conditionTarget.value==='page'&&!['page_ready','url_contains','url_not_contains'].includes(conditionType.value))conditionType.value='page_ready';saveConditionFromUi();updateEditor()});
-  conditionSelector.addEventListener('input',saveConditionFromUi);conditionClass.addEventListener('input',saveConditionFromUi);conditionValueName.addEventListener('input',saveConditionFromUi);conditionExpected.addEventListener('input',saveConditionFromUi);conditionText.addEventListener('input',saveConditionFromUi);
-  function showConditionResult(result){const matched=Boolean(result.matched),message=result.error?`確認できません：${result.error}`:matched?`今は進む状態です。開始すると、この動作をすぐ実行します。${result.current?` 現在: ${result.current}`:''}`:`今は待つ状態です。開始すると、条件が合うまでここで待ちます。${result.current?` 現在: ${result.current}`:''}`;conditionResult.classList.toggle('ok',matched);conditionResult.classList.toggle('bad',Boolean(result.error)||!matched);if(conditionResult.lastElementChild.textContent!==message)conditionResult.lastElementChild.textContent=message;updateConditionTargetSummary()}
-  controls.testCondition.addEventListener('click',()=>{const p=selectedPoint();if(!p)return;saveConditionFromUi();const result=evaluateCondition(p);showConditionResult(result);if(result.element)flashTarget(result.element,result.description)});controls.pickConditionTarget.addEventListener('click',()=>startPicker('condition'));
-  controls.inspectCondition.addEventListener('click',()=>{const p=selectedPoint();if(!p)return;saveConditionFromUi();const c=normalizeCondition(p.condition,p.type);if(isGranblueConditionType(c.type)){const result=evaluateCondition(p);showConditionResult(result);if(result.element)flashTarget(result.element,result.description);return}const target=baseConditionTarget(p,c);if(target.error)return showConditionResult({error:target.error});if(target.page)return showConditionResult(evaluateCondition(p));const el=target.element;if(!el)return showConditionResult({matched:false,current:'対象なし'});flashTarget(el,`${label(el)} · ${plainElementState(el)}`);conditionResult.classList.remove('ok','bad');conditionResult.lastElementChild.textContent=`現在のボタン：${plainElementState(el)}。条件は「${conditionTypeLabel(c.type)}」です。`;updateConditionTargetSummary()});
-  controls.autoCondition.addEventListener('click',()=>applyConditionRecommendation(conditionRecommendationFor(selectedPoint())));controls.applyConditionRecommendation.addEventListener('click',()=>applyConditionRecommendation());controls.scanGranblue.addEventListener('click',()=>{refreshGranblueAssistant();updateStatus('グラブルの現在状態を診断しました')});
-    conditionPresetButtons.forEach(button=>button.addEventListener('click',()=>{const p=selectedPoint();if(!p)return;conditionEnabled.checked=true;const preset=button.dataset.conditionPreset;if(isGranblueConditionType(preset)){conditionTarget.value='selector';conditionSelector.value=preset.startsWith('gbf_full_auto_')?'.btn-auto':'.btn-attack-start';conditionType.value=preset}else if(preset==='page_ready'){conditionTarget.value='page';conditionType.value='page_ready'}else{conditionTarget.value=!isNavigate(p)&&!isWait(p)?'action':'selector';conditionType.value=preset}saveConditionFromUi();updateEditor();refreshGranblueAssistant();showConditionResult(evaluateCondition(p))}));tabButtons.forEach((button,index)=>{button.addEventListener('click',()=>setActiveTab(button.dataset.tab));button.addEventListener('keydown',event=>{let next=index;if(event.key==='ArrowRight'||event.key==='ArrowDown')next=(index+1)%tabButtons.length;else if(event.key==='ArrowLeft'||event.key==='ArrowUp')next=(index-1+tabButtons.length)%tabButtons.length;else if(event.key==='Home')next=0;else if(event.key==='End')next=tabButtons.length-1;else return;event.preventDefault();const target=tabButtons[next];setActiveTab(target.dataset.tab);target.focus()})});
-  controls.useCurrentUrl.addEventListener('click',()=>{const p=selectedPoint();if(!isNavigate(p))return;p.url=currentIframeUrl();actionUrl.value=p.url;saveState();renderPointStrip();updateStatus(`${actionName(p)}へ現在URLを設定`)});
-  controls.navigateNow.addEventListener('click',async()=>{const p=selectedPoint();if(!isNavigate(p))return;const r=await executeNavigation(p);updateStatus(r.message)});
-  for(const c of [method,count,loop,timeRandomEnabled,timeJitter,positionRandomEnabled,positionJitter,recordMode])c.addEventListener('change',()=>{count.value=clamp(int(count.value,1),1,999999);timeJitter.value=clamp(int(timeJitter.value,DEFAULT_TIME_JITTER_MS),0,5000);positionJitter.value=clamp(finite(positionJitter.value,DEFAULT_POSITION_JITTER_PX),0,MAX_POSITION_JITTER_PX);saveState();updateButtons()});
-  controls.recordPanel.addEventListener('click',startRecording);controls.finishRecord.addEventListener('click',()=>stopRecording({apply:true}));controls.cancelRecord.addEventListener('click',()=>stopRecording({apply:false}));
-  recordLayer.addEventListener('pointerdown',recordPointerDown,{passive:false});recordLayer.addEventListener('pointermove',recordPointerMove,{passive:false});recordLayer.addEventListener('pointerup',recordPointerEnd,{passive:false});recordLayer.addEventListener('pointercancel',recordPointerEnd,{passive:false});
-  controls.savePreset.addEventListener('click',()=>savePreset());controls.loadPreset.addEventListener('click',loadPreset);controls.deletePreset.addEventListener('click',deletePreset);presetSlot.addEventListener('change',updatePresetInfo);presetName.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();savePreset()}});controls.restoreRecovery.addEventListener('click',restoreRecovery);controls.exportSettings.addEventListener('click',exportSettingsFile);controls.importFile.addEventListener('click',()=>settingsFile.click());settingsFile.addEventListener('change',async()=>{const file=settingsFile.files?.[0];settingsFile.value='';if(!file)return;try{applyImportedSnapshot(JSON.parse(await file.text()),`「${file.name}」`)}catch(error){updateStatus(`ファイルを読めません: ${error.message}`)}});controls.clearLog.addEventListener('click',()=>{state.logs=[];renderLogs();updateRunStats('履歴を消しました')});controls.copySettings.addEventListener('click',async()=>{const text=JSON.stringify(snapshot(),null,2);try{await navigator.clipboard.writeText(text);updateStatus('設定をコピーしました')}catch{prompt('この設定をコピーしてください',text)}});controls.importSettings.addEventListener('click',()=>{const text=prompt('コピーした設定を貼り付けてください');if(!text)return;try{applyImportedSnapshot(JSON.parse(text),'貼り付けた設定')}catch(error){updateStatus(`設定を読めません: ${error.message}`)}});
-  pickerLayer.addEventListener('pointerdown',event=>{if(event.target===controls.cancelPicker)return;event.preventDefault();event.stopPropagation()},{passive:false});pickerLayer.addEventListener('pointerup',event=>{if(event.target===controls.cancelPicker)return;event.preventDefault();event.stopPropagation();applyPickedTarget(event)},{passive:false});controls.cancelPicker.addEventListener('click',event=>{event.stopPropagation();endPicker('選択を中止しました')});
+  function cloneBlock(block) {
+    return regenerateBlockIds(deepClone(block));
+  }
 
-  function handlePanelShortcut(event){if(event.defaultPrevented)return;const target=event.composedPath?.()[0]||event.target,editing=target instanceof HTMLElement&&target.matches('input,select,textarea');if(event.key==='Escape'){if(state.picking){event.preventDefault();endPicker('選択を中止しました')}else if(state.recording){event.preventDefault();stopRecording({apply:false})}else if(state.running){event.preventDefault();stopSequence('停止')}else if(state.addMenuOpen){event.preventDefault();setAddMenu(false)}return}if((event.metaKey||event.ctrlKey)&&event.key==='Enter'&&!editing){event.preventDefault();state.running?stopSequence('停止'):startSequence()}}
-  shadow.addEventListener('keydown',handlePanelShortcut);
+  function countBlocks(blocks) {
+    let count = 0;
+    walkBlocks(blocks, () => {
+      count += 1;
+      return null;
+    });
+    return count;
+  }
 
-  const usesSoftwareKeyboard=()=>Boolean(window.matchMedia?.('(hover:none) and (pointer:coarse)').matches);
-  shadow.addEventListener('focusin',event=>{const target=event.target;if(!(target instanceof HTMLElement)||!target.matches('input,select,textarea'))return;if(target===urlInput){setTimeout(()=>target.select?.(),0);return}if(!usesSoftwareKeyboard())return;enterKeyboardMode(target)});shadow.addEventListener('focusout',()=>{clearTimeout(state.keyboardFocusTimer);state.keyboardFocusTimer=setTimeout(()=>{const active=shadow.activeElement;if(!(active instanceof HTMLElement)||!active.matches('input,select,textarea')||active===urlInput)exitKeyboardMode()},140)});
-  window.addEventListener('resize',onResize,{passive:true});window.visualViewport?.addEventListener('resize',onResize,{passive:true});onCleanup(()=>{window.removeEventListener('resize',onResize);window.visualViewport?.removeEventListener('resize',onResize)});installDockDrag(dockHandle);installDockDrag(compactGrip,{tapToOpen:true});installDockResize(resizeLeft,'left');installDockResize(resizeRight,'right');dockHandle.addEventListener('dblclick',event=>{event.preventDefault();resetDockLayout()});compactGrip.addEventListener('dblclick',event=>{event.preventDefault();resetDockLayout()});const previewTimer=setInterval(()=>{if(state.destroyed||state.running||state.recording||!state.settingsOpen||state.activeTab!=='condition')return;const p=selectedPoint();if(p?.condition?.enabled)showConditionResult(evaluateCondition(p));else updateConditionTargetSummary();refreshGranblueAssistant()},700);onCleanup(()=>clearInterval(previewTimer));
+  function isDescendant(block, targetId) {
+    if (block.id === targetId) return true;
+    return [...(block.children || []), ...(block.elseChildren || [])].some(child => isDescendant(child, targetId));
+  }
 
-  function destroy(){if(state.destroyed)return;state.destroyed=true;if(state.recording)stopRecording({apply:false});endPicker('終了');clearTimeout(state.highlightTimer);stopSequence('終了');clearMarkers();for(const fn of cleanup){try{fn()}catch{}}cleanup.clear();root.remove();if(window[GLOBAL_KEY]?.destroy===destroy)delete window[GLOBAL_KEY]}
+  function removeBlockById(id) {
+    const location = findBlockLocation(id);
+    if (!location) return null;
+    const [removed] = location.list.splice(location.index, 1);
+    return removed;
+  }
 
-  document.documentElement.append(root);shadow.querySelectorAll('input[type=number]').forEach(input=>input.inputMode='decimal');loadInitial();refreshPresets();rebuildMarkers();applyVisibility();updateUi();if(!state.points.length)updateStatus('「＋ 追加」から最初の動作を作成してください');requestAnimationFrame(()=>positionDock({defaultIfMissing:true}));const savedInitial=String(urlInput.value||'').trim(),initial=normalizeUrl(!savedInitial||savedInitial==='about:blank'?location.href:savedInitial);urlInput.value=initial;iframe.src=initial;
-  window.__AUTO_TEST__={state,shadow,iframe,addPoint,addNavigation,addWait,clearPoints,startSequence,stopSequence,evaluateCondition,waitForCondition,executePoint,readGranblueFullAutoState,readGranblueAttackState,selectorForElement,clickElementStatus,normalizeCondition,applySnapshot,snapshot,applyDockSize,setCompact,savePreset,restoreRecovery,method,positionRandomEnabled,timeRandomEnabled,conditionRecommendationFor,refreshGranblueAssistant};
-  window[GLOBAL_KEY]={destroy,save:saveState,stop:stopSequence,record:startRecording,startFromSelected:()=>startSequence({startIndex:Math.max(0,pointIndex(selectedPoint()))})};
-  if(typeof completion==='function')completion({ok:true,installed:true,version:12});
+  function moveBlockToList(id, targetList, targetIndex) {
+    const location = findBlockLocation(id);
+    if (!location) return false;
+    const moving = location.block;
+    const targetOwner = walkBlocks(currentWorkflow().blocks, block =>
+      block.children === targetList || block.elseChildren === targetList ? block : null
+    );
+    if (targetOwner && isDescendant(moving, targetOwner.id)) return false;
+    location.list.splice(location.index, 1);
+    let index = clamp(int(targetIndex, targetList.length), 0, targetList.length);
+    if (location.list === targetList && location.index < index) index -= 1;
+    targetList.splice(index, 0, moving);
+    touchWorkflow();
+    renderWorkflowEditor();
+    return true;
+  }
+
+  function moveBlockSibling(id, direction) {
+    const location = findBlockLocation(id);
+    if (!location) return;
+    const next = location.index + direction;
+    if (next < 0 || next >= location.list.length) return;
+    [location.list[location.index], location.list[next]] = [location.list[next], location.list[location.index]];
+    touchWorkflow();
+    renderWorkflowEditor();
+  }
+
+  function indentBlock(id) {
+    const location = findBlockLocation(id);
+    if (!location || location.index <= 0) return;
+    const previous = location.list[location.index - 1];
+    if (!BLOCK_DEFINITIONS[previous.type]?.container) {
+      toast('直前のブロックは入れ子を持てません');
+      return;
+    }
+    location.list.splice(location.index, 1);
+    previous.children.push(location.block);
+    touchWorkflow();
+    renderWorkflowEditor();
+  }
+
+  function outdentBlock(id) {
+    const location = findBlockLocation(id);
+    if (!location?.parent) return;
+    const parentLocation = findBlockLocation(location.parent.id);
+    if (!parentLocation) return;
+    location.list.splice(location.index, 1);
+    parentLocation.list.splice(parentLocation.index + 1, 0, location.block);
+    touchWorkflow();
+    renderWorkflowEditor();
+  }
+
+  function setInsertion(list, index, description) {
+    state.insertion = { list, index };
+    ui.insertHint.textContent = `${description}へ追加します。`;
+    ui.palette.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function addBlockAtInsertion(type) {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    const target = state.insertion || { list: workflow.blocks, index: workflow.blocks.length };
+    target.list.splice(clamp(target.index, 0, target.list.length), 0, createBlock(type));
+    state.insertion = null;
+    ui.insertHint.textContent = '末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。';
+    touchWorkflow();
+    renderWorkflowEditor();
+  }
+
+  function element(tag, options = {}, children = []) {
+    const node = document.createElement(tag);
+    if (options.className) node.className = options.className;
+    if (options.text != null) node.textContent = options.text;
+    if (options.type) node.type = options.type;
+    if (options.value != null) node.value = options.value;
+    if (options.title) node.title = options.title;
+    if (options.dataset) Object.assign(node.dataset, options.dataset);
+    if (options.attrs) for (const [key, value] of Object.entries(options.attrs)) node.setAttribute(key, value);
+    for (const child of Array.isArray(children) ? children : [children]) if (child) node.append(child);
+    return node;
+  }
+
+  function field(labelText, input) {
+    return element('label', { className: 'field' }, [element('span', { text: labelText }), input]);
+  }
+
+  function numberInput(value, min, max, step, onChange) {
+    const input = element('input', { type: 'number', value });
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    input.inputMode = 'decimal';
+    input.addEventListener('change', () => onChange(input));
+    return input;
+  }
+
+  function textInput(value, onChange, placeholder = '') {
+    const input = element('input', { type: 'text', value });
+    input.placeholder = placeholder;
+    input.addEventListener('change', () => onChange(input));
+    return input;
+  }
+
+  function selectInput(value, options, onChange) {
+    const select = element('select');
+    for (const [optionValue, labelText] of options) {
+      const option = element('option', { value: optionValue, text: labelText });
+      select.append(option);
+    }
+    select.value = value;
+    select.addEventListener('change', () => onChange(select));
+    return select;
+  }
+
+  function updateBlockConfig(block, updater) {
+    updater(block.config);
+    const normalized = normalizeBlock(block);
+    block.config = normalized.config;
+    if (normalized.children) block.children = normalized.children;
+    if (normalized.elseChildren) block.elseChildren = normalized.elseChildren;
+    touchWorkflow();
+    renderWorkflowEditor();
+  }
+
+  function renderCandidates(block, container) {
+    const candidates = normalizeCandidates(block.config.supporterCandidates);
+    const grid = element('div', { className: 'grid2' });
+    candidates.forEach((candidate, index) => {
+      const name = textInput(candidate.name, input => updateBlockConfig(block, config => {
+        config.supporterCandidates = normalizeCandidates(config.supporterCandidates);
+        config.supporterCandidates[index].name = input.value;
+      }), '召喚石名（完全一致）');
+      const level = numberInput(candidate.minimumLevel, 0, 9999, 1, input => updateBlockConfig(block, config => {
+        config.supporterCandidates = normalizeCandidates(config.supporterCandidates);
+        config.supporterCandidates[index].minimumLevel = finite(input.value, 0);
+      }));
+      grid.append(field(`候補${index + 1} 名前`, name), field(`候補${index + 1} 最低Lv`, level));
+    });
+    container.append(grid);
+  }
+
+  function renderConditionFields(block, container, configKey = 'condition') {
+    const condition = normalizeConditionConfig(block.config[configKey]);
+    const grid = element('div', { className: 'grid2' });
+    const type = selectInput(condition.type, CONDITION_OPTIONS, input => updateBlockConfig(block, config => {
+      config[configKey] = normalizeConditionConfig(config[configKey]);
+      config[configKey].type = input.value;
+    }));
+    const selector = textInput(condition.selector, input => updateBlockConfig(block, config => {
+      config[configKey] = normalizeConditionConfig(config[configKey]);
+      config[configKey].selector = input.value;
+    }), '.selector または #id');
+    const value = textInput(condition.value, input => updateBlockConfig(block, config => {
+      config[configKey] = normalizeConditionConfig(config[configKey]);
+      config[configKey].value = input.value;
+    }), 'URLに含む文字など');
+    grid.append(field('条件', type), field('セレクタ', selector), field('比較値', value));
+    container.append(grid);
+  }
+
+  function renderBlockConfig(block, container) {
+    const config = block.config;
+    const grid = element('div', { className: 'grid2' });
+    const addNumber = (labelText, key, min, max, step) => grid.append(field(labelText,
+      numberInput(config[key], min, max, step, input => updateBlockConfig(block, next => { next[key] = finite(input.value, config[key]); }))
+    ));
+    switch (block.type) {
+      case 'gbfAssistSelect':
+        addNumber('最低残HP（%）', 'minimumHp', 0, 100, 0.1);
+        addNumber('更新基準時間（秒）', 'baseDelaySec', 0, 600, 0.1);
+        addNumber('更新ずれ時間 ±秒', 'jitterSec', 0, 600, 0.1);
+        addNumber('状態待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('最大再試行回数', 'maxAttempts', 1, 100000, 1);
+        container.append(grid);
+        renderCandidates(block, container);
+        return;
+      case 'gbfSupporterConditional':
+        addNumber('候補待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        container.append(grid);
+        renderCandidates(block, container);
+        return;
+      case 'gbfSupporterAuto':
+      case 'gbfEnsureFullAuto':
+      case 'gbfWaitAutoAttack':
+        addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        break;
+      case 'gbfDeckConfirm':
+        addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('エラー後更新基準（秒）', 'refreshBaseDelaySec', 0, 600, 0.1);
+        addNumber('エラー後更新ずれ ±秒', 'refreshJitterSec', 0, 600, 0.1);
+        break;
+      case 'gbfUnclaimedAll':
+        addNumber('画面待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('安全上限件数', 'maxItems', 1, 100000, 1);
+        break;
+      case 'gbfRefreshAssist':
+        addNumber('更新前待機（秒）', 'baseDelaySec', 0, 600, 0.1);
+        addNumber('待機ずれ ±秒', 'jitterSec', 0, 600, 0.1);
+        addNumber('更新タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        break;
+      case 'repeat':
+        addNumber('繰り返す回数', 'count', 0, MAX_REPEAT_COUNT, 1);
+        break;
+      case 'repeatUntil':
+        renderConditionFields(block, container);
+        addNumber('最大反復回数', 'maxIterations', 1, 100000, 1);
+        addNumber('最大実行時間（秒）', 'maxDurationSec', 1, 86400, 1);
+        break;
+      case 'if':
+        renderConditionFields(block, container);
+        return;
+      case 'stop': {
+        const reason = textInput(config.reason, input => updateBlockConfig(block, next => { next.reason = input.value; }), '停止理由');
+        grid.append(field('停止理由', reason));
+        break;
+      }
+      case 'fixedWait':
+        addNumber('待機秒数', 'seconds', 0, 86400, 0.01);
+        break;
+      case 'randomWait':
+        addNumber('最小秒', 'minSeconds', 0, 86400, 0.01);
+        addNumber('最大秒', 'maxSeconds', 0, 86400, 0.01);
+        break;
+      case 'watch':
+        renderConditionFields(block, container);
+        addNumber('タイムアウト（秒、0=無制限）', 'timeoutSec', 0, 86400, 1);
+        addNumber('成立安定時間（ms）', 'stableMs', 0, 5000, 10);
+        break;
+      case 'iframeReload':
+      case 'iframeBack':
+      case 'iframeReady': {
+        addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        const expected = selectInput(config.expectedScreen, [
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+        ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
+        grid.append(field('目的画面', expected));
+        break;
+      }
+      case 'iframeRoute': {
+        const route = textInput(config.route, input => updateBlockConfig(block, next => { next.route = input.value; }), '#quest/assist/multi/0');
+        grid.append(field('ゲーム内ルート', route));
+        addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        const expected = selectInput(config.expectedScreen, [
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+        ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
+        grid.append(field('目的画面', expected));
+        break;
+      }
+    }
+    container.append(grid);
+  }
+
+  function createDropZone(list, index) {
+    const zone = element('div', { className: 'dropZone' });
+    zone.addEventListener('dragover', event => {
+      if (!state.dragBlockId) return;
+      event.preventDefault();
+      zone.classList.add('dragOver');
+    });
+    zone.addEventListener('dragleave', () => zone.classList.remove('dragOver'));
+    zone.addEventListener('drop', event => {
+      event.preventDefault();
+      zone.classList.remove('dragOver');
+      if (state.dragBlockId) moveBlockToList(state.dragBlockId, list, index);
+      state.dragBlockId = null;
+    });
+    return zone;
+  }
+
+  function renderBlockList(blocks, host, depth = 0, branchName = 'blocks') {
+    host.append(createDropZone(blocks, 0));
+    blocks.forEach((block, index) => {
+      const definition = BLOCK_DEFINITIONS[block.type] || { category: 'control', label: block.type, description: '未対応' };
+      const card = element('div', { className: `blockCard category-${definition.category}` });
+      card.dataset.blockId = block.id;
+      card.draggable = !state.running;
+      card.classList.toggle('running', state.running?.currentBlockId === block.id);
+      card.classList.toggle('collapsed', state.collapsed.has(block.id));
+      card.addEventListener('dragstart', event => {
+        if (state.running) return event.preventDefault();
+        state.dragBlockId = block.id;
+        card.classList.add('dragging');
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', block.id);
+      });
+      card.addEventListener('dragend', () => {
+        card.classList.remove('dragging');
+        state.dragBlockId = null;
+        shadow.querySelectorAll('.dropZone.dragOver').forEach(zone => zone.classList.remove('dragOver'));
+      });
+
+      const collapse = element('button', { className: 'dragHandle', text: state.collapsed.has(block.id) ? '＋' : '−', title: '折りたたみ' });
+      collapse.addEventListener('click', () => {
+        if (state.collapsed.has(block.id)) state.collapsed.delete(block.id); else state.collapsed.add(block.id);
+        renderWorkflowEditor();
+      });
+      const name = element('div', { className: 'blockName' }, [
+        element('strong', { text: definition.label }),
+        element('small', { text: definition.description })
+      ]);
+      const progress = state.blockProgress.get(block.id);
+      if (progress) name.append(element('span', { className: 'progressBadge', text: progress }));
+      const tools = element('div', { className: 'blockTools' });
+      const tool = (text, title, handler) => {
+        const button = element('button', { text, title });
+        button.disabled = Boolean(state.running);
+        button.addEventListener('click', handler);
+        tools.append(button);
+      };
+      tool('↑', '上へ', () => moveBlockSibling(block.id, -1));
+      tool('↓', '下へ', () => moveBlockSibling(block.id, 1));
+      tool('→', '直前の親へ入れる', () => indentBlock(block.id));
+      tool('←', '親から外へ出す', () => outdentBlock(block.id));
+      tool('複製', '複製', () => {
+        const location = findBlockLocation(block.id);
+        location.list.splice(location.index + 1, 0, cloneBlock(block));
+        touchWorkflow();
+        renderWorkflowEditor();
+      });
+      tool('＋下', 'この直後へ追加', () => {
+        const location = findBlockLocation(block.id);
+        setInsertion(location.list, location.index + 1, `「${definition.label}」の直後`);
+      });
+      if (definition.container) tool('＋子', '子ブロックへ追加', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`));
+      tool('削除', '削除', () => {
+        removeBlockById(block.id);
+        touchWorkflow();
+        renderWorkflowEditor();
+      });
+      const head = element('div', { className: 'blockHead' }, [collapse, name, tools]);
+      const body = element('div', { className: 'blockBody' });
+      renderBlockConfig(block, body);
+      if (state.running) body.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = true; });
+      card.append(head, body);
+
+      if (definition.container) {
+        const childArea = element('div', { className: 'childArea' });
+        const childLabel = element('div', { className: 'childLabel' }, [
+          element('span', { text: block.type === 'if' ? '条件成立時' : '内側の処理' }),
+          element('button', { text: '＋子' })
+        ]);
+        childLabel.lastElementChild.addEventListener('click', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`));
+        childArea.append(childLabel);
+        renderBlockList(block.children, childArea, depth + 1, 'children');
+        card.append(childArea);
+      }
+      if (definition.elseBranch) {
+        const elseArea = element('div', { className: 'childArea' });
+        const elseLabel = element('div', { className: 'childLabel' }, [element('span', { text: '条件不成立時' }), element('button', { text: '＋else' })]);
+        elseLabel.lastElementChild.addEventListener('click', () => setInsertion(block.elseChildren, block.elseChildren.length, '条件不成立側'));
+        elseArea.append(elseLabel);
+        renderBlockList(block.elseChildren, elseArea, depth + 1, 'elseChildren');
+        card.append(elseArea);
+      }
+      host.append(card, createDropZone(blocks, index + 1));
+    });
+  }
+
+  function renderWorkflowEditor() {
+    workflowEditor.textContent = '';
+    const workflow = currentWorkflow();
+    if (!workflow) return;
+    ui.workflowName.value = workflow.name;
+    ui.workflowStats.textContent = `${countBlocks(workflow.blocks)}ブロック`;
+    if (!workflow.blocks.length) {
+      workflowEditor.append(element('div', { className: 'empty', text: 'ブロックがありません。上のパレットまたは完成テンプレートから追加してください。' }));
+      return;
+    }
+    renderBlockList(workflow.blocks, workflowEditor);
+  }
+
+  function renderWorkflowSelect() {
+    ui.workflowSelect.textContent = '';
+    for (const workflow of state.workflows.workflows) {
+      ui.workflowSelect.append(element('option', { value: workflow.id, text: workflow.name }));
+    }
+    ui.workflowSelect.value = state.selectedWorkflowId;
+    renderWorkflowEditor();
+  }
+
+  function renderPalette() {
+    ui.palette.textContent = '';
+    for (const [type, definition] of Object.entries(BLOCK_DEFINITIONS)) {
+      const button = element('button', { className: `paletteButton ${definition.category}` }, [
+        element('strong', { text: `${CATEGORY_LABELS[definition.category]}：${definition.label}` }),
+        element('small', { text: definition.description })
+      ]);
+      button.disabled = Boolean(state.running);
+      button.addEventListener('click', () => addBlockAtInsertion(type));
+      ui.palette.append(button);
+    }
+  }
+
+  function renderTemplateSelect() {
+    ui.templateSelect.textContent = '';
+    for (const [id, labelText] of TEMPLATES) ui.templateSelect.append(element('option', { value: id, text: labelText }));
+  }
+
+  class FlowError extends Error {
+    constructor(message, code = 'FLOW_ERROR', details = null) {
+      super(message);
+      this.name = 'FlowError';
+      this.code = code;
+      this.details = details;
+    }
+  }
+
+  class FlowStop extends Error {
+    constructor(message = '停止しました') {
+      super(message);
+      this.name = 'FlowStop';
+    }
+  }
+
+  function abortException(signal) {
+    const reason = signal?.reason;
+    if (reason instanceof Error) return reason;
+    return new DOMException(String(reason || 'Aborted'), 'AbortError');
+  }
+
+  function throwIfAborted(signal) {
+    if (signal?.aborted) throw abortException(signal);
+  }
+
+  function abortableDelay(ms, signal) {
+    throwIfAborted(signal);
+    const delay = Math.max(0, finite(ms, 0));
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = callback => value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        callback(value);
+      };
+      const onResolve = finish(resolve);
+      const onReject = finish(reject);
+      const onAbort = () => onReject(abortException(signal));
+      const timer = setTimeout(() => onResolve(), delay);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  function frameWindow() {
+    const win = iframe.contentWindow;
+    if (!win) throw new FlowError('iframeがまだ利用できません', 'FRAME_UNAVAILABLE');
+    return win;
+  }
+
+  function frameDocument() {
+    try {
+      const doc = iframe.contentDocument || frameWindow().document;
+      if (!doc) throw new Error('document unavailable');
+      return doc;
+    } catch {
+      throw new FlowError('iframe内部を読み取れません。同一オリジンで開いてください', 'CROSS_ORIGIN');
+    }
+  }
+
+  function currentFrameUrl() {
+    try {
+      return frameWindow().location.href;
+    } catch {
+      return urlInput.value || iframe.src || '';
+    }
+  }
+
+  function computedVisible(element) {
+    if (!element || !element.isConnected) return false;
+    const view = element.ownerDocument?.defaultView || window;
+    const style = view.getComputedStyle?.(element);
+    if (style) {
+      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse') return false;
+      if (Number(style.opacity) === 0) return false;
+    }
+    const rect = element.getBoundingClientRect?.();
+    return Boolean(rect && rect.width > 0 && rect.height > 0 && element.getClientRects?.().length);
+  }
+
+  function hiddenOrAbsent(doc, selector) {
+    const element = doc.querySelector(selector);
+    return !element || !computedVisible(element);
+  }
+
+  function popupInfo(doc = frameDocument()) {
+    const popup = doc.querySelector(SELECTORS.popup);
+    if (!popup || !computedVisible(popup)) return null;
+    const body = popup.querySelector(SELECTORS.popupBody);
+    const text = normalizePopupText(body?.textContent || '');
+    let type = 'UNKNOWN_ERROR';
+    if (text === NORMALIZED_ERRORS.MAX_ASSIST) type = 'MAX_ASSIST_ERROR';
+    else if (text === NORMALIZED_ERRORS.UNCLAIMED) type = 'UNCLAIMED_ERROR';
+    else if (text === NORMALIZED_ERRORS.RAID_FULL) type = 'RAID_FULL_ERROR';
+    return { type, text, rawText: String(body?.textContent || '').trim(), popup, ok: popup.querySelector(SELECTORS.popupOk) };
+  }
+
+  function detectScreenState(doc = frameDocument()) {
+    const popup = popupInfo(doc);
+    if (popup) return { ...popup, document: doc };
+    const deckOk = doc.querySelector(SELECTORS.deckOk);
+    if (deckOk && computedVisible(deckOk)) return { type: 'DECK_CONFIRM', element: deckOk, document: doc };
+    const unclaimedList = doc.querySelector(SELECTORS.unclaimedList);
+    if (unclaimedList) return { type: 'UNCLAIMED_LIST', element: unclaimedList, document: doc };
+    const supporter = doc.querySelector(SELECTORS.supporterScreen);
+    if (supporter) return { type: 'SUPPORTER', element: supporter, document: doc };
+    const assist = doc.querySelector(SELECTORS.assistScreen);
+    if (assist) return { type: 'ASSIST_LIST', element: assist, document: doc };
+    const battle = doc.querySelector(SELECTORS.battleScreen);
+    if (battle) return { type: 'BATTLE', element: battle, document: doc };
+    if (currentFrameUrl().includes('result_multi/')) return { type: 'RESULT', document: doc };
+    return { type: 'UNKNOWN', document: doc };
+  }
+
+  function safeDetectScreenState() {
+    try {
+      return detectScreenState();
+    } catch (error) {
+      return { type: error.code || 'UNAVAILABLE', error };
+    }
+  }
+
+  function screenSignature(doc = frameDocument()) {
+    const stateInfo = detectScreenState(doc);
+    const assistRows = [...doc.querySelectorAll(SELECTORS.assistRows)].slice(0, 12).map(row => [
+      row.dataset.raidId || '',
+      row.querySelector('.prt-raid-gauge-inner')?.style.width || '',
+      normalizePopupText(row.querySelector('.prt-flees-in')?.textContent || '')
+    ].join(':')).join('|');
+    const unclaimedRows = [...doc.querySelectorAll(SELECTORS.unclaimedRows)].slice(0, 12).map(row => row.dataset.raidId || row.dataset.href || '').join('|');
+    return `${stateInfo.type}|${assistRows}|${unclaimedRows}|${doc.body?.childElementCount || 0}`;
+  }
+
+  function captureFrameState() {
+    let doc = null;
+    let href = currentFrameUrl();
+    let screen = 'UNAVAILABLE';
+    let signature = '';
+    try {
+      doc = frameDocument();
+      screen = detectScreenState(doc).type;
+      signature = screenSignature(doc);
+    } catch {}
+    return { doc, href, screen, signature, at: performance.now() };
+  }
+
+  function expectedScreenMatches(expected, doc, stateInfo = detectScreenState(doc)) {
+    if (!expected || expected === 'auto') return ['ASSIST_LIST', 'SUPPORTER', 'DECK_CONFIRM', 'UNCLAIMED_LIST', 'BATTLE', 'RESULT'].includes(stateInfo.type);
+    if (expected === 'assist') return stateInfo.type === 'ASSIST_LIST';
+    if (expected === 'supporter') return stateInfo.type === 'SUPPORTER' || stateInfo.type === 'DECK_CONFIRM';
+    if (expected === 'unclaimed') return stateInfo.type === 'UNCLAIMED_LIST';
+    if (expected === 'battle') return stateInfo.type === 'BATTLE';
+    if (expected === 'result') return stateInfo.type === 'RESULT' || currentFrameUrl().includes('result_multi/');
+    return false;
+  }
+
+  function pageBaseReady(doc) {
+    return ['interactive', 'complete'].includes(doc.readyState)
+      && hiddenOrAbsent(doc, '#loading')
+      && hiddenOrAbsent(doc, '#ready');
+  }
+
+  function monitorFrame(check, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '状態待ち', allowInterval = true } = {}) {
+    throwIfAborted(signal);
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let observer = null;
+      let observedDoc = null;
+      let timeout = null;
+      let interval = null;
+      let stableSince = null;
+      let lastMutation = performance.now();
+
+      const cleanupMonitor = () => {
+        observer?.disconnect();
+        observer = null;
+        observedDoc = null;
+        clearTimeout(timeout);
+        clearInterval(interval);
+        iframe.removeEventListener('load', onFrameLoad);
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        cleanupMonitor();
+        callback(value);
+      };
+      const onAbort = () => finish(reject, abortException(signal));
+      const onFrameLoad = () => {
+        lastMutation = performance.now();
+        bindObserver();
+        evaluate();
+      };
+      const bindObserver = () => {
+        let doc;
+        try { doc = frameDocument(); } catch { return; }
+        if (doc === observedDoc) return;
+        observer?.disconnect();
+        observedDoc = doc;
+        const rootNode = doc.documentElement || doc;
+        observer = new MutationObserver(() => {
+          lastMutation = performance.now();
+          stableSince = null;
+          evaluate();
+        });
+        try {
+          observer.observe(rootNode, { subtree: true, childList: true, attributes: true, characterData: true });
+        } catch {}
+      };
+      const evaluate = () => {
+        if (settled) return;
+        if (signal?.aborted) return onAbort();
+        bindObserver();
+        let result;
+        try {
+          result = check({ lastMutation });
+        } catch (error) {
+          if (error instanceof FlowError && ['CROSS_ORIGIN', 'FRAME_UNAVAILABLE'].includes(error.code)) return;
+          return finish(reject, error);
+        }
+        if (!result) {
+          stableSince = null;
+          return;
+        }
+        const now = performance.now();
+        if (stableMs > 0) {
+          if (stableSince == null) stableSince = now;
+          const stableFrom = Math.max(stableSince, lastMutation);
+          if (now - stableFrom < stableMs) return;
+        }
+        finish(resolve, result === true ? {} : result);
+      };
+
+      iframe.addEventListener('load', onFrameLoad);
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
+      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : 300);
+      bindObserver();
+      evaluate();
+    });
+  }
+
+  async function waitForFrameReady({ signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', before = null, requireChange = false, stableMs = DEFAULT_STABLE_MS } = {}) {
+    const baseline = before || captureFrameState();
+    return monitorFrame(() => {
+      const doc = frameDocument();
+      const stateInfo = detectScreenState(doc);
+      if (!pageBaseReady(doc)) return false;
+      if (!expectedScreenMatches(expectedScreen, doc, stateInfo)) return false;
+      if (requireChange) {
+        const changed = doc !== baseline.doc
+          || currentFrameUrl() !== baseline.href
+          || stateInfo.type !== baseline.screen
+          || screenSignature(doc) !== baseline.signature;
+        if (!changed) return false;
+      }
+      return { document: doc, state: stateInfo.type, url: currentFrameUrl() };
+    }, { signal, timeoutMs, stableMs, description: 'ページ読込完了待ち' });
+  }
+
+  async function performFrameOperation(operation, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', requireChange = true } = {}) {
+    const before = captureFrameState();
+    throwIfAborted(signal);
+    const readiness = waitForFrameReady({ signal, timeoutMs, expectedScreen, before, requireChange });
+    try {
+      operation();
+    } catch (error) {
+      readiness.catch(() => {});
+      throw new FlowError(`iframe操作に失敗しました: ${error.message}`, 'NAVIGATION_FAILED');
+    }
+    return readiness;
+  }
+
+  function gameRouteUrl(route) {
+    const raw = String(route || '').trim();
+    if (!raw) throw new FlowError('ゲーム内ルートが空です', 'INVALID_ROUTE');
+    const current = new URL(currentFrameUrl() || urlInput.value || location.href, location.href);
+    if (/^https?:/i.test(raw)) return new URL(raw).href;
+    if (raw.startsWith('#')) {
+      current.hash = raw.slice(1);
+      return current.href;
+    }
+    if (raw.startsWith('/')) return new URL(raw, current.origin).href;
+    current.hash = raw.replace(/^#/, '');
+    return current.href;
+  }
+
+  let tapQueue = Promise.resolve();
+  const activeTapTargets = new WeakSet();
+
+  function queueExclusive(task) {
+    const next = tapQueue.then(task, task);
+    tapQueue = next.catch(() => {});
+    return next;
+  }
+
+  async function jqTapStrict(target, { signal, label: targetLabel = '対象' } = {}) {
+    if (!target || !target.isConnected) throw new FlowError(`${targetLabel}が見つかりません`, 'TARGET_MISSING');
+    return queueExclusive(async () => {
+      throwIfAborted(signal);
+      if (activeTapTargets.has(target)) throw new FlowError(`${targetLabel}はすでに押下処理中です`, 'TAP_BUSY');
+      const win = target.ownerDocument?.defaultView;
+      if (!win || win !== frameWindow()) throw new FlowError(`${targetLabel}が現在のiframeに属していません`, 'STALE_TARGET');
+      const jq = win.jQuery || win.$;
+      if (typeof jq !== 'function' || !jq.fn || typeof jq.fn.trigger !== 'function') {
+        throw new FlowError('iframe側のjQueryまたはtapが利用できないため停止しました', 'JQUERY_TAP_UNAVAILABLE');
+      }
+      activeTapTargets.add(target);
+      try {
+        jq(target).trigger('tap');
+        await sleepMicrotask();
+      } finally {
+        activeTapTargets.delete(target);
+      }
+    });
+  }
+
+  function randomUniform(min, max) {
+    const a = finite(min, 0);
+    const b = finite(max, 0);
+    if (b < a) throw new FlowError('ランダム待機の最大値が最小値未満です', 'INVALID_RANGE');
+    return a + Math.random() * (b - a);
+  }
+
+  function waitForGbfState(accepted, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '画面状態待ち' } = {}) {
+    const acceptedSet = new Set(accepted);
+    return monitorFrame(() => {
+      const stateInfo = detectScreenState();
+      if (stateInfo.type === 'UNKNOWN_ERROR') return stateInfo;
+      return acceptedSet.has(stateInfo.type) ? stateInfo : false;
+    }, { signal, timeoutMs, stableMs, description });
+  }
+
+  function assertNoUnknownPopup(doc = frameDocument()) {
+    const popup = popupInfo(doc);
+    if (popup?.type === 'UNKNOWN_ERROR') {
+      throw new FlowError(`未知のエラー本文を検出しました: ${popup.rawText || '(空)'}`, 'UNKNOWN_POPUP', popup);
+    }
+    return popup;
+  }
+
+  async function tapPopupOk(popup, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expected = null } = {}) {
+    if (!popup?.ok) throw new FlowError('表示中エラーポップアップのOKが見つかりません', 'POPUP_OK_MISSING');
+    const before = captureFrameState();
+    await jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK' });
+    if (expected) {
+      return waitForGbfState(expected, { signal, timeoutMs, description: 'エラー後画面待ち' });
+    }
+    return monitorFrame(() => {
+      const current = popupInfo();
+      if (!current) return { closed: true };
+      if (current.popup !== popup.popup) return { changed: true };
+      const changed = frameDocument() !== before.doc || currentFrameUrl() !== before.href;
+      return changed ? { changed: true } : false;
+    }, { signal, timeoutMs, stableMs: 80, description: 'ポップアップ終了待ち' });
+  }
+
+  function parseAssistRow(row, index = 0) {
+    const hp = parseFloat(row.querySelector('.prt-raid-gauge-inner')?.style.width ?? 'NaN');
+    const peopleText = row.querySelector('.prt-flees-in')?.textContent?.trim() ?? '';
+    const currentPeople = Number.parseInt(peopleText.split('/')[0], 10);
+    return {
+      row,
+      index,
+      hp,
+      peopleText,
+      currentPeople,
+      raidId: String(row.dataset.raidId || ''),
+      score: Number.isFinite(hp) && Number.isInteger(currentPeople) && currentPeople > 0
+        ? (hp ** 3) / currentPeople
+        : Number.NEGATIVE_INFINITY
+    };
+  }
+
+  function rankAssistRows(rows, minimumHp = 50) {
+    return [...rows].map(parseAssistRow).filter(item =>
+      Number.isFinite(item.hp)
+      && item.hp >= minimumHp
+      && Number.isInteger(item.currentPeople)
+      && item.currentPeople > 0
+    ).sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.index - b.index;
+    });
+  }
+
+  function assistListSignature(list) {
+    if (!list) return '';
+    return [...list.children].filter(row => row.matches?.('.btn-multi-raid.lis-raid.search')).map(row => {
+      const hp = row.querySelector('.prt-raid-gauge-inner')?.style.width || '';
+      const people = normalizePopupText(row.querySelector('.prt-flees-in')?.textContent || '');
+      return `${row.dataset.raidId || ''}:${hp}:${people}`;
+    }).join('|');
+  }
+
+  async function waitRandomized(baseSec, jitterSec, signal) {
+    const base = Math.max(0, finite(baseSec, 0));
+    const jitter = Math.max(0, finite(jitterSec, 0));
+    const actual = Math.max(0, base + randomUniform(-jitter, jitter));
+    await abortableDelay(actual * 1000, signal);
+  }
+
+  async function refreshAssistList(config, context) {
+    const { signal } = context;
+    await waitRandomized(config.baseDelaySec, config.jitterSec, signal);
+    const doc = frameDocument();
+    assertNoUnknownPopup(doc);
+    if (detectScreenState(doc).type !== 'ASSIST_LIST') {
+      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist' });
+    }
+    const currentDoc = frameDocument();
+    const refresh = currentDoc.querySelector(SELECTORS.assistRefresh);
+    const beforeList = currentDoc.querySelector(SELECTORS.assistList);
+    if (!refresh || !computedVisible(refresh)) throw new FlowError('救援一覧の更新ボタンが表示されていません', 'REFRESH_MISSING');
+    if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
+    const beforeSignature = assistListSignature(beforeList);
+    let sawMutation = false;
+    let sawLoading = false;
+    let loadingEnded = false;
+    let observer = null;
+    try {
+      observer = new MutationObserver(() => { sawMutation = true; });
+      observer.observe(currentDoc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const waitPromise = monitorFrame(() => {
+        const docNow = frameDocument();
+        const listNow = docNow.querySelector(SELECTORS.assistList);
+        const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
+        if (loadingVisible) sawLoading = true;
+        if (sawLoading && !loadingVisible) loadingEnded = true;
+        const reconstructed = Boolean(listNow && listNow !== beforeList);
+        const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+        const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
+        if (!completed || !listNow || loadingVisible) return false;
+        return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+      }, {
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        stableMs: DEFAULT_STABLE_MS,
+        description: '救援一覧更新完了待ち'
+      });
+      await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
+      await waitPromise;
+    } finally {
+      observer?.disconnect();
+    }
+  }
+
+  function visibleSupporterRows(doc = frameDocument()) {
+    return [...doc.querySelectorAll(SELECTORS.supporterRows)].filter(computedVisible);
+  }
+
+  function parseSupporterRow(row, index = 0) {
+    const name = String(row.querySelector('.js-summon-name')?.textContent || '').trim();
+    const levelText = String(row.querySelector('.txt-summon-level')?.textContent || '').trim();
+    const match = levelText.match(/Lv\s*(\d+)/i);
+    const level = match ? Number.parseInt(match[1], 10) : Number.NaN;
+    const friend = Boolean(row.querySelector('.prt-supporter-name.ico-friend'));
+    return { row, index, name, level, friend, valid: Boolean(name) && Number.isInteger(level) };
+  }
+
+  function chooseSupporter(rows, candidates, random = Math.random) {
+    const parsed = [...rows].map(parseSupporterRow).filter(item => item.valid && computedVisible(item.row));
+    for (const candidate of normalizeCandidates(candidates)) {
+      if (!candidate.name) continue;
+      const matches = parsed.filter(item => item.name === candidate.name && item.level >= candidate.minimumLevel);
+      const friends = matches.filter(item => item.friend);
+      if (friends.length) return friends[0];
+      if (matches.length) {
+        const maxLevel = Math.max(...matches.map(item => item.level));
+        return matches.find(item => item.level === maxLevel) || null;
+      }
+    }
+    if (!parsed.length) return null;
+    const maxLevel = Math.max(...parsed.map(item => item.level));
+    const highest = parsed.filter(item => item.level === maxLevel);
+    if (highest.length === 1) return highest[0];
+    const index = Math.min(highest.length - 1, Math.floor(random() * highest.length));
+    return highest[index];
+  }
+
+  async function waitForSupporterRows(config, context) {
+    return monitorFrame(() => {
+      const doc = frameDocument();
+      const deckOk = doc.querySelector(SELECTORS.deckOk);
+      if (deckOk && computedVisible(deckOk)) return { deckOk, rows: [] };
+      const rows = visibleSupporterRows(doc).filter(row => parseSupporterRow(row).valid);
+      return rows.length ? { rows } : false;
+    }, {
+      signal: context.signal,
+      timeoutMs: config.timeoutSec * 1000,
+      stableMs: 80,
+      description: 'サポーター候補待ち'
+    });
+  }
+
+  async function selectSupporterConditional(config, context) {
+    const { signal } = context;
+    const doc = frameDocument();
+    assertNoUnknownPopup(doc);
+    const deckOk = doc.querySelector(SELECTORS.deckOk);
+    if (deckOk && computedVisible(deckOk)) return { alreadySelected: true, deckOk };
+    const result = await waitForSupporterRows(config, context);
+    if (result.deckOk) return { alreadySelected: true, deckOk: result.deckOk };
+    const selected = chooseSupporter(result.rows, config.supporterCandidates);
+    if (!selected) throw new FlowError('有効なサポーター行または召喚石レベルを取得できません', 'SUPPORTER_NOT_FOUND');
+    const statePromise = waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      description: 'サポーター選択後待ち'
+    });
+    await jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}` });
+    const next = await statePromise;
+    if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+    return { selected, next };
+  }
+
+  async function selectSupporterAuto(config, context) {
+    const { signal } = context;
+    const doc = frameDocument();
+    assertNoUnknownPopup(doc);
+    const deckOk = doc.querySelector(SELECTORS.deckOk);
+    if (deckOk && computedVisible(deckOk)) return { alreadySelected: true, deckOk };
+    const auto = doc.querySelector(SELECTORS.supporterAuto);
+    if (!auto || !computedVisible(auto)) throw new FlowError('サポーター自動選択ボタンが表示されていません', 'SUPPORTER_AUTO_MISSING');
+    const statePromise = waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      description: 'サポーター自動選択後待ち'
+    });
+    await jqTapStrict(auto, { signal, label: 'サポーター自動選択' });
+    return statePromise;
+  }
+
+  async function returnToAssistFromUnclaimed(config, context) {
+    const { signal } = context;
+    const doc = frameDocument();
+    const returnButton = doc.querySelector(SELECTORS.assistReturn);
+    if (returnButton && computedVisible(returnButton)) {
+      const waitPromise = waitForFrameReady({
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        expectedScreen: 'assist',
+        before: captureFrameState(),
+        requireChange: true
+      });
+      await jqTapStrict(returnButton, { signal, label: '救援一覧へ戻る' });
+      return waitPromise;
+    }
+    return performFrameOperation(() => {
+      frameWindow().location.href = gameRouteUrl('#quest/assist/multi/0');
+    }, { signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist', requireChange: true });
+  }
+
+  async function confirmAllUnclaimed(config, context) {
+    const { signal } = context;
+    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'unclaimed' });
+    let processed = 0;
+    while (true) {
+      throwIfAborted(signal);
+      const doc = frameDocument();
+      assertNoUnknownPopup(doc);
+      const rows = [...doc.querySelectorAll(SELECTORS.unclaimedRows)];
+      if (!rows.length) break;
+      if (processed >= config.maxItems) throw new FlowError('未確認バトル処理が安全上限件数を超えました', 'UNCLAIMED_LIMIT');
+      const topRow = rows[0];
+      const href = String(topRow.dataset.href || '');
+      const before = captureFrameState();
+      const resultPromise = monitorFrame(() => {
+        const url = currentFrameUrl();
+        const docNow = frameDocument();
+        if (!pageBaseReady(docNow)) return false;
+        const changed = docNow !== before.doc || url !== before.href || url.includes('result_multi/') || !docNow.querySelector(SELECTORS.unclaimedList);
+        return changed ? { url } : false;
+      }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: DEFAULT_STABLE_MS, description: '未確認結果画面待ち' });
+      await jqTapStrict(topRow, { signal, label: `未確認バトル ${href}` });
+      await resultPromise;
+      processed += 1;
+      await performFrameOperation(() => {
+        frameWindow().location.href = gameRouteUrl('#quest/assist/unclaimed/0/0');
+      }, { signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'unclaimed', requireChange: true });
+    }
+    await returnToAssistFromUnclaimed(config, context);
+    return { processed };
+  }
+
+  function fullAutoState(doc = frameDocument()) {
+    const button = doc.querySelector(SELECTORS.fullAuto);
+    return {
+      button,
+      exists: Boolean(button),
+      visible: computedVisible(button),
+      on: Boolean(button?.classList.contains('on'))
+    };
+  }
+
+  async function ensureFullAuto(config, context) {
+    const { signal } = context;
+    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+    const found = await monitorFrame(() => {
+      const observed = fullAutoState();
+      return observed.exists && observed.visible ? observed : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, description: 'フルオートボタン待ち' });
+    if (found.on) return { changed: false };
+    const waitOn = monitorFrame(() => {
+      const observed = fullAutoState();
+      return observed.exists && observed.visible && observed.on ? observed : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
+    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    await waitOn;
+    return { changed: true };
+  }
+
+  function elementDisplayOn(element) {
+    return Boolean(element && (computedVisible(element) || element.classList.contains('display-on')) && !element.classList.contains('display-off'));
+  }
+
+  function turnSignature(doc = frameDocument()) {
+    const turn = doc.querySelector(SELECTORS.turn);
+    return turn ? `${turn.textContent || ''}|${turn.innerHTML || ''}` : '';
+  }
+
+  function attackSnapshot(doc = frameDocument()) {
+    const start = doc.querySelector(SELECTORS.attackStart);
+    const dummy = doc.querySelector(SELECTORS.attackDummy);
+    const cancel = doc.querySelector(SELECTORS.attackCancel);
+    return {
+      start,
+      dummy,
+      cancel,
+      startVisible: elementDisplayOn(start),
+      dummyVisible: elementDisplayOn(dummy),
+      cancelVisible: elementDisplayOn(cancel),
+      turn: turnSignature(doc)
+    };
+  }
+
+  function isAttackInProgress(snapshot) {
+    return Boolean(snapshot.cancelVisible || snapshot.dummyVisible);
+  }
+
+  async function waitForAutoAttack(config, context) {
+    const { signal } = context;
+    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+    const auto = fullAutoState();
+    if (!auto.on) await ensureFullAuto(config, context);
+    const baseline = attackSnapshot();
+    if (isAttackInProgress(baseline)) return { alreadyAttacking: true };
+    return monitorFrame(() => {
+      const current = attackSnapshot();
+      const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
+      const startBecameHidden = baseline.startVisible && !current.startVisible;
+      const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
+      const started = current.cancelVisible || current.dummyVisible || startReplaced || startBecameHidden || turnChanged;
+      return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 40, description: 'フルオート攻撃開始待ち' });
+  }
+
+  async function recoverKnownPopup(stateInfo, refreshConfig, context) {
+    if (stateInfo.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+    if (!['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(stateInfo.type)) {
+      throw new FlowError(`処理できない画面状態です: ${stateInfo.type}`, 'UNEXPECTED_STATE');
+    }
+    if (stateInfo.type === 'UNCLAIMED_ERROR') {
+      await tapPopupOk(stateInfo, { signal: context.signal, timeoutMs: refreshConfig.timeoutSec * 1000, expected: ['UNCLAIMED_LIST'] });
+      await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
+      return { retry: true, reason: '未確認バトルを処理しました' };
+    }
+    await tapPopupOk(stateInfo, { signal: context.signal, timeoutMs: refreshConfig.timeoutSec * 1000, expected: ['ASSIST_LIST'] });
+    await refreshAssistList(refreshConfig, context);
+    return { retry: true, reason: stateInfo.type === 'MAX_ASSIST_ERROR' ? '最大3件エラーから再試行' : '参戦人数上限から再試行' };
+  }
+
+  async function pressDeckConfirm(config, context) {
+    const { signal } = context;
+    const current = detectScreenState();
+    if (current.type.endsWith('_ERROR')) return recoverKnownPopup(current, {
+      baseDelaySec: config.refreshBaseDelaySec ?? 0.6,
+      jitterSec: config.refreshJitterSec ?? 0,
+      timeoutSec: config.timeoutSec
+    }, context);
+    if (current.type === 'BATTLE') return { battle: true };
+    const doc = frameDocument();
+    const button = doc.querySelector(SELECTORS.deckOk);
+    if (!button || !computedVisible(button)) throw new FlowError('編成確認OKが表示されていません', 'DECK_OK_MISSING');
+    const statePromise = waitForGbfState(['BATTLE', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      description: '編成確認後待ち'
+    });
+    await jqTapStrict(button, { signal, label: '編成確認OK' });
+    const next = await statePromise;
+    if (next.type === 'BATTLE') {
+      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+      return { battle: true };
+    }
+    return recoverKnownPopup(next, {
+      baseDelaySec: config.refreshBaseDelaySec ?? 0.6,
+      jitterSec: config.refreshJitterSec ?? 0,
+      timeoutSec: config.timeoutSec
+    }, context);
+  }
+
+  async function assistSelectFullFlow(config, context) {
+    const { signal } = context;
+    const refreshConfig = { baseDelaySec: config.baseDelaySec, jitterSec: config.jitterSec, timeoutSec: config.timeoutSec };
+    for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
+      throwIfAborted(signal);
+      context.setProgress(`${attempt}回目`);
+      const current = detectScreenState();
+      if (current.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+      if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(current.type)) {
+        await recoverKnownPopup(current, refreshConfig, context);
+        continue;
+      }
+      if (current.type === 'UNCLAIMED_LIST') {
+        await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
+        continue;
+      }
+      if (current.type === 'BATTLE') return { attempts: attempt, alreadyInBattle: true };
+      if (current.type !== 'ASSIST_LIST') {
+        await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist' });
+      }
+
+      const doc = frameDocument();
+      assertNoUnknownPopup(doc);
+      const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
+      const ranked = rankAssistRows(rows, config.minimumHp);
+      if (!ranked.length) {
+        await refreshAssistList(refreshConfig, context);
+        continue;
+      }
+
+      const selected = ranked[0];
+      const nextPromise = waitForGbfState([
+        'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR',
+        'DECK_CONFIRM', 'SUPPORTER', 'UNCLAIMED_LIST', 'BATTLE'
+      ], { signal, timeoutMs: config.timeoutSec * 1000, description: '救援選択後待ち' });
+      await jqTapStrict(selected.row, { signal, label: `救援 ${selected.raidId || selected.index + 1}` });
+      let next = await nextPromise;
+      if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+      if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
+        await recoverKnownPopup(next, refreshConfig, context);
+        continue;
+      }
+      if (next.type === 'UNCLAIMED_LIST') {
+        await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
+        continue;
+      }
+      if (next.type === 'BATTLE') return { attempts: attempt };
+
+      if (next.type === 'SUPPORTER') {
+        const supporterResult = await selectSupporterConditional({
+          timeoutSec: config.timeoutSec,
+          supporterCandidates: config.supporterCandidates
+        }, context);
+        next = supporterResult.next || { type: 'DECK_CONFIRM' };
+        if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+        if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
+          await recoverKnownPopup(next, refreshConfig, context);
+          continue;
+        }
+      }
+
+      if (next.type === 'DECK_CONFIRM' || detectScreenState().type === 'DECK_CONFIRM') {
+        const deckResult = await pressDeckConfirm({
+          timeoutSec: config.timeoutSec,
+          refreshBaseDelaySec: config.baseDelaySec,
+          refreshJitterSec: config.jitterSec
+        }, context);
+        if (deckResult.retry) continue;
+        if (deckResult.battle) return { attempts: attempt };
+      }
+    }
+    throw new FlowError('救援参加の最大再試行回数に達しました', 'ASSIST_MAX_ATTEMPTS');
+  }
+
+  function evaluateWorkflowCondition(condition) {
+    const config = normalizeConditionConfig(condition);
+    const doc = frameDocument();
+    const popup = popupInfo(doc);
+    if (popup?.type === 'UNKNOWN_ERROR') assertNoUnknownPopup(doc);
+    const screen = detectScreenState(doc).type;
+    switch (config.type) {
+      case 'gbfFullAutoOn':
+        return fullAutoState(doc).on;
+      case 'gbfFullAutoOff': {
+        const auto = fullAutoState(doc);
+        return auto.exists && !auto.on;
+      }
+      case 'gbfAttacking':
+        return screen === 'BATTLE' && isAttackInProgress(attackSnapshot(doc));
+      case 'gbfAttackWaiting': {
+        if (screen !== 'BATTLE') return false;
+        const attack = attackSnapshot(doc);
+        return attack.startVisible && !isAttackInProgress(attack);
+      }
+      case 'gbfBattle':
+        return screen === 'BATTLE';
+      case 'gbfAssist':
+        return screen === 'ASSIST_LIST';
+      case 'gbfUnclaimedEmpty':
+        return Boolean(doc.querySelector(SELECTORS.unclaimedList)) && doc.querySelectorAll(SELECTORS.unclaimedRows).length === 0;
+      case 'selectorVisible': {
+        if (!config.selector) throw new FlowError('監視セレクタが空です', 'INVALID_SELECTOR');
+        let element;
+        try { element = doc.querySelector(config.selector); } catch { throw new FlowError('監視セレクタの書式が不正です', 'INVALID_SELECTOR'); }
+        return computedVisible(element);
+      }
+      case 'selectorHidden': {
+        if (!config.selector) throw new FlowError('監視セレクタが空です', 'INVALID_SELECTOR');
+        let element;
+        try { element = doc.querySelector(config.selector); } catch { throw new FlowError('監視セレクタの書式が不正です', 'INVALID_SELECTOR'); }
+        return !element || !computedVisible(element);
+      }
+      case 'selectorExists': {
+        if (!config.selector) throw new FlowError('監視セレクタが空です', 'INVALID_SELECTOR');
+        try { return Boolean(doc.querySelector(config.selector)); } catch { throw new FlowError('監視セレクタの書式が不正です', 'INVALID_SELECTOR'); }
+      }
+      case 'selectorMissing': {
+        if (!config.selector) throw new FlowError('監視セレクタが空です', 'INVALID_SELECTOR');
+        try { return !doc.querySelector(config.selector); } catch { throw new FlowError('監視セレクタの書式が不正です', 'INVALID_SELECTOR'); }
+      }
+      case 'pageReady':
+        return pageBaseReady(doc);
+      case 'urlContains':
+        return currentFrameUrl().includes(config.value);
+      default:
+        return false;
+    }
+  }
+
+  async function waitForWorkflowCondition(config, context, { timeoutSec = 30, stableMs = 0 } = {}) {
+    return monitorFrame(() => evaluateWorkflowCondition(config) ? { matched: true } : false, {
+      signal: context.signal,
+      timeoutMs: Math.max(0, finite(timeoutSec, 30)) * 1000,
+      stableMs: Math.max(0, int(stableMs, 0)),
+      description: '条件成立待ち'
+    });
+  }
+
+  function setRunningBlock(context, block, progress = '') {
+    context.currentBlockId = block?.id || null;
+    state.blockProgress.clear();
+    if (block && progress) state.blockProgress.set(block.id, progress);
+    renderWorkflowEditor();
+  }
+
+  function updateBlockProgress(context, block, progress) {
+    context.currentBlockId = block.id;
+    state.blockProgress.set(block.id, progress);
+    const escapedId = window.CSS?.escape ? window.CSS.escape(block.id) : String(block.id).replace(/[\"\\]/g, '\\$&');
+    const card = shadow.querySelector(`.blockCard[data-block-id="${escapedId}"]`);
+    if (card) {
+      card.classList.add('running');
+      let badge = card.querySelector('.progressBadge');
+      if (!badge) {
+        badge = element('span', { className: 'progressBadge' });
+        card.querySelector('.blockName')?.append(badge);
+      }
+      badge.textContent = progress;
+    }
+  }
+
+  async function runBlockList(blocks, context) {
+    for (const block of blocks) {
+      throwIfAborted(context.signal);
+      await executeWorkflowBlock(block, context);
+    }
+  }
+
+  async function executeWorkflowBlock(block, context) {
+    const definition = BLOCK_DEFINITIONS[block.type];
+    if (!definition) throw new FlowError(`未対応ブロックです: ${block.type}`, 'UNKNOWN_BLOCK');
+    setRunningBlock(context, block);
+    setStatus(definition.label);
+    appendLog('開始', '', definition.label);
+    const blockContext = {
+      ...context,
+      setProgress: progress => updateBlockProgress(context, block, progress)
+    };
+    try {
+      switch (block.type) {
+        case 'gbfAssistSelect':
+          await assistSelectFullFlow(block.config, blockContext);
+          break;
+        case 'gbfSupporterAuto': {
+          const result = await selectSupporterAuto(block.config, blockContext);
+          if (result.type && result.type !== 'DECK_CONFIRM') {
+            if (result.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+            throw new FlowError(`サポーター自動選択後に${result.type}を検出しました`, 'SUPPORTER_AUTO_ERROR');
+          }
+          break;
+        }
+        case 'gbfSupporterConditional': {
+          const result = await selectSupporterConditional(block.config, blockContext);
+          if (result.next && result.next.type !== 'DECK_CONFIRM') {
+            if (result.next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
+            throw new FlowError(`サポーター選択後に${result.next.type}を検出しました`, 'SUPPORTER_SELECT_ERROR');
+          }
+          break;
+        }
+        case 'gbfDeckConfirm':
+          await pressDeckConfirm(block.config, blockContext);
+          break;
+        case 'gbfUnclaimedAll':
+          await confirmAllUnclaimed(block.config, blockContext);
+          break;
+        case 'gbfEnsureFullAuto':
+          await ensureFullAuto(block.config, blockContext);
+          break;
+        case 'gbfWaitAutoAttack':
+          await waitForAutoAttack(block.config, blockContext);
+          break;
+        case 'gbfRefreshAssist':
+          await refreshAssistList(block.config, blockContext);
+          break;
+        case 'repeat': {
+          const count = clamp(int(block.config.count, 0), 0, MAX_REPEAT_COUNT);
+          for (let index = 0; index < count; index++) {
+            throwIfAborted(context.signal);
+            updateBlockProgress(context, block, `${index + 1} / ${count}回目`);
+            await runBlockList(block.children, context);
+          }
+          break;
+        }
+        case 'repeatUntil': {
+          const startedAt = performance.now();
+          const maxIterations = clamp(int(block.config.maxIterations, MAX_CONDITION_ITERATIONS), 1, 100000);
+          const maxDurationMs = clamp(finite(block.config.maxDurationSec, 600), 1, 86400) * 1000;
+          let iteration = 0;
+          while (!evaluateWorkflowCondition(block.config.condition)) {
+            throwIfAborted(context.signal);
+            if (iteration >= maxIterations) throw new FlowError('条件ループの最大反復回数に達しました', 'LOOP_ITERATION_LIMIT');
+            if (performance.now() - startedAt >= maxDurationMs) throw new FlowError('条件ループの最大実行時間に達しました', 'LOOP_DURATION_LIMIT');
+            iteration += 1;
+            updateBlockProgress(context, block, `${iteration}回目`);
+            await runBlockList(block.children, context);
+            if (evaluateWorkflowCondition(block.config.condition)) break;
+          }
+          break;
+        }
+        case 'if':
+          if (evaluateWorkflowCondition(block.config.condition)) await runBlockList(block.children, context);
+          else await runBlockList(block.elseChildren, context);
+          break;
+        case 'stop':
+          throw new FlowStop(block.config.reason);
+        case 'fixedWait':
+          await abortableDelay(block.config.seconds * 1000, context.signal);
+          break;
+        case 'randomWait':
+          await abortableDelay(randomUniform(block.config.minSeconds, block.config.maxSeconds) * 1000, context.signal);
+          break;
+        case 'watch':
+          await waitForWorkflowCondition(block.config.condition, blockContext, { timeoutSec: block.config.timeoutSec, stableMs: block.config.stableMs });
+          break;
+        case 'iframeReload':
+          await performFrameOperation(() => frameWindow().location.reload(), {
+            signal: context.signal,
+            timeoutMs: block.config.timeoutSec * 1000,
+            expectedScreen: block.config.expectedScreen,
+            requireChange: true
+          });
+          break;
+        case 'iframeBack':
+          if (frameWindow().history.length <= 1) throw new FlowError('iframeに戻れる履歴がありません', 'NO_HISTORY');
+          await performFrameOperation(() => frameWindow().history.back(), {
+            signal: context.signal,
+            timeoutMs: block.config.timeoutSec * 1000,
+            expectedScreen: block.config.expectedScreen,
+            requireChange: true
+          });
+          break;
+        case 'iframeRoute':
+          await performFrameOperation(() => { frameWindow().location.href = gameRouteUrl(block.config.route); }, {
+            signal: context.signal,
+            timeoutMs: block.config.timeoutSec * 1000,
+            expectedScreen: block.config.expectedScreen,
+            requireChange: true
+          });
+          break;
+        case 'iframeReady':
+          await waitForFrameReady({
+            signal: context.signal,
+            timeoutMs: block.config.timeoutSec * 1000,
+            expectedScreen: block.config.expectedScreen,
+            requireChange: false
+          });
+          break;
+      }
+      appendLog('完了', 'success', definition.label);
+    } catch (error) {
+      error.block = error.block || block;
+      throw error;
+    }
+  }
+
+  async function startWorkflow() {
+    if (state.running || state.legacyRunning) return;
+    const workflow = currentWorkflow();
+    if (!workflow?.blocks.length) return toast('実行するブロックがありません');
+    clearWorkflowError();
+    const controller = new AbortController();
+    const context = {
+      controller,
+      signal: controller.signal,
+      workflow,
+      currentBlockId: null,
+      startedAt: performance.now()
+    };
+    state.running = context;
+    ui.runWorkflow.disabled = true;
+    ui.stopWorkflow.disabled = false;
+    renderPalette();
+    renderWorkflowEditor();
+    appendLog(`ワークフロー「${workflow.name}」を開始`);
+    try {
+      await runBlockList(workflow.blocks, context);
+      appendLog(`ワークフロー「${workflow.name}」が完了`, 'success');
+      setStatus('ワークフロー完了');
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        appendLog('ユーザー操作で停止', 'warn');
+        setStatus('停止しました');
+      } else if (error instanceof FlowStop) {
+        appendLog(error.message, 'warn', '停止');
+        setStatus(error.message);
+      } else {
+        showWorkflowError(error, error.block || null);
+        setStatus('エラーで停止');
+      }
+    } finally {
+      if (state.running === context) state.running = null;
+      state.blockProgress.clear();
+      ui.runWorkflow.disabled = false;
+      ui.stopWorkflow.disabled = true;
+      renderPalette();
+      renderWorkflowEditor();
+    }
+  }
+
+  function stopWorkflow(reason = '停止ボタン') {
+    if (!state.running) return;
+    state.running.controller.abort(new DOMException(reason, 'AbortError'));
+  }
+
+  const LEGACY_CONDITION_TYPES = new Set([
+    'exists', 'missing', 'visible', 'hidden', 'state_on', 'state_off', 'enabled', 'disabled',
+    'gbf_full_auto_on', 'gbf_full_auto_off', 'gbf_attack_ready', 'gbf_attack_not_ready',
+    'class_has', 'class_missing', 'value_true', 'value_false', 'value_equals', 'value_not_equals',
+    'text_contains', 'text_not_contains', 'page_ready', 'url_contains', 'url_not_contains'
+  ]);
+
+  function normalizeLegacyCondition(raw, actionType = 'click') {
+    const value = raw && typeof raw === 'object' ? raw : {};
+    let target = value.target === 'point' ? 'action' : value.target;
+    if (!['action', 'selector', 'page'].includes(target)) target = actionType === 'click' ? 'action' : 'selector';
+    let type = value.type === 'gbf_attack_on' ? 'gbf_attack_ready' : value.type === 'gbf_attack_off' ? 'gbf_attack_not_ready' : value.type;
+    if (!LEGACY_CONDITION_TYPES.has(type)) type = 'exists';
+    return {
+      enabled: actionType === 'wait' ? value.enabled !== false : Boolean(value.enabled),
+      mode: value.mode === 'check' ? 'check' : 'wait',
+      target,
+      selector: String(value.selector || '').trim(),
+      type,
+      className: String(value.className || ''),
+      valueName: String(value.valueName || 'aria-pressed'),
+      expected: String(value.expected ?? 'false'),
+      text: String(value.text || ''),
+      timeoutMs: clamp(int(value.timeoutMs, 30_000), 0, 600_000),
+      timeoutAction: ['skip', 'execute'].includes(value.timeoutAction) ? value.timeoutAction : 'stop',
+      stableMs: clamp(int(value.stableMs, 80), 0, 5000)
+    };
+  }
+
+  function defaultLegacyState() {
+    return {
+      version: 12,
+      markerHitSize: 48,
+      url: '',
+      actions: [],
+      selectedId: null,
+      nextId: 1,
+      method: 'tap',
+      count: 1,
+      loop: false,
+      timeRandomEnabled: true,
+      timeJitterMs: 100,
+      positionRandomEnabled: true,
+      positionJitterPx: 2,
+      recordMode: 'replace',
+      settingsOpen: true,
+      browserHidden: false,
+      compact: false,
+      dockX: null,
+      dockY: null
+    };
+  }
+
+  function normalizeLegacyState(raw, legacyKey = '') {
+    const source = raw && typeof raw === 'object' ? raw : defaultLegacyState();
+    const version = clamp(int(source.version, legacyKey.includes('v11') ? 11 : legacyKey.includes('v10') ? 10 : 1), 1, 12);
+    const sourceSize = finite(source.markerHitSize, version <= 1 ? 64 : version <= 3 ? 46 : 44);
+    const sourceActions = Array.isArray(source.actions) ? source.actions : Array.isArray(source.points) ? source.points : [];
+    const actions = sourceActions.map((item, index) => {
+      const id = int(item.id, index + 1);
+      const type = item.type === 'navigate' ? 'navigate' : item.type === 'wait' ? 'wait' : 'click';
+      const common = {
+        id,
+        type,
+        enabled: item.enabled !== false,
+        delayMs: clamp(int(item.delayMs, index === 0 ? 0 : int(source.interval, 1000)), 0, 600_000),
+        condition: normalizeLegacyCondition(item.condition, type)
+      };
+      if (type === 'navigate') {
+        return {
+          ...common,
+          url: String(item.url || ''),
+          waitForLoad: item.waitForLoad !== false,
+          loadTimeoutMs: clamp(int(item.loadTimeoutMs, 15_000), 1000, 120_000),
+          failureMode: item.failureMode === 'continue' ? 'continue' : 'stop'
+        };
+      }
+      if (type === 'wait') return common;
+      let cx;
+      let cy;
+      if (item.cx != null || item.cy != null) {
+        cx = finite(item.cx, window.innerWidth / 2);
+        cy = finite(item.cy, window.innerHeight / 2);
+      } else if (version >= 4) {
+        cx = finite(item.x, window.innerWidth / 2);
+        cy = finite(item.y, window.innerHeight / 2);
+      } else {
+        cx = finite(item.x, window.innerWidth / 2) + sourceSize / 2;
+        cy = finite(item.y, window.innerHeight / 2) + sourceSize / 2;
+      }
+      return {
+        ...common,
+        cx: clamp(cx, 0, window.innerWidth),
+        cy: clamp(cy, 0, window.innerHeight),
+        holdMs: clamp(int(item.holdMs, 55), 0, 5000),
+        targetMode: item.targetMode === 'selector' ? 'selector' : 'point',
+        selector: String(item.selector || '').trim(),
+        waitForTarget: item.waitForTarget !== false,
+        targetTimeoutMs: clamp(int(item.targetTimeoutMs, 15_000), 0, 120_000),
+        targetFailureMode: ['skip', 'point'].includes(item.targetFailureMode) ? item.targetFailureMode : 'stop',
+        scrollTarget: item.scrollTarget !== false,
+        targetLabel: String(item.targetLabel || '')
+      };
+    });
+    const nextId = Math.max(int(source.nextId, 1), ...actions.map(action => action.id + 1), 1);
+    return {
+      ...defaultLegacyState(),
+      version: 12,
+      url: String(source.url || ''),
+      actions,
+      selectedId: actions.some(action => action.id === int(source.selectedId)) ? int(source.selectedId) : actions[0]?.id ?? null,
+      nextId,
+      method: 'tap',
+      count: clamp(int(source.count, 1), 1, 999_999),
+      loop: Boolean(source.loop),
+      timeRandomEnabled: source.timeRandomEnabled ?? source.randomEnabled ?? true,
+      timeJitterMs: clamp(int(source.timeJitterMs ?? source.jitterMs, 100), 0, 5000),
+      positionRandomEnabled: source.positionRandomEnabled !== false,
+      positionJitterPx: clamp(finite(source.positionJitterPx, 2), 0, 30),
+      recordMode: ['replace', 'append'].includes(source.recordMode) ? source.recordMode : 'replace',
+      settingsOpen: source.settingsOpen !== false,
+      browserHidden: Boolean(source.browserHidden),
+      compact: Boolean(source.compact),
+      dockX: Number.isFinite(Number(source.dockX)) ? Number(source.dockX) : null,
+      dockY: Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null
+    };
+  }
+
+  function findLegacySaved() {
+    const current = readJson(LEGACY_STORAGE_KEY);
+    if (current) return { data: current, key: LEGACY_STORAGE_KEY };
+    for (const key of LEGACY_STORAGE_KEYS) {
+      const data = readJson(key);
+      if (data) return { data, key };
+    }
+    return null;
+  }
+
+  function loadLegacyState() {
+    const saved = findLegacySaved();
+    state.legacy = normalizeLegacyState(saved?.data, saved?.key || '');
+    state.selectedLegacyId = state.legacy.selectedId;
+    state.nextLegacyId = state.legacy.nextId;
+    ui.legacyCount.value = state.legacy.count;
+    ui.legacyJitter.value = state.legacy.timeJitterMs;
+    ui.legacyPositionJitter.value = state.legacy.positionJitterPx;
+    if (Number.isFinite(state.legacy.dockX)) state.dockX = state.legacy.dockX;
+    if (Number.isFinite(state.legacy.dockY)) state.dockY = state.legacy.dockY;
+  }
+
+  function legacySnapshot() {
+    return {
+      version: 12,
+      markerHitSize: 48,
+      url: urlInput.value,
+      actions: state.legacy.actions.map(action => deepClone(action)),
+      selectedId: state.selectedLegacyId,
+      nextId: state.nextLegacyId,
+      method: 'tap',
+      count: clamp(int(ui.legacyCount.value, 1), 1, 999_999),
+      loop: Boolean(state.legacy.loop),
+      timeRandomEnabled: state.legacy.timeRandomEnabled !== false,
+      timeJitterMs: clamp(int(ui.legacyJitter.value, 100), 0, 5000),
+      positionRandomEnabled: state.legacy.positionRandomEnabled !== false,
+      positionJitterPx: clamp(finite(ui.legacyPositionJitter.value, 2), 0, 30),
+      recordMode: state.legacy.recordMode || 'replace',
+      settingsOpen: true,
+      browserHidden: ui.browserBar.classList.contains('hidden'),
+      compact: dock.classList.contains('compact'),
+      dockX: state.dockX,
+      dockY: state.dockY
+    };
+  }
+
+  function saveLegacyState() {
+    if (!state.legacy) return;
+    const snapshot = legacySnapshot();
+    state.legacy = normalizeLegacyState(snapshot);
+    state.selectedLegacyId = state.legacy.selectedId;
+    state.nextLegacyId = state.legacy.nextId;
+    try {
+      localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      appendLog(`旧マクロ保存失敗: ${error.message}`, 'error');
+    }
+  }
+
+  function legacyActionName(action, index = state.legacy.actions.indexOf(action)) {
+    if (action.type === 'navigate') return `URL移動 ${index + 1}`;
+    if (action.type === 'wait') return `条件待ち ${index + 1}`;
+    return `クリック ${index + 1}`;
+  }
+
+  function addLegacyAction(type) {
+    if (state.legacyRunning || state.recording) return;
+    const index = state.legacy.actions.length;
+    let action;
+    if (type === 'navigate') {
+      action = {
+        id: state.nextLegacyId++, type: 'navigate', enabled: true, delayMs: index ? 1000 : 0,
+        url: currentFrameUrl(), waitForLoad: true, loadTimeoutMs: 15_000, failureMode: 'stop',
+        condition: normalizeLegacyCondition({}, 'navigate')
+      };
+    } else if (type === 'wait') {
+      action = {
+        id: state.nextLegacyId++, type: 'wait', enabled: true, delayMs: index ? 1000 : 0,
+        condition: normalizeLegacyCondition({ enabled: true, target: 'selector', selector: '', type: 'visible' }, 'wait')
+      };
+    } else {
+      action = {
+        id: state.nextLegacyId++, type: 'click', enabled: true, delayMs: index ? 1000 : 0,
+        cx: window.innerWidth / 2, cy: window.innerHeight / 2, holdMs: 55,
+        targetMode: 'point', selector: '', waitForTarget: true, targetTimeoutMs: 15_000,
+        targetFailureMode: 'stop', scrollTarget: true, targetLabel: '', condition: normalizeLegacyCondition({}, 'click')
+      };
+    }
+    state.legacy.actions.push(action);
+    state.selectedLegacyId = action.id;
+    state.legacy.selectedId = action.id;
+    renderLegacy();
+    saveLegacyState();
+  }
+
+  function updateLegacyAction(action, updater) {
+    updater(action);
+    const normalized = normalizeLegacyState({ ...legacySnapshot(), actions: state.legacy.actions });
+    const replacement = normalized.actions.find(item => item.id === action.id);
+    if (replacement) Object.assign(action, replacement);
+    renderLegacy();
+    saveLegacyState();
+  }
+
+  function moveLegacyAction(action, direction) {
+    const index = state.legacy.actions.indexOf(action);
+    const next = index + direction;
+    if (next < 0 || next >= state.legacy.actions.length) return;
+    [state.legacy.actions[index], state.legacy.actions[next]] = [state.legacy.actions[next], state.legacy.actions[index]];
+    renderLegacy();
+    saveLegacyState();
+  }
+
+  function removeLegacyAction(action) {
+    const index = state.legacy.actions.indexOf(action);
+    if (index < 0) return;
+    state.legacy.actions.splice(index, 1);
+    state.selectedLegacyId = (state.legacy.actions[index] || state.legacy.actions[index - 1])?.id ?? null;
+    state.legacy.selectedId = state.selectedLegacyId;
+    renderLegacy();
+    saveLegacyState();
+  }
+
+  function duplicateLegacyAction(action) {
+    const index = state.legacy.actions.indexOf(action);
+    if (index < 0) return;
+    const copy = deepClone(action);
+    copy.id = state.nextLegacyId++;
+    if (copy.type === 'click') {
+      copy.cx = clamp(copy.cx + 14, 0, window.innerWidth);
+      copy.cy = clamp(copy.cy + 14, 0, window.innerHeight);
+    }
+    state.legacy.actions.splice(index + 1, 0, copy);
+    state.selectedLegacyId = copy.id;
+    state.legacy.selectedId = copy.id;
+    renderLegacy();
+    saveLegacyState();
+  }
+
+  function legacyConditionEditor(action) {
+    const condition = normalizeLegacyCondition(action.condition, action.type);
+    const grid = element('div', { className: 'grid2' });
+    const enabled = element('input', { type: 'checkbox' });
+    enabled.checked = condition.enabled;
+    enabled.addEventListener('change', () => updateLegacyAction(action, target => { target.condition.enabled = enabled.checked; }));
+    const target = selectInput(condition.target, [['action', 'この動作の対象'], ['selector', 'セレクタ'], ['page', 'ページ全体']], input => updateLegacyAction(action, targetAction => { targetAction.condition.target = input.value; }));
+    const type = selectInput(condition.type, [
+      ['exists', '要素が存在'], ['missing', '要素が消失'], ['visible', '要素が表示'], ['hidden', '要素が非表示'],
+      ['state_on', 'ON'], ['state_off', 'OFF'], ['enabled', '操作可能'], ['disabled', '操作不可'],
+      ['gbf_full_auto_on', 'フルオートON'], ['gbf_full_auto_off', 'フルオートOFF'],
+      ['gbf_attack_ready', '攻撃可能'], ['gbf_attack_not_ready', '攻撃不可'],
+      ['page_ready', 'ページ読込完了'], ['url_contains', 'URLに文字を含む'], ['text_contains', '本文に文字を含む']
+    ], input => updateLegacyAction(action, targetAction => { targetAction.condition.type = input.value; }));
+    const selector = textInput(condition.selector, input => updateLegacyAction(action, targetAction => { targetAction.condition.selector = input.value; }), '.btn-auto');
+    const text = textInput(condition.text, input => updateLegacyAction(action, targetAction => { targetAction.condition.text = input.value; }), '文字列');
+    const timeout = numberInput(condition.timeoutMs, 0, 600_000, 500, input => updateLegacyAction(action, targetAction => { targetAction.condition.timeoutMs = input.value; }));
+    grid.append(field('条件を使う', enabled), field('監視対象', target), field('成立条件', type), field('セレクタ', selector), field('文字/URL', text), field('タイムアウトms', timeout));
+    return grid;
+  }
+
+  function renderLegacyAction(action, index) {
+    const row = element('div', { className: 'legacyRow' });
+    row.classList.toggle('selected', action.id === state.selectedLegacyId);
+    const title = element('strong', { text: legacyActionName(action, index) });
+    const tools = element('div', { className: 'legacyTools' });
+    const tool = (text, handler) => {
+      const button = element('button', { text });
+      button.disabled = Boolean(state.legacyRunning || state.recording);
+      button.addEventListener('click', handler);
+      tools.append(button);
+    };
+    tool('↑', () => moveLegacyAction(action, -1));
+    tool('↓', () => moveLegacyAction(action, 1));
+    tool('複製', () => duplicateLegacyAction(action));
+    tool('削除', () => removeLegacyAction(action));
+    const head = element('div', { className: 'legacyHead' }, [title, tools]);
+    head.addEventListener('click', event => {
+      if (event.target.closest('button')) return;
+      state.selectedLegacyId = action.id;
+      state.legacy.selectedId = action.id;
+      renderLegacy();
+      saveLegacyState();
+    });
+    row.append(head);
+    const common = element('div', { className: 'grid2' });
+    const enabled = element('input', { type: 'checkbox' });
+    enabled.checked = action.enabled !== false;
+    enabled.addEventListener('change', () => updateLegacyAction(action, target => { target.enabled = enabled.checked; }));
+    const delay = numberInput(action.delayMs, 0, 600_000, 10, input => updateLegacyAction(action, target => { target.delayMs = input.value; }));
+    common.append(field('使う', enabled), field('実行前待機ms', delay));
+    row.append(common);
+
+    if (action.type === 'click') {
+      const grid = element('div', { className: 'grid2' });
+      const mode = selectInput(action.targetMode, [['point', '保存位置'], ['selector', 'セレクタ追跡']], input => updateLegacyAction(action, target => { target.targetMode = input.value; }));
+      const selector = textInput(action.selector, input => updateLegacyAction(action, target => { target.selector = input.value; }), '.btn-auto');
+      const x = numberInput(action.cx, 0, Math.max(1, window.innerWidth), 1, input => updateLegacyAction(action, target => { target.cx = input.value; }));
+      const y = numberInput(action.cy, 0, Math.max(1, window.innerHeight), 1, input => updateLegacyAction(action, target => { target.cy = input.value; }));
+      const timeout = numberInput(action.targetTimeoutMs, 0, 120_000, 500, input => updateLegacyAction(action, target => { target.targetTimeoutMs = input.value; }));
+      grid.append(field('対象', mode), field('セレクタ', selector), field('X', x), field('Y', y), field('対象待機ms', timeout));
+      row.append(grid);
+    } else if (action.type === 'navigate') {
+      const grid = element('div', { className: 'grid2' });
+      const url = textInput(action.url, input => updateLegacyAction(action, target => { target.url = input.value; }), 'https://...');
+      const timeout = numberInput(action.loadTimeoutMs, 1000, 120_000, 500, input => updateLegacyAction(action, target => { target.loadTimeoutMs = input.value; }));
+      grid.append(field('移動先URL', url), field('読込待機ms', timeout));
+      row.append(grid);
+    }
+    row.append(legacyConditionEditor(action));
+    row.querySelectorAll('input,select,button').forEach(control => {
+      if (state.legacyRunning || state.recording) control.disabled = true;
+    });
+    return row;
+  }
+
+  function clearLegacyMarkers() {
+    markerLayer.textContent = '';
+  }
+
+  function renderLegacyMarkers() {
+    clearLegacyMarkers();
+    if (state.page !== 'legacy' || state.recording) return;
+    state.legacy.actions.forEach((action, index) => {
+      if (action.type !== 'click' || action.targetMode !== 'point') return;
+      const marker = element('div', { className: 'marker', text: String(index + 1), attrs: { tabindex: '0', role: 'button' } });
+      marker.classList.toggle('selected', action.id === state.selectedLegacyId);
+      marker.style.left = `${action.cx}px`;
+      marker.style.top = `${action.cy}px`;
+      marker.addEventListener('click', () => {
+        state.selectedLegacyId = action.id;
+        state.legacy.selectedId = action.id;
+        renderLegacy();
+        saveLegacyState();
+      });
+      const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
+      const move = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        event.preventDefault();
+        action.cx = clamp(drag.baseX + event.clientX - drag.startX, 0, window.innerWidth);
+        action.cy = clamp(drag.baseY + event.clientY - drag.startY, 0, window.innerHeight);
+        marker.style.left = `${action.cx}px`;
+        marker.style.top = `${action.cy}px`;
+      };
+      const finish = event => {
+        if (!drag.active || event.pointerId !== drag.id) return;
+        drag.active = false;
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', finish, true);
+        window.removeEventListener('pointercancel', finish, true);
+        saveLegacyState();
+        renderLegacyListOnly();
+      };
+      marker.addEventListener('pointerdown', event => {
+        if (state.legacyRunning || state.recording || event.button !== 0) return;
+        event.preventDefault();
+        drag.active = true;
+        drag.id = event.pointerId;
+        drag.startX = event.clientX;
+        drag.startY = event.clientY;
+        drag.baseX = action.cx;
+        drag.baseY = action.cy;
+        window.addEventListener('pointermove', move, { capture: true, passive: false });
+        window.addEventListener('pointerup', finish, { capture: true, passive: false });
+        window.addEventListener('pointercancel', finish, { capture: true, passive: false });
+      }, { passive: false });
+      marker.addEventListener('keydown', event => {
+        const amount = event.shiftKey ? 10 : 1;
+        const delta = { ArrowLeft: [-amount, 0], ArrowRight: [amount, 0], ArrowUp: [0, -amount], ArrowDown: [0, amount] }[event.key];
+        if (!delta) return;
+        event.preventDefault();
+        action.cx = clamp(action.cx + delta[0], 0, window.innerWidth);
+        action.cy = clamp(action.cy + delta[1], 0, window.innerHeight);
+        marker.style.left = `${action.cx}px`;
+        marker.style.top = `${action.cy}px`;
+        saveLegacyState();
+      });
+      markerLayer.append(marker);
+    });
+  }
+
+  function renderLegacyListOnly() {
+    ui.legacyList.textContent = '';
+    if (!state.legacy.actions.length) ui.legacyList.append(element('div', { className: 'empty', text: '旧マクロの動作はありません。上のボタンから追加できます。' }));
+    else state.legacy.actions.forEach((action, index) => ui.legacyList.append(renderLegacyAction(action, index)));
+  }
+
+  function renderLegacy() {
+    ui.legacyCount.value = clamp(int(ui.legacyCount.value || state.legacy.count, 1), 1, 999_999);
+    ui.legacyJitter.value = clamp(int(ui.legacyJitter.value || state.legacy.timeJitterMs, 100), 0, 5000);
+    ui.legacyPositionJitter.value = clamp(finite(ui.legacyPositionJitter.value || state.legacy.positionJitterPx, 2), 0, 30);
+    renderLegacyListOnly();
+    renderLegacyMarkers();
+    const busy = Boolean(state.legacyRunning || state.recording);
+    ui.legacyRun.disabled = busy || !state.legacy.actions.length;
+    ui.legacyStop.disabled = !state.legacyRunning;
+  }
+
+  function legacyElementTarget(action) {
+    const doc = frameDocument();
+    if (action.targetMode === 'selector') {
+      let target;
+      try { target = doc.querySelector(action.selector); }
+      catch { throw new FlowError('旧マクロのセレクタが不正です', 'INVALID_SELECTOR'); }
+      if (!target) return null;
+      return target.closest?.('button,a,[role="button"],.btn-usual-ok,.btn-multi-raid,.btn-supporter') || target;
+    }
+    const frameRect = iframe.getBoundingClientRect();
+    const x = action.cx - frameRect.left;
+    const y = action.cy - frameRect.top;
+    if (x < 0 || y < 0 || x > frameRect.width || y > frameRect.height) throw new FlowError('旧マクロの保存位置がiframe外です', 'POINT_OUTSIDE_FRAME');
+    return doc.elementFromPoint(x, y);
+  }
+
+  function legacyPositionWithJitter(action) {
+    if (!state.legacy.positionRandomEnabled) return { x: action.cx, y: action.cy };
+    const radius = clamp(finite(ui.legacyPositionJitter.value, 2), 0, 30);
+    if (!radius) return { x: action.cx, y: action.cy };
+    const angle = Math.random() * Math.PI * 2;
+    const length = Math.sqrt(Math.random()) * radius;
+    return {
+      x: clamp(action.cx + Math.cos(angle) * length, 0, window.innerWidth),
+      y: clamp(action.cy + Math.sin(angle) * length, 0, window.innerHeight)
+    };
+  }
+
+  function legacyBooleanState(target) {
+    if (!target) return null;
+    if (target.classList?.contains('on') || target.classList?.contains('active') || target.getAttribute?.('aria-pressed') === 'true') return true;
+    if (target.classList?.contains('off') || target.classList?.contains('inactive') || target.getAttribute?.('aria-pressed') === 'false') return false;
+    return null;
+  }
+
+  function legacyConditionTarget(action, condition) {
+    const doc = frameDocument();
+    if (condition.target === 'page') return { document: doc, page: true };
+    if (condition.target === 'action' && action.type === 'click') return { element: legacyElementTarget(action) };
+    if (!condition.selector) return { element: null };
+    try { return { element: doc.querySelector(condition.selector) }; }
+    catch { throw new FlowError('旧マクロ条件のセレクタが不正です', 'INVALID_SELECTOR'); }
+  }
+
+  function evaluateLegacyCondition(action) {
+    const condition = normalizeLegacyCondition(action.condition, action.type);
+    if (!condition.enabled) return { matched: true };
+    if (condition.type === 'gbf_full_auto_on') return { matched: fullAutoState().on };
+    if (condition.type === 'gbf_full_auto_off') {
+      const auto = fullAutoState();
+      return { matched: auto.exists && !auto.on };
+    }
+    if (condition.type === 'gbf_attack_ready' || condition.type === 'gbf_attack_not_ready') {
+      const snapshot = attackSnapshot();
+      const ready = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
+      return { matched: condition.type === 'gbf_attack_ready' ? ready : !ready };
+    }
+    const target = legacyConditionTarget(action, condition);
+    if (target.page) {
+      if (condition.type === 'page_ready') return { matched: pageBaseReady(target.document) };
+      if (condition.type === 'url_contains') return { matched: currentFrameUrl().includes(condition.text) };
+      if (condition.type === 'url_not_contains') return { matched: !currentFrameUrl().includes(condition.text) };
+      return { matched: false };
+    }
+    const elementTarget = target.element;
+    const visible = computedVisible(elementTarget);
+    const disabled = Boolean(elementTarget && ('disabled' in elementTarget && elementTarget.disabled || elementTarget.getAttribute?.('aria-disabled') === 'true'));
+    switch (condition.type) {
+      case 'exists': return { matched: Boolean(elementTarget) };
+      case 'missing': return { matched: !elementTarget };
+      case 'visible': return { matched: visible };
+      case 'hidden': return { matched: !elementTarget || !visible };
+      case 'enabled': return { matched: Boolean(elementTarget) && !disabled };
+      case 'disabled': return { matched: Boolean(elementTarget) && disabled };
+      case 'state_on': return { matched: legacyBooleanState(elementTarget) === true };
+      case 'state_off': return { matched: legacyBooleanState(elementTarget) === false };
+      case 'class_has': return { matched: Boolean(elementTarget) && String(condition.className).trim().split(/\s+/).filter(Boolean).every(name => elementTarget.classList.contains(name)) };
+      case 'class_missing': return { matched: !elementTarget || String(condition.className).trim().split(/\s+/).filter(Boolean).some(name => !elementTarget.classList.contains(name)) };
+      case 'text_contains': return { matched: Boolean(elementTarget) && String(elementTarget.textContent || '').includes(condition.text) };
+      case 'text_not_contains': return { matched: !elementTarget || !String(elementTarget.textContent || '').includes(condition.text) };
+      default: return { matched: false };
+    }
+  }
+
+  async function waitForLegacyCondition(action, signal) {
+    const condition = normalizeLegacyCondition(action.condition, action.type);
+    if (!condition.enabled) return 'execute';
+    const initial = evaluateLegacyCondition(action);
+    if (condition.mode === 'check') return initial.matched ? 'execute' : 'skip';
+    try {
+      await monitorFrame(() => evaluateLegacyCondition(action).matched, {
+        signal,
+        timeoutMs: condition.timeoutMs,
+        stableMs: condition.stableMs,
+        description: `${legacyActionName(action)}の条件待ち`
+      });
+      return 'execute';
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      if (condition.timeoutAction === 'skip') return 'skip';
+      if (condition.timeoutAction === 'execute') return 'execute';
+      throw error;
+    }
+  }
+
+  async function waitForLegacyTarget(action, signal) {
+    let immediate = legacyElementTarget(action);
+    if (immediate && computedVisible(immediate)) return immediate;
+    if (action.targetMode !== 'selector' || !action.waitForTarget) return immediate;
+    return monitorFrame(() => {
+      const target = legacyElementTarget(action);
+      return target && computedVisible(target) ? target : false;
+    }, { signal, timeoutMs: action.targetTimeoutMs, stableMs: 30, description: `${legacyActionName(action)}の対象待ち` });
+  }
+
+  async function executeLegacyClick(action, signal) {
+    let target;
+    try {
+      target = await waitForLegacyTarget(action, signal);
+    } catch (error) {
+      if (action.targetFailureMode === 'skip' && error?.code === 'TIMEOUT') return { skipped: true };
+      if (action.targetFailureMode !== 'point') throw error;
+    }
+    if (!target && action.targetFailureMode === 'point') {
+      const point = legacyPositionWithJitter(action);
+      const frameRect = iframe.getBoundingClientRect();
+      target = frameDocument().elementFromPoint(point.x - frameRect.left, point.y - frameRect.top);
+    }
+    if (!target) {
+      if (action.targetFailureMode === 'skip') return { skipped: true };
+      throw new FlowError('旧マクロの押下対象が見つかりません', 'TARGET_MISSING');
+    }
+    if (!computedVisible(target)) throw new FlowError('旧マクロの押下対象が非表示です', 'TARGET_HIDDEN');
+    await jqTapStrict(target, { signal, label: legacyActionName(action) });
+    return { ok: true };
+  }
+
+  async function executeLegacyAction(action, signal, index) {
+    if (action.enabled === false) return 'skip';
+    const jitter = state.legacy.timeRandomEnabled && index > 0 ? randomUniform(-finite(ui.legacyJitter.value, 100), finite(ui.legacyJitter.value, 100)) : 0;
+    await abortableDelay(Math.max(0, action.delayMs + jitter), signal);
+    const conditionResult = await waitForLegacyCondition(action, signal);
+    if (conditionResult === 'skip') return 'skip';
+    if (action.type === 'wait') return 'ok';
+    if (action.type === 'navigate') {
+      const destination = String(action.url || '').trim();
+      if (!destination) throw new FlowError('旧マクロのURLが空です', 'INVALID_URL');
+      const normalized = /^https?:/i.test(destination) ? new URL(destination).href : new URL(destination, currentFrameUrl() || location.href).href;
+      if (action.waitForLoad) {
+        await performFrameOperation(() => {
+          urlInput.value = normalized;
+          iframe.contentWindow.location.href = normalized;
+        }, { signal, timeoutMs: action.loadTimeoutMs, expectedScreen: 'auto', requireChange: true });
+      } else {
+        iframe.contentWindow.location.href = normalized;
+      }
+      return 'ok';
+    }
+    const result = await executeLegacyClick(action, signal);
+    return result.skipped ? 'skip' : 'ok';
+  }
+
+  async function startLegacy() {
+    if (state.legacyRunning || state.running || state.recording || !state.legacy.actions.length) return;
+    const controller = new AbortController();
+    const token = { controller, signal: controller.signal };
+    state.legacyRunning = token;
+    ui.legacyRun.disabled = true;
+    ui.legacyStop.disabled = false;
+    renderLegacy();
+    saveLegacyState();
+    appendLog('旧マクロを開始');
+    try {
+      const count = clamp(int(ui.legacyCount.value, 1), 1, 999_999);
+      let cycle = 0;
+      while (!controller.signal.aborted && (state.legacy.loop || cycle < count)) {
+        for (let index = 0; index < state.legacy.actions.length; index++) {
+          throwIfAborted(controller.signal);
+          const action = state.legacy.actions[index];
+          setStatus(`${cycle + 1}周目 · ${legacyActionName(action, index)}`);
+          const result = await executeLegacyAction(action, controller.signal, index);
+          appendLog(`${legacyActionName(action, index)}: ${result === 'skip' ? 'スキップ' : '完了'}`, result === 'skip' ? 'warn' : 'success', '旧マクロ');
+        }
+        cycle += 1;
+      }
+      appendLog(`旧マクロ ${cycle}周完了`, 'success');
+      setStatus('旧マクロ完了');
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        appendLog('旧マクロを停止', 'warn');
+        setStatus('旧マクロ停止');
+      } else {
+        appendLog(`旧マクロエラー: ${error.message}`, 'error');
+        setStatus(`旧マクロ停止: ${error.message}`);
+      }
+    } finally {
+      if (state.legacyRunning === token) state.legacyRunning = null;
+      ui.legacyRun.disabled = false;
+      ui.legacyStop.disabled = true;
+      renderLegacy();
+    }
+  }
+
+  function stopLegacy(reason = '停止ボタン') {
+    state.legacyRunning?.controller.abort(new DOMException(reason, 'AbortError'));
+  }
+
+  function legacyPresetKey(slot) {
+    return `${LEGACY_PRESET_PREFIX}_${slot}`;
+  }
+
+  function readLegacyPreset(slot) {
+    let data = readJson(legacyPresetKey(slot));
+    if (data) return data;
+    for (const prefix of LEGACY_PRESET_PREFIXES) {
+      data = readJson(`${prefix}_${slot}`);
+      if (data) return data;
+    }
+    return null;
+  }
+
+  function refreshLegacyPresets() {
+    const selected = ui.legacyPresetSlot.value || '1';
+    ui.legacyPresetSlot.textContent = '';
+    for (let slot = 1; slot <= 8; slot++) {
+      const data = readLegacyPreset(slot);
+      const name = String(data?.presetMeta?.name || `保存 ${slot}`);
+      ui.legacyPresetSlot.append(element('option', { value: String(slot), text: `${name}${data ? ' ✓' : ''}` }));
+    }
+    ui.legacyPresetSlot.value = selected;
+    const current = readLegacyPreset(selected);
+    ui.legacyPresetName.value = String(current?.presetMeta?.name || '');
+  }
+
+  function saveLegacyPreset() {
+    const slot = ui.legacyPresetSlot.value || '1';
+    const name = String(ui.legacyPresetName.value || '').trim() || `保存 ${slot}`;
+    const snapshot = { ...legacySnapshot(), presetMeta: { name, savedAt: Date.now() } };
+    try {
+      localStorage.setItem(legacyPresetKey(slot), JSON.stringify(snapshot));
+      refreshLegacyPresets();
+      ui.legacyPresetSlot.value = slot;
+      ui.legacyPresetName.value = name;
+      toast(`「${name}」を保存しました`);
+    } catch (error) {
+      toast(`保存失敗: ${error.message}`);
+    }
+  }
+
+  function loadLegacyPreset() {
+    const slot = ui.legacyPresetSlot.value || '1';
+    const data = readLegacyPreset(slot);
+    if (!data) return toast('このスロットは空です');
+    state.legacy = normalizeLegacyState(data);
+    state.selectedLegacyId = state.legacy.selectedId;
+    state.nextLegacyId = state.legacy.nextId;
+    ui.legacyCount.value = state.legacy.count;
+    ui.legacyJitter.value = state.legacy.timeJitterMs;
+    ui.legacyPositionJitter.value = state.legacy.positionJitterPx;
+    if (state.legacy.url) {
+      urlInput.value = state.legacy.url;
+      iframe.src = state.legacy.url;
+    }
+    renderLegacy();
+    saveLegacyState();
+    toast(`「${data.presetMeta?.name || `保存 ${slot}`}」を読み込みました`);
+  }
+
+  function deleteLegacyPreset() {
+    const slot = ui.legacyPresetSlot.value || '1';
+    const data = readLegacyPreset(slot);
+    if (!data) return toast('このスロットは空です');
+    if (!confirm(`「${data.presetMeta?.name || `保存 ${slot}`}」を削除しますか？`)) return;
+    localStorage.removeItem(legacyPresetKey(slot));
+    for (const prefix of LEGACY_PRESET_PREFIXES) localStorage.removeItem(`${prefix}_${slot}`);
+    refreshLegacyPresets();
+    toast('削除しました');
+  }
+
+  function createRecordDot(x, y, number) {
+    const dot = element('div', { className: 'recordDot', text: String(number) });
+    dot.style.left = `${x}px`;
+    dot.style.top = `${y}px`;
+    recordLayer.append(dot);
+    return dot;
+  }
+
+  function startLegacyRecording() {
+    if (state.recording || state.running || state.legacyRunning) return;
+    state.recording = true;
+    state.recordedPoints = [];
+    state.activeRecordPointers.clear();
+    state.recordStartedAt = performance.now();
+    recordLayer.textContent = '';
+    recordLayer.classList.add('active');
+    clearLegacyMarkers();
+    setStatus('タッチ記録中。終了するには旧マクロの「タッチ記録」を再度押してください');
+    toast('記録中。ボタンを再度押すと確定します');
+  }
+
+  function finishLegacyRecording({ apply = true } = {}) {
+    if (!state.recording) return;
+    state.recording = false;
+    recordLayer.classList.remove('active');
+    state.activeRecordPointers.clear();
+    if (apply && state.recordedPoints.length) {
+      if (state.legacy.recordMode !== 'append') state.legacy.actions = state.legacy.actions.filter(action => action.type !== 'click');
+      const records = state.recordedPoints.slice().sort((a, b) => a.startedAt - b.startedAt);
+      let previous = 0;
+      records.forEach((record, index) => {
+        const delayMs = index === 0 ? record.startedAt : record.startedAt - previous;
+        previous = record.startedAt;
+        state.legacy.actions.push({
+          id: state.nextLegacyId++, type: 'click', enabled: true, delayMs: Math.max(0, int(delayMs, 0)),
+          cx: record.x, cy: record.y, holdMs: clamp(int(record.holdMs, 55), 0, 5000),
+          targetMode: 'point', selector: '', waitForTarget: true, targetTimeoutMs: 15_000,
+          targetFailureMode: 'stop', scrollTarget: true, targetLabel: '', condition: normalizeLegacyCondition({}, 'click')
+        });
+      });
+      state.selectedLegacyId = state.legacy.actions.at(-1)?.id ?? null;
+      state.legacy.selectedId = state.selectedLegacyId;
+      toast(`${records.length}件を追加しました`);
+    }
+    state.recordedPoints = [];
+    recordLayer.textContent = '';
+    renderLegacy();
+    saveLegacyState();
+    setStatus('記録終了');
+  }
+
+  function recordPointerDown(event) {
+    if (!state.recording) return;
+    event.preventDefault();
+    const started = performance.now();
+    const item = {
+      pointerId: event.pointerId,
+      absoluteStart: started,
+      startedAt: started - state.recordStartedAt,
+      x: event.clientX,
+      y: event.clientY,
+      dot: createRecordDot(event.clientX, event.clientY, state.recordedPoints.length + state.activeRecordPointers.size + 1)
+    };
+    state.activeRecordPointers.set(event.pointerId, item);
+  }
+
+  function recordPointerMove(event) {
+    const item = state.activeRecordPointers.get(event.pointerId);
+    if (!item) return;
+    event.preventDefault();
+    item.x = event.clientX;
+    item.y = event.clientY;
+    item.dot.style.left = `${item.x}px`;
+    item.dot.style.top = `${item.y}px`;
+  }
+
+  function recordPointerEnd(event) {
+    const item = state.activeRecordPointers.get(event.pointerId);
+    if (!item) return;
+    event.preventDefault();
+    recordPointerMove(event);
+    state.activeRecordPointers.delete(event.pointerId);
+    state.recordedPoints.push({ startedAt: item.startedAt, x: item.x, y: item.y, holdMs: performance.now() - item.absoluteStart });
+    item.dot.textContent = String(state.recordedPoints.length);
+  }
+
+  function selectWorkflow(id) {
+    if (!state.workflows.workflows.some(workflow => workflow.id === id)) return;
+    state.selectedWorkflowId = id;
+    state.workflows.currentId = id;
+    state.insertion = null;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+  }
+
+  function createNewWorkflow() {
+    if (state.running) return;
+    const workflow = normalizeWorkflow({ name: `ワークフロー ${state.workflows.workflows.length + 1}`, blocks: [] });
+    state.workflows.workflows.push(workflow);
+    state.selectedWorkflowId = workflow.id;
+    state.workflows.currentId = workflow.id;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    toast('新しいワークフローを作成しました');
+  }
+
+  function renameCurrentWorkflow() {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    const name = String(ui.workflowName.value || '').trim().slice(0, 60);
+    if (!name) return toast('名前を入力してください');
+    workflow.name = name;
+    workflow.updatedAt = Date.now();
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    toast('名前を変更しました');
+  }
+
+  function duplicateCurrentWorkflow() {
+    const current = currentWorkflow();
+    if (!current || state.running) return;
+    const workflow = normalizeWorkflow(deepClone(current));
+    workflow.id = nowId('workflow');
+    workflow.name = `${current.name} のコピー`.slice(0, 60);
+    workflow.blocks.forEach(regenerateBlockIds);
+    workflow.createdAt = Date.now();
+    workflow.updatedAt = Date.now();
+    state.workflows.workflows.push(workflow);
+    state.selectedWorkflowId = workflow.id;
+    state.workflows.currentId = workflow.id;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    toast('ワークフローを複製しました');
+  }
+
+  function deleteCurrentWorkflow() {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    if (state.workflows.workflows.length === 1) return toast('最後のワークフローは削除できません');
+    if (!confirm(`「${workflow.name}」を削除しますか？`)) return;
+    const index = state.workflows.workflows.indexOf(workflow);
+    state.workflows.workflows.splice(index, 1);
+    const next = state.workflows.workflows[index] || state.workflows.workflows[index - 1];
+    state.selectedWorkflowId = next.id;
+    state.workflows.currentId = next.id;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    toast('ワークフローを削除しました');
+  }
+
+  function applyTemplate(mode) {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    const template = findTemplate(ui.templateSelect.value);
+    const blocks = template[2]().map(normalizeBlock);
+    if (mode === 'replace') workflow.blocks = blocks;
+    else workflow.blocks.push(...blocks);
+    workflow.updatedAt = Date.now();
+    state.insertion = null;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowEditor();
+    toast(`「${template[1]}」を${mode === 'replace' ? '読み込み' : '追加'}しました`);
+  }
+
+  function downloadJson(data, filename) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = href;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  }
+
+  function exportCurrentWorkflow() {
+    const workflow = currentWorkflow();
+    if (!workflow) return;
+    const safeName = workflow.name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 50) || 'workflow';
+    downloadJson(normalizeWorkflow(workflow), `${safeName}.autoflow.json`);
+    toast('JSONを書き出しました');
+  }
+
+  let importPurpose = null;
+  function chooseImportFile(purpose) {
+    importPurpose = purpose;
+    if (typeof importFile.showPicker === 'function') importFile.showPicker();
+    else importFile.click();
+  }
+
+  function importWorkflowData(data, fileName = 'JSON') {
+    const candidate = data?.workflow || data;
+    let workflows;
+    if (Array.isArray(candidate?.workflows)) workflows = candidate.workflows.map(normalizeWorkflow);
+    else if (Array.isArray(candidate)) workflows = candidate.map(normalizeWorkflow);
+    else if (candidate && Array.isArray(candidate.blocks)) workflows = [normalizeWorkflow(candidate)];
+    else throw new Error('ワークフローAST形式ではありません');
+    if (!workflows.length) throw new Error('ワークフローが空です');
+    for (const workflow of workflows) {
+      workflow.id = nowId('workflow');
+      workflow.blocks.forEach(regenerateBlockIds);
+      state.workflows.workflows.push(workflow);
+    }
+    state.selectedWorkflowId = workflows.at(-1).id;
+    state.workflows.currentId = state.selectedWorkflowId;
+    saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    toast(`${fileName}を読み込みました`);
+  }
+
+  function setPage(page) {
+    state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
+    shadow.querySelectorAll('.mainTab').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
+    shadow.querySelectorAll('.page').forEach(section => section.classList.toggle('active', section.id === `page-${state.page}`));
+    renderLegacyMarkers();
+  }
+
+  function setBrowserHidden(hidden) {
+    ui.browserBar.classList.toggle('hidden', hidden);
+    ui.browserHandle.classList.toggle('visible', hidden);
+    saveLegacyState();
+  }
+
+  function setCompact(compact) {
+    dock.classList.toggle('compact', compact);
+    byId('toggleCompact').textContent = compact ? '□' : '—';
+    saveLegacyState();
+  }
+
+  function positionDock() {
+    const rect = dock.getBoundingClientRect();
+    const width = rect.width || 780;
+    const height = rect.height || 600;
+    if (!Number.isFinite(state.dockX)) state.dockX = 8;
+    if (!Number.isFinite(state.dockY)) state.dockY = Math.max(8, window.innerHeight - height - 8);
+    state.dockX = clamp(state.dockX, 4, Math.max(4, window.innerWidth - width - 4));
+    state.dockY = clamp(state.dockY, 4, Math.max(4, window.innerHeight - height - 4));
+    dock.style.left = `${state.dockX}px`;
+    dock.style.top = `${state.dockY}px`;
+    dock.style.bottom = 'auto';
+  }
+
+  function installDockDrag(handle) {
+    const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
+    const move = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      event.preventDefault();
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      drag.moved ||= Math.hypot(dx, dy) > 3;
+      state.dockX = drag.baseX + dx;
+      state.dockY = drag.baseY + dy;
+      positionDock();
+    };
+    const finish = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      drag.active = false;
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      if (!drag.moved && handle.id === 'compactGrip') setCompact(false);
+      saveLegacyState();
+    };
+    handle.addEventListener('pointerdown', event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const rect = dock.getBoundingClientRect();
+      drag.active = true;
+      drag.id = event.pointerId;
+      drag.startX = event.clientX;
+      drag.startY = event.clientY;
+      drag.baseX = rect.left;
+      drag.baseY = rect.top;
+      drag.moved = false;
+      window.addEventListener('pointermove', move, { capture: true, passive: false });
+      window.addEventListener('pointerup', finish, { capture: true, passive: false });
+      window.addEventListener('pointercancel', finish, { capture: true, passive: false });
+    }, { passive: false });
+    addCleanup(() => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+    });
+  }
+
+  function normalizeInitialUrl() {
+    const saved = String(state.legacy.url || '').trim();
+    const source = !saved || saved === 'about:blank' ? location.href : saved;
+    try { return new URL(source, location.href).href; }
+    catch { return location.href; }
+  }
+
+  function loadUrlFromBar() {
+    const raw = String(urlInput.value || '').trim();
+    if (!raw) return;
+    let destination;
+    try { destination = /^https?:/i.test(raw) ? new URL(raw).href : new URL(raw, currentFrameUrl() || location.href).href; }
+    catch { return toast('URLが不正です'); }
+    urlInput.value = destination;
+    iframe.src = destination;
+    saveLegacyState();
+    setStatus('読込中');
+  }
+
+  function stopEverything(reason = '停止') {
+    stopWorkflow(reason);
+    stopLegacy(reason);
+  }
+
+  function destroy() {
+    if (state.destroyed) return;
+    state.destroyed = true;
+    stopEverything('終了');
+    if (state.recording) finishLegacyRecording({ apply: false });
+    clearTimeout(state.toastTimer);
+    clearTimeout(state.autosaveTimer);
+    clearLegacyMarkers();
+    for (const callback of cleanup) {
+      try { callback(); } catch {}
+    }
+    cleanup.clear();
+    root.remove();
+    if (window[GLOBAL_KEY]?.destroy === destroy) delete window[GLOBAL_KEY];
+  }
+
+  byId('loadUrl').addEventListener('click', loadUrlFromBar);
+  urlInput.addEventListener('keydown', event => { if (event.key === 'Enter') loadUrlFromBar(); });
+  byId('backFrame').addEventListener('click', () => { try { iframe.contentWindow.history.back(); } catch { toast('戻る操作に失敗しました'); } });
+  byId('forwardFrame').addEventListener('click', () => { try { iframe.contentWindow.history.forward(); } catch { toast('進む操作に失敗しました'); } });
+  byId('reloadFrame').addEventListener('click', () => { try { iframe.contentWindow.location.reload(); } catch { iframe.src = iframe.src; } });
+  byId('hideBrowser').addEventListener('click', () => setBrowserHidden(true));
+  ui.browserHandle.addEventListener('click', () => setBrowserHidden(false));
+  byId('closeApp').addEventListener('click', destroy);
+  byId('toggleCompact').addEventListener('click', () => setCompact(!dock.classList.contains('compact')));
+  byId('compactRun').addEventListener('click', () => state.page === 'legacy' ? (state.legacyRunning ? stopLegacy() : startLegacy()) : (state.running ? stopWorkflow() : startWorkflow()));
+  shadow.querySelectorAll('.mainTab').forEach(button => button.addEventListener('click', () => setPage(button.dataset.page)));
+
+  ui.workflowSelect.addEventListener('change', () => selectWorkflow(ui.workflowSelect.value));
+  ui.workflowName.addEventListener('change', renameCurrentWorkflow);
+  byId('newWorkflow').addEventListener('click', createNewWorkflow);
+  byId('renameWorkflow').addEventListener('click', renameCurrentWorkflow);
+  byId('duplicateWorkflow').addEventListener('click', duplicateCurrentWorkflow);
+  byId('deleteWorkflow').addEventListener('click', deleteCurrentWorkflow);
+  byId('replaceTemplate').addEventListener('click', () => applyTemplate('replace'));
+  byId('appendTemplate').addEventListener('click', () => applyTemplate('append'));
+  byId('exportWorkflow').addEventListener('click', exportCurrentWorkflow);
+  byId('importWorkflow').addEventListener('click', () => chooseImportFile('workflow'));
+  ui.runWorkflow.addEventListener('click', startWorkflow);
+  ui.stopWorkflow.addEventListener('click', () => stopWorkflow());
+
+  byId('legacyAddClick').addEventListener('click', () => addLegacyAction('click'));
+  byId('legacyAddNavigate').addEventListener('click', () => addLegacyAction('navigate'));
+  byId('legacyAddWait').addEventListener('click', () => addLegacyAction('wait'));
+  byId('legacyRecord').addEventListener('click', () => state.recording ? finishLegacyRecording({ apply: true }) : startLegacyRecording());
+  ui.legacyRun.addEventListener('click', startLegacy);
+  ui.legacyStop.addEventListener('click', () => stopLegacy());
+  for (const input of [ui.legacyCount, ui.legacyJitter, ui.legacyPositionJitter]) input.addEventListener('change', () => {
+    state.legacy.count = clamp(int(ui.legacyCount.value, 1), 1, 999_999);
+    state.legacy.timeJitterMs = clamp(int(ui.legacyJitter.value, 100), 0, 5000);
+    state.legacy.positionJitterPx = clamp(finite(ui.legacyPositionJitter.value, 2), 0, 30);
+    renderLegacy();
+    saveLegacyState();
+  });
+  byId('legacySavePreset').addEventListener('click', saveLegacyPreset);
+  byId('legacyLoadPreset').addEventListener('click', loadLegacyPreset);
+  byId('legacyDeletePreset').addEventListener('click', deleteLegacyPreset);
+  ui.legacyPresetSlot.addEventListener('change', () => {
+    const data = readLegacyPreset(ui.legacyPresetSlot.value);
+    ui.legacyPresetName.value = String(data?.presetMeta?.name || '');
+  });
+  byId('clearLogs').addEventListener('click', () => { state.logs = []; renderLogs(); });
+
+  recordLayer.addEventListener('pointerdown', recordPointerDown, { passive: false });
+  recordLayer.addEventListener('pointermove', recordPointerMove, { passive: false });
+  recordLayer.addEventListener('pointerup', recordPointerEnd, { passive: false });
+  recordLayer.addEventListener('pointercancel', recordPointerEnd, { passive: false });
+
+  importFile.addEventListener('change', async () => {
+    const file = importFile.files?.[0];
+    importFile.value = '';
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (importPurpose === 'workflow') importWorkflowData(data, file.name);
+    } catch (error) {
+      toast(`JSON読込失敗: ${error.message}`);
+    } finally {
+      importPurpose = null;
+    }
+  });
+
+  iframe.addEventListener('load', () => {
+    try {
+      urlInput.value = iframe.contentWindow.location.href;
+      state.legacy.url = urlInput.value;
+      saveLegacyState();
+      if (!state.running && !state.legacyRunning) setStatus('読込完了');
+    } catch {
+      if (!state.running && !state.legacyRunning) setStatus('読込完了・別オリジン');
+    }
+  });
+
+  const resizeHandler = () => {
+    positionDock();
+    for (const action of state.legacy?.actions || []) {
+      if (action.type === 'click') {
+        action.cx = clamp(action.cx, 0, window.innerWidth);
+        action.cy = clamp(action.cy, 0, window.innerHeight);
+      }
+    }
+    renderLegacyMarkers();
+  };
+  window.addEventListener('resize', resizeHandler, { passive: true });
+  window.visualViewport?.addEventListener('resize', resizeHandler, { passive: true });
+  addCleanup(() => {
+    window.removeEventListener('resize', resizeHandler);
+    window.visualViewport?.removeEventListener('resize', resizeHandler);
+  });
+  installDockDrag(byId('dockGrip'));
+  installDockDrag(byId('compactGrip'));
+
+  shadow.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      if (state.recording) finishLegacyRecording({ apply: false });
+      else stopEverything('Escape');
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+      event.preventDefault();
+      if (state.page === 'legacy') state.legacyRunning ? stopLegacy() : startLegacy();
+      else state.running ? stopWorkflow() : startWorkflow();
+    }
+  });
+
+  document.documentElement.append(root);
+  loadWorkflowStore();
+  loadLegacyState();
+  renderTemplateSelect();
+  renderWorkflowSelect();
+  renderPalette();
+  refreshLegacyPresets();
+  renderLegacy();
+  renderLogs();
+  setPage('workflow');
+  setBrowserHidden(state.legacy.browserHidden);
+  setCompact(state.legacy.compact);
+  requestAnimationFrame(positionDock);
+  const initialUrl = normalizeInitialUrl();
+  urlInput.value = initialUrl;
+  iframe.src = initialUrl;
+
+  window.__AUTO_TEST__ = {
+    APP_VERSION,
+    state,
+    iframe,
+    normalizePopupText,
+    normalizeBlock,
+    normalizeWorkflow,
+    migrateWorkflowStore,
+    createBlock,
+    rankAssistRows,
+    parseAssistRow,
+    randomUniform,
+    chooseSupporter,
+    parseSupporterRow,
+    detectScreenState,
+    evaluateWorkflowCondition,
+    normalizeLegacyState,
+    legacySnapshot,
+    startWorkflow,
+    stopWorkflow,
+    startLegacy,
+    stopLegacy,
+    waitForFrameReady,
+    performFrameOperation,
+    jqTapStrict,
+    ensureFullAuto,
+    waitForAutoAttack,
+    confirmAllUnclaimed,
+    refreshAssistList,
+    TEMPLATES,
+    BLOCK_DEFINITIONS,
+    ERROR_MESSAGES,
+    SELECTORS
+  };
+  window[GLOBAL_KEY] = {
+    version: APP_VERSION,
+    destroy,
+    stop: stopEverything,
+    save: () => { saveWorkflowStore({ immediate: true }); saveLegacyState(); },
+    startWorkflow,
+    startLegacy
+  };
+  if (typeof completion === 'function') completion({ ok: true, installed: true, version: APP_VERSION });
 })();
