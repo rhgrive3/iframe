@@ -2,7 +2,7 @@ name: One-shot full-auto fix
 
 on:
   schedule:
-    - cron: '48 15 29 7 *'
+    - cron: '47 15 29 7 *'
   workflow_dispatch:
 
 permissions:
