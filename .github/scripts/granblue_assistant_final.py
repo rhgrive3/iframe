@@ -25,6 +25,13 @@ replace_once(
     'immediate condition diagnosis'
 )
 
+old_assertion = "  assert.match(source, /normalizeUrl\\(urlInput\\.value\\|\\|location\\.href\\)/);"
+new_assertion = "  assert.match(source, /normalizeUrl\\(!savedInitial\\|\\|savedInitial==='about:blank'\\?location\\.href:savedInitial\\)/);"
+assertion_count = tests.count(old_assertion)
+if assertion_count != 1:
+    raise SystemExit(f'initial URL test migration: expected exactly one match, got {assertion_count}')
+tests = tests.replace(old_assertion, new_assertion, 1)
+
 tests += r'''
 
 test("legacy about blank state also falls back to the parent URL", () => {
