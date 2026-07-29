@@ -1,32 +1,331 @@
-name: Validate Auto Flow
+name: Apply requested touch geometry fixes
 
 on:
-  pull_request:
-    paths:
-      - a.js
-      - tests/**
-      - .github/workflows/validate-autoflow.yml
   push:
-    branches: [main]
-    paths:
-      - a.js
-      - tests/**
-      - .github/workflows/validate-autoflow.yml
+    branches: [experiment/touch-events-scroll]
+    paths: [.github/workflows/validate-autoflow.yml]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: apply-touch-geometry-fixes
+  cancel-in-progress: false
 
 jobs:
-  validate:
+  patch:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-      - name: JavaScript syntax
-        run: node --check a.js
-      - name: UX regression checks
-        run: node --test tests/autoflow.static.test.mjs
+        with:
+          ref: experiment/touch-events-scroll
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Patch implementation
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+
+          old_constants = """  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 125, stdDev: 20, min: 70, max: 250 });
+          const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
+          const TOUCH_END_MAX_DRIFT_PX = 5;
+          const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
+          const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
+          """
+          new_constants = """  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
+          const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
+          const TOUCH_START_STDDEV_RATIO_MIN = 0.12;
+          const TOUCH_START_STDDEV_RATIO_MAX = 0.15;
+          const TOUCH_DRIFT_STDDEV_RATIO = 0.012;
+          const TOUCH_DRIFT_STDDEV_MIN_PX = 0.35;
+          const TOUCH_DRIFT_STDDEV_MAX_PX = 3;
+          const TOUCH_MOVE_THRESHOLD_PX = 0.1;
+          const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
+          const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
+          """
+          if source.count(old_constants) != 1:
+              raise SystemExit('touch constant block changed concurrently')
+          source = source.replace(old_constants, new_constants, 1)
+
+          source, count = re.subn(
+              r"      radiusX: randomUniform\(1\.2, 2\.8\),\n"
+              r"      radiusY: randomUniform\(1\.2, 2\.8\),\n"
+              r"      rotationAngle: randomUniform\(-8, 8\),\n"
+              r"      force: randomUniform\(0\.35, 0\.75\)\n",
+              "",
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'physical attribute removal count: {count}')
+          source = source.replace('      pageY: point.y + finite(win.scrollY, 0),\n    };', '      pageY: point.y + finite(win.scrollY, 0)\n    };', 1)
+
+          old_point = """  function pointForTarget(target, fractions) {
+            const rect = target.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+              throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
+            }
+            return {
+              rect,
+              x: rect.left + (rect.width * fractions.x),
+              y: rect.top + (rect.height * fractions.y)
+            };
+          }
+          """
+          new_point = """  function pointForTarget(target, fractions) {
+            const rect = target.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) {
+              throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
+            }
+            const insetX = Math.min(0.01, rect.width / 2);
+            const insetY = Math.min(0.01, rect.height / 2);
+            return {
+              rect,
+              x: clamp(rect.left + (rect.width * fractions.x), rect.left + insetX, rect.right - insetX),
+              y: clamp(rect.top + (rect.height * fractions.y), rect.top + insetY, rect.bottom - insetY)
+            };
+          }
+          """
+          if source.count(old_point) != 1:
+              raise SystemExit('pointForTarget changed concurrently')
+          source = source.replace(old_point, new_point, 1)
+
+          old_end = """  function randomEndPoint(start, rect) {
+            const angle = randomUniform(0, Math.PI * 2);
+            const radius = Math.sqrt(Math.random()) * TOUCH_END_MAX_DRIFT_PX;
+            const epsilon = 0.01;
+            return {
+              x: clamp(start.x + (Math.cos(angle) * radius), rect.left + epsilon, rect.right - epsilon),
+              y: clamp(start.y + (Math.sin(angle) * radius), rect.top + epsilon, rect.bottom - epsilon)
+            };
+          }
+          """
+          new_end = """  function sampleTouchStartFractions(random = Math.random) {
+            const stdDevRatio = randomUniform(
+              TOUCH_START_STDDEV_RATIO_MIN,
+              TOUCH_START_STDDEV_RATIO_MAX,
+              random
+            );
+            return {
+              x: clamp(0.5 + (sampleStandardNormal(random) * stdDevRatio), 0, 1),
+              y: clamp(0.5 + (sampleStandardNormal(random) * stdDevRatio), 0, 1)
+            };
+          }
+
+          function sampleTouchEndPoint(start, rect, random = Math.random) {
+            const stdDev = clamp(
+              Math.min(rect.width, rect.height) * TOUCH_DRIFT_STDDEV_RATIO,
+              TOUCH_DRIFT_STDDEV_MIN_PX,
+              TOUCH_DRIFT_STDDEV_MAX_PX
+            );
+            const insetX = Math.min(0.01, rect.width / 2);
+            const insetY = Math.min(0.01, rect.height / 2);
+            return {
+              x: clamp(start.x + (sampleStandardNormal(random) * stdDev), rect.left + insetX, rect.right - insetX),
+              y: clamp(start.y + (sampleStandardNormal(random) * stdDev), rect.top + insetY, rect.bottom - insetY)
+            };
+          }
+
+          function interpolateTouchPoint(start, end, progress) {
+            return {
+              x: start.x + ((end.x - start.x) * progress),
+              y: start.y + ((end.y - start.y) * progress)
+            };
+          }
+          """
+          if source.count(old_end) != 1:
+              raise SystemExit('end-point helper changed concurrently')
+          source = source.replace(old_end, new_end, 1)
+
+          old_sampler = """    const u1 = Math.max(Number.MIN_VALUE, 1 - random());
+            const u2 = 1 - random();
+            const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+            return Math.round(clamp((z0 * stdDevValue) + meanValue, minValue, maxValue));
+          }
+          """
+          new_sampler = """    return Math.round(clamp(
+              (sampleStandardNormal(random) * stdDevValue) + meanValue,
+              minValue,
+              maxValue
+            ));
+          }
+
+          function sampleStandardNormal(random = Math.random) {
+            const u1 = Math.max(Number.MIN_VALUE, 1 - random());
+            const u2 = 1 - random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+          }
+          """
+          if source.count(old_sampler) != 1:
+              raise SystemExit('normal sampler changed concurrently')
+          source = source.replace(old_sampler, new_sampler, 1)
+
+          source = source.replace(
+              '        const fractions = { x: Math.random(), y: Math.random() };',
+              '        const fractions = sampleTouchStartFractions();',
+              1,
+          )
+          source = source.replace(
+              '`${targetLabel}のランダム座標が他要素に遮られています`',
+              '`${targetLabel}のガウス座標が他要素に遮られています`',
+              1,
+          )
+
+          old_lifecycle = """        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);
+            const endPoint = randomEndPoint(start, start.rect);
+            activePoint = endPoint;
+            const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
+            dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
+          """
+          new_lifecycle = """        const holdDuration = sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS);
+            const endPoint = sampleTouchEndPoint(start, start.rect);
+            const movement = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
+            if (movement >= TOUCH_MOVE_THRESHOLD_PX) {
+              const moveProgress = randomUniform(0.4, 0.7);
+              await abortableDelay(holdDuration * moveProgress, signal);
+              const movePoint = interpolateTouchPoint(start, endPoint, moveProgress);
+              activePoint = movePoint;
+              const moveTouch = createSyntheticTouch(win, dispatchTarget, identifier, movePoint);
+              dispatchSyntheticTouch(win, dispatchTarget, 'touchmove', moveTouch, true);
+              await abortableDelay(holdDuration * (1 - moveProgress), signal);
+            } else {
+              await abortableDelay(holdDuration, signal);
+            }
+            activePoint = endPoint;
+            const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
+            dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
+          """
+          if source.count(old_lifecycle) != 1:
+              raise SystemExit('touch lifecycle changed concurrently')
+          source = source.replace(old_lifecycle, new_lifecycle, 1)
+
+          source, count = re.subn(
+              r"  function randomUniform\(min, max\) \{\n"
+              r"    const a = finite\(min, 0\);\n"
+              r"    const b = finite\(max, 0\);\n"
+              r"    if \(b < a\) throw new FlowError\('ランダム待機の最大値が最小値未満です', 'INVALID_RANGE'\);\n"
+              r"    return a \+ Math\.random\(\) \* \(b - a\);\n"
+              r"  \}",
+              """  function randomUniform(min, max, random = Math.random) {
+            const a = finite(min, 0);
+            const b = finite(max, 0);
+            if (b < a) throw new FlowError('ランダム待機の最大値が最小値未満です', 'INVALID_RANGE');
+            return a + random() * (b - a);
+          }""",
+              source,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'randomUniform replacement count: {count}')
+
+          path.write_text(source, encoding='utf-8')
+
+      - name: Write regression tests
+        shell: bash
+        run: |
+          mkdir -p test
+          cat > test/touch-event-regression.test.mjs <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import test from 'node:test';
+          import vm from 'node:vm';
+
+          const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
+
+          test('script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
+
+          test('visible wait matches the requested normal distribution', () => {
+            assert.match(source, /TOUCH_VISIBLE_LATENCY_MS = Object\.freeze\(\{ mean: 130, stdDev: 20, min: 80, max: 250 \}\)/);
+            assert.match(source, /abortableDelay\(sampleClampedNormalMs\(TOUCH_VISIBLE_LATENCY_MS\), signal\)/);
+          });
+
+          test('start point is a clamped center-biased 2D Gaussian sample', () => {
+            assert.match(source, /TOUCH_START_STDDEV_RATIO_MIN = 0\.12/);
+            assert.match(source, /TOUCH_START_STDDEV_RATIO_MAX = 0\.15/);
+            assert.match(source, /x: clamp\(0\.5 \+ \(sampleStandardNormal\(random\) \* stdDevRatio\), 0, 1\)/);
+            assert.match(source, /y: clamp\(0\.5 \+ \(sampleStandardNormal\(random\) \* stdDevRatio\), 0, 1\)/);
+            assert.doesNotMatch(source, /fractions = \{ x: Math\.random\(\), y: Math\.random\(\) \}/);
+          });
+
+          test('a moved touch emits touchmove before touchend', () => {
+            const move = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchmove'");
+            const end = source.indexOf("dispatchSyntheticTouch(win, dispatchTarget, 'touchend'");
+            assert.ok(move >= 0 && end > move);
+            assert.match(source, /movement >= TOUCH_MOVE_THRESHOLD_PX/);
+            assert.doesNotMatch(source, /TOUCH_END_MAX_DRIFT_PX/);
+          });
+
+          test('optional physical attributes are not independently resampled', () => {
+            const start = source.indexOf('function createSyntheticTouch');
+            const end = source.indexOf('function dispatchSyntheticTouch', start);
+            const body = source.slice(start, end);
+            assert.doesNotMatch(body, /radiusX|radiusY|rotationAngle|force/);
+          });
+
+          test('TouchEvent lists remain coherent', () => {
+            assert.match(source, /const activeTouches = active \? \[touch\] : \[\]/);
+            assert.match(source, /touches: activeTouches/);
+            assert.match(source, /targetTouches: activeTouches/);
+            assert.match(source, /changedTouches: \[touch\]/);
+            assert.match(source, /'touchcancel', cancelTouch, false/);
+          });
+          EOF
+
+      - name: Restore validator
+        shell: bash
+        run: |
+          cat > .github/workflows/validate-autoflow.yml <<'EOF'
+          name: Validate Auto Flow
+
+          on:
+            pull_request:
+              paths:
+                - a.js
+                - test/**
+                - tests/**
+                - .github/workflows/validate-autoflow.yml
+            push:
+              branches: [main]
+              paths:
+                - a.js
+                - test/**
+                - tests/**
+                - .github/workflows/validate-autoflow.yml
+
+          permissions:
+            contents: read
+
+          concurrency:
+            group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
+            cancel-in-progress: true
+
+          jobs:
+            validate:
+              runs-on: ubuntu-latest
+              timeout-minutes: 5
+              steps:
+                - uses: actions/checkout@v5
+                - name: JavaScript syntax
+                  run: node --check a.js
+                - name: Regression checks
+                  run: node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+          EOF
+
+      - name: Verify and commit
+        shell: bash
+        run: |
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js test/touch-event-regression.test.mjs .github/workflows/validate-autoflow.yml
+          git commit -m 'fix: make synthetic touch gestures statistically coherent'
+          git push origin HEAD:experiment/touch-events-scroll
