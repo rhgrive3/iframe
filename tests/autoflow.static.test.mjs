@@ -91,3 +91,14 @@ test("first iframe load mirrors the parent page URL when no saved URL exists", (
   assert.match(source, /urlInput\.value=initial;iframe\.src=initial/);
   assert.doesNotMatch(source, /iframe\.src=initial\|\|'about:blank'/);
 });
+
+
+test("same-page initial iframe cannot recursively install itself in child frames", () => {
+  assert.match(source, /if \(window\.top !== window\) return;/);
+});
+
+test("Granblue presets bind their known stable selectors", () => {
+  assert.match(source, /conditionSelector\.value=preset\.startsWith\('gbf_full_auto_'\)\?'\.btn-auto':'\.btn-attack-start'/);
+  assert.match(source, /function findGranblueElement/);
+  assert.match(source, /if\(!state\.settingsOpen\|\|state\.activeTab!=='condition'\)return/);
+});
