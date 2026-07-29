@@ -5,7 +5,7 @@ on:
     branches:
       - experiment/touch-events-scroll
     paths:
-      - .github/workflows/one-shot-normal-latency.yml
+      - .normal-latency-trigger
 
 permissions:
   contents: write
@@ -131,12 +131,12 @@ test('an interrupted touch is cancelled cleanly', () => {
           node --check a.js
           node --test test/touch-event-regression.test.mjs
 
-      - name: Commit changes and remove temporary workflow
+      - name: Commit changes and remove temporary files
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add a.js test/touch-event-regression.test.mjs
-          git rm .github/workflows/one-shot-normal-latency.yml
+          git rm .github/workflows/one-shot-normal-latency.yml .normal-latency-trigger
           git commit -m 'refactor: model touch latency with Box-Muller distribution'
           git push origin HEAD:experiment/touch-events-scroll
