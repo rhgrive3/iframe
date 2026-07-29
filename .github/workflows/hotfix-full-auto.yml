@@ -1,0 +1,42 @@
+name: Apply full-auto flow hotfix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/hotfix-full-auto.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch full-auto block completion
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('a.js')
+          source = path.read_text()
+          old = """    const waitOn = monitorFrame(() => {
+      const observed = fullAutoState();
+      return observed.exists && observed.visible && observed.on ? observed : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
+    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    await waitOn;
+    return { changed: true };"""
+          new = """    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    return { changed: true };"""
+          if old not in source:
+              raise SystemExit('target full-auto block not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
+      - name: Commit hotfix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js
+          git commit -m 'fix: let full-auto block continue after tap'
+          git push
