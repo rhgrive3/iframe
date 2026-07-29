@@ -28,12 +28,22 @@ test("keyboard and non-drag alternatives are present", () => {
   assert.match(source, /data-dock-position/);
   assert.match(source, /data-dock-size/);
   assert.match(source, /handlePanelShortcut/);
+  assert.match(source, /event\.key==='Home'/);
+  assert.match(source, /tabButtons\.forEach\(\(button,index\)=>/);
 });
 
 test("hidden panels are removed from focus order", () => {
   assert.match(source, /toggleAttribute\('inert'/);
   assert.match(source, /role="tablist"/);
   assert.match(source, /aria-selected/);
+});
+
+test("dependent controls refresh immediately", () => {
+  assert.match(source, /waitForTarget\.addEventListener\('change',\(\)=>\{saveClickTargetFromUi\(\);updateEditor\(\)\}\)/);
+  assert.match(source, /p\.waitForLoad=waitForLoad\.checked;saveState\(\);updateEditor\(\)/);
+  assert.match(source, /saveConditionFromUi\(\);updateEditor\(\)/);
+  assert.match(source, /controls\.run\.disabled=state\.recording/);
+  assert.match(source, /controls\.clear\.disabled=!has\|\|busy/);
 });
 
 test("destructive and replacement operations are recoverable", () => {
