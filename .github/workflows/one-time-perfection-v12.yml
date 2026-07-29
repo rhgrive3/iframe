@@ -22,6 +22,9 @@ jobs:
           ref: ux/perfection-v12
           fetch-depth: 0
 
+      - name: Prepare scoped patch
+        run: python3 .github/scripts/fix_perfection_v12.py
+
       - name: Apply v12 usability overhaul
         run: python3 .github/scripts/perfection_v12.py
 
@@ -36,6 +39,7 @@ jobs:
       - name: Commit product changes and remove one-time machinery
         run: |
           rm -f .trigger-perfection-v12
+          rm -f .github/scripts/fix_perfection_v12.py
           rm -f .github/scripts/perfection_v12.py
           rm -f .github/workflows/one-time-perfection-v12.yml
           git config user.name github-actions[bot]
