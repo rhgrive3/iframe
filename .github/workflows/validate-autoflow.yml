@@ -19,14 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Report start
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh pr comment "${{ github.event.pull_request.number }}" --body "touch consistency finalizer started at base ${{ github.sha }}"
       - uses: actions/checkout@v5
         with:
           ref: main
           fetch-depth: 0
+      - name: Report start
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment "${{ github.event.pull_request.number }}" --repo rhgrive3/iframe --body "touch consistency finalizer started at base ${{ github.sha }}"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -60,4 +60,4 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh pr comment "${{ github.event.pull_request.number }}" --body "touch consistency finalizer finished with status: ${{ job.status }}"
+        run: gh pr comment "${{ github.event.pull_request.number }}" --repo rhgrive3/iframe --body "touch consistency finalizer finished with status: ${{ job.status }}"
