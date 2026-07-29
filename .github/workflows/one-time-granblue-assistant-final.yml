@@ -2,7 +2,7 @@ name: One-time Granblue assistant final polish
 
 on:
   push:
-    branches: [feature/granblue-condition-assistant]
+    branches: [main]
     paths:
       - .trigger-granblue-assistant-final
 
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: feature/granblue-condition-assistant
+          ref: main
           fetch-depth: 0
       - name: Apply final polish
         run: python3 .github/scripts/granblue_assistant_final.py
@@ -28,11 +28,13 @@ jobs:
           grep -q "state.activeTab==='condition')requestAnimationFrame(refreshGranblueAssistant" a.js
       - name: Commit and remove one-time files
         run: |
+          rm -rf .github/scripts/__pycache__
           rm -f .trigger-granblue-assistant-final
           rm -f .github/scripts/granblue_assistant_final.py
           rm -f .github/workflows/one-time-granblue-assistant-final.yml
+          rm -f .github/workflows/one-time-granblue-assistant-final-pr.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m "fix: finalize Granblue assistant initial state"
-          git push
+          git push origin HEAD:main
