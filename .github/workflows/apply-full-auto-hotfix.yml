@@ -1,0 +1,44 @@
+name: Apply full-auto hotfix
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.issue.title == 'apply-full-auto-hotfix-now'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch a.js
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('a.js')
+          s = p.read_text()
+          old = """    const waitOn = monitorFrame(() => {
+      const observed = fullAutoState();
+      return observed.exists && observed.visible && observed.on ? observed : false;
+    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
+    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    await waitOn;
+    return { changed: true };
+"""
+          new = """    await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    return { changed: true };
+"""
+          if s.count(old) != 1:
+              raise SystemExit(f'expected exactly one target, found {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          node --check a.js
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add a.js
+          git commit -m "fix: continue after enabling full auto"
+          git push
