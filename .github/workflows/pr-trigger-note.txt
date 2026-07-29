@@ -1,2 +1,1 @@
-temporary trigger for safe touch patch workflow
-retrigger pull_request_target
+temporary trigger for requested touch correctness patch
