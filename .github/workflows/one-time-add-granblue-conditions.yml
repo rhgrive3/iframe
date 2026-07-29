@@ -1,9 +1,10 @@
 name: One-time add Granblue conditions
 
 on:
-  schedule:
-    - cron: '2-59/5 * * * *'
-  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .trigger-granblue-patch
 
 permissions:
   contents: write
@@ -25,6 +26,7 @@ jobs:
 
       - name: Commit patch and remove one-time files
         run: |
+          rm -f .trigger-granblue-patch
           rm -f .github/scripts/add_granblue_conditions.py
           rm -f .github/workflows/one-time-add-granblue-conditions.yml
           git config user.name github-actions[bot]
