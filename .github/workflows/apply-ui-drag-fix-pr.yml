@@ -25,6 +25,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/apply_ui_drag_fix.py
+          python3 <<'PY'
+          from pathlib import Path
+          path = Path('tests/ui-drag-regression.test.mjs')
+          source = path.read_text()
+          old = "  assert.match(source, /touchmove', suppressNativeDrag, \\{ capture: true, passive: false \\}/);"
+          new = "  assert.match(source, /\\['touchmove', 'gesturestart', 'gesturechange'\\]/);\n  assert.match(source, /window\\.addEventListener\\(type, suppressNativeDrag, \\{ capture: true, passive: false \\}\\)/);"
+          if old not in source:
+              raise SystemExit('touch drag assertion anchor not found')
+          path.write_text(source.replace(old, new, 1))
+          PY
           node --check a.js
           node --test tests/ui-drag-regression.test.mjs
       - name: Commit verified fix
