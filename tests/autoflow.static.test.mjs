@@ -1,0 +1,48 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const source = readFileSync(new URL("../a.js", import.meta.url), "utf8");
+
+test("v12 migration remains backward compatible", () => {
+  assert.match(source, /state_v12/);
+  assert.match(source, /state_v11/);
+  assert.match(source, /version:12/);
+});
+
+test("principal touch targets meet enhanced sizing", () => {
+  const marker = Number(source.match(/const MARKER_HIT_SIZE = (\d+);/)?.[1]);
+  assert.ok(marker >= 44, `marker hit size was ${marker}`);
+  assert.match(source, /button,select,input:not\(\[type=checkbox\]\)\{min-height:44px\}/);
+  assert.match(source, /#browserHandle\{[^}]*height:44px/);
+});
+
+test("an empty flow remains empty and exposes a first action", () => {
+  assert.doesNotMatch(source, /if\(!state\.points\.length\)addPoint\(\)/);
+  assert.match(source, /className='emptyFlow'/);
+  assert.match(source, /最初の動作を追加/);
+});
+
+test("keyboard and non-drag alternatives are present", () => {
+  assert.match(source, /矢印キーで1px/);
+  assert.match(source, /data-dock-position/);
+  assert.match(source, /data-dock-size/);
+  assert.match(source, /handlePanelShortcut/);
+});
+
+test("hidden panels are removed from focus order", () => {
+  assert.match(source, /toggleAttribute\('inert'/);
+  assert.match(source, /role="tablist"/);
+  assert.match(source, /aria-selected/);
+});
+
+test("destructive and replacement operations are recoverable", () => {
+  assert.match(source, /id="undo"/);
+  assert.match(source, /createRecoveryPoint\('記録適用前'\)/);
+  assert.match(source, /controls\.undo\.addEventListener/);
+});
+
+test("user-derived condition summaries do not use innerHTML", () => {
+  assert.doesNotMatch(source, /conditionTargetSummary[^;\n]*innerHTML/);
+  assert.match(source, /setConditionTargetSummary/);
+});
