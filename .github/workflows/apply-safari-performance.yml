@@ -1,0 +1,38 @@
+name: Apply Safari performance fix
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - 'tools/apply_safari_perf_fix.py'
+      - '.tmp/apply-safari-performance'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - name: Apply and verify
+        run: |
+          set -euo pipefail
+          python3 tools/apply_safari_perf_fix.py
+          node --check a.js
+          node --test tests/ui-drag-regression.test.mjs tests/safari-performance-regression.test.mjs
+      - name: Commit verified fix
+        run: |
+          set -euo pipefail
+          rm -f tools/apply_safari_perf_fix.py .tmp/apply-safari-performance .github/workflows/apply-safari-performance.yml
+          rmdir tools .tmp 2>/dev/null || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'perf: reduce Safari memory and rendering pressure'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
