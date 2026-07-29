@@ -1,0 +1,56 @@
+name: One-time Granblue condition assistant
+
+on:
+  push:
+    branches: [feature/granblue-condition-assistant]
+    paths:
+      - .trigger-granblue-condition-assistant
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feature/granblue-condition-assistant
+          fetch-depth: 0
+
+      - name: Scope and compile patch
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('.github/scripts/apply_granblue_condition_assistant.py')
+          source = path.read_text(encoding='utf-8')
+          source = source.replace(
+              'r"^  const GRANBLUE_CONDITION_TYPES=.*?^  function readGranblueAttackState\\(\\).*$"',
+              'r"^  const GRANBLUE_CONDITION_TYPES=[^\\n]*\\n  const isGranblueConditionType=[^\\n]*\\n  function readGranblueFullAutoState\\(\\)[^\\n]*\\n  function readGranblueAttackState\\(\\)[^\\n]*$"'
+          )
+          path.write_text(source, encoding='utf-8')
+          PY
+          python3 -m py_compile .github/scripts/apply_granblue_condition_assistant.py
+
+      - name: Apply Granblue assistant
+        run: python3 .github/scripts/apply_granblue_condition_assistant.py
+
+      - name: Validate product
+        run: |
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs
+          grep -q 'id="granblueAssistant"' a.js
+          grep -q 'conditionRecommendationFor' a.js
+          grep -q 'normalizeUrl(urlInput.value||location.href)' a.js
+
+      - name: Commit product changes and remove one-time files
+        run: |
+          rm -f .trigger-granblue-condition-assistant
+          rm -f .github/scripts/apply_granblue_condition_assistant.py
+          rm -f .github/workflows/one-time-granblue-condition-assistant.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "feat: add Granblue condition assistant"
+          git push
