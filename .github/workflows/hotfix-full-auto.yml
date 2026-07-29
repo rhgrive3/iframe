@@ -1,9 +1,10 @@
 name: Apply full-auto flow hotfix
 
 on:
-  push:
+  pull_request:
+    types: [opened, synchronize, reopened]
     paths:
-      - '.github/workflows/hotfix-full-auto.yml'
+      - '.tmp/full-auto-hotfix-trigger'
 
 permissions:
   contents: write
@@ -13,6 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
       - name: Patch full-auto block completion
         run: |
           python3 - <<'PY'
@@ -21,14 +25,14 @@ jobs:
           path = Path('a.js')
           source = path.read_text()
           old = """    const waitOn = monitorFrame(() => {
-      const observed = fullAutoState();
-      return observed.exists && observed.visible && observed.on ? observed : false;
-    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
-    await jqTapStrict(found.button, { signal, label: 'フルオート' });
-    await waitOn;
-    return { changed: true };"""
+            const observed = fullAutoState();
+            return observed.exists && observed.visible && observed.on ? observed : false;
+          }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 50, description: 'フルオートON待ち' });
+          await jqTapStrict(found.button, { signal, label: 'フルオート' });
+          await waitOn;
+          return { changed: true };"""
           new = """    await jqTapStrict(found.button, { signal, label: 'フルオート' });
-    return { changed: true };"""
+          return { changed: true };"""
           if old not in source:
               raise SystemExit('target full-auto block not found')
           path.write_text(source.replace(old, new, 1))
@@ -40,5 +44,3 @@ jobs:
           git add a.js
           git commit -m 'fix: let full-auto block continue after tap'
           git push
-
-# trigger: 2
