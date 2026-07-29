@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 18;
+  const APP_VERSION = 19;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1431,9 +1431,13 @@
     return next;
   }
 
-  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 125, stdDev: 20, min: 70, max: 250 });
+  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
   const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
-  const TOUCH_END_MAX_DRIFT_PX = 5;
+  const TOUCH_START_STDDEV_RATIO_MIN = 0.12;
+  const TOUCH_START_STDDEV_RATIO_MAX = 0.15;
+  const TOUCH_DRIFT_STDDEV_RATIO = 0.012;
+  const TOUCH_DRIFT_STDDEV_MIN_PX = 0.35;
+  const TOUCH_DRIFT_STDDEV_MAX_PX = 3;
   const SCROLL_SPEED_MIN_PX_PER_SEC = 900;
   const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
 
@@ -1447,10 +1451,17 @@
       || maxValue < minValue) {
       throw new FlowError('正規分布レイテンシのパラメータが不正です', 'INVALID_NORMAL_LATENCY');
     }
+    return Math.round(clamp(
+      (sampleStandardNormal(random) * stdDevValue) + meanValue,
+      minValue,
+      maxValue
+    ));
+  }
+
+  function sampleStandardNormal(random = Math.random) {
     const u1 = Math.max(Number.MIN_VALUE, 1 - random());
     const u2 = 1 - random();
-    const z0 = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-    return Math.round(clamp((z0 * stdDevValue) + meanValue, minValue, maxValue));
+    return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
   }
 
   function createSyntheticTouch(win, target, identifier, point) {
@@ -1465,11 +1476,7 @@
       screenX: point.x + finite(win.screenX, 0),
       screenY: point.y + finite(win.screenY, 0),
       pageX: point.x + finite(win.scrollX, 0),
-      pageY: point.y + finite(win.scrollY, 0),
-      radiusX: randomUniform(1.2, 2.8),
-      radiusY: randomUniform(1.2, 2.8),
-      rotationAngle: randomUniform(-8, 8),
-      force: randomUniform(0.35, 0.75)
+      pageY: point.y + finite(win.scrollY, 0)
     };
     try {
       return new win.Touch(init);
@@ -1623,10 +1630,12 @@
     if (rect.width <= 0 || rect.height <= 0) {
       throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
     }
+    const insetX = Math.min(0.01, rect.width / 2);
+    const insetY = Math.min(0.01, rect.height / 2);
     return {
       rect,
-      x: rect.left + (rect.width * fractions.x),
-      y: rect.top + (rect.height * fractions.y)
+      x: clamp(rect.left + (rect.width * fractions.x), rect.left + insetX, rect.right - insetX),
+      y: clamp(rect.top + (rect.height * fractions.y), rect.top + insetY, rect.bottom - insetY)
     };
   }
 
@@ -1663,13 +1672,36 @@
     return { ...finalPoint, scrolled };
   }
 
-  function randomEndPoint(start, rect) {
-    const angle = randomUniform(0, Math.PI * 2);
-    const radius = Math.sqrt(Math.random()) * TOUCH_END_MAX_DRIFT_PX;
-    const epsilon = 0.01;
+  function sampleTouchStartFractions(random = Math.random) {
+    const stdDevRatio = randomUniform(
+      TOUCH_START_STDDEV_RATIO_MIN,
+      TOUCH_START_STDDEV_RATIO_MAX,
+      random
+    );
     return {
-      x: clamp(start.x + (Math.cos(angle) * radius), rect.left + epsilon, rect.right - epsilon),
-      y: clamp(start.y + (Math.sin(angle) * radius), rect.top + epsilon, rect.bottom - epsilon)
+      x: clamp(0.5 + (sampleStandardNormal(random) * stdDevRatio), 0, 1),
+      y: clamp(0.5 + (sampleStandardNormal(random) * stdDevRatio), 0, 1)
+    };
+  }
+
+  function sampleTouchEndPoint(start, rect, random = Math.random) {
+    const stdDev = clamp(
+      Math.min(rect.width, rect.height) * TOUCH_DRIFT_STDDEV_RATIO,
+      TOUCH_DRIFT_STDDEV_MIN_PX,
+      TOUCH_DRIFT_STDDEV_MAX_PX
+    );
+    const insetX = Math.min(0.01, rect.width / 2);
+    const insetY = Math.min(0.01, rect.height / 2);
+    return {
+      x: clamp(start.x + (sampleStandardNormal(random) * stdDev), rect.left + insetX, rect.right - insetX),
+      y: clamp(start.y + (sampleStandardNormal(random) * stdDev), rect.top + insetY, rect.bottom - insetY)
+    };
+  }
+
+  function interpolateTouchPoint(start, end, progress) {
+    return {
+      x: start.x + ((end.x - start.x) * progress),
+      y: start.y + ((end.y - start.y) * progress)
     };
   }
 
@@ -1686,7 +1718,7 @@
       let activePoint = null;
       let touchActive = false;
       try {
-        const fractions = { x: Math.random(), y: Math.random() };
+        const fractions = sampleTouchStartFractions();
         let start = null;
         for (let attempt = 0; attempt < 4; attempt++) {
           await ensureTargetPointVisible(target, fractions, { signal });
@@ -1703,7 +1735,7 @@
         if (!start) throw new FlowError(`${targetLabel}の表示位置が安定しません`, 'TARGET_UNSTABLE');
         const hit = target.ownerDocument.elementFromPoint(start.x, start.y);
         if (!hit || (hit !== target && !target.contains(hit))) {
-          throw new FlowError(`${targetLabel}のランダム座標が他要素に遮られています`, 'TARGET_OCCLUDED');
+          throw new FlowError(`${targetLabel}のガウス座標が他要素に遮られています`, 'TARGET_OCCLUDED');
         }
         dispatchTarget = hit;
         identifier = Math.floor(randomUniform(1, 2_147_483_647));
@@ -1711,8 +1743,20 @@
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
         touchActive = true;
-        await abortableDelay(sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS), signal);
-        const endPoint = randomEndPoint(start, start.rect);
+        const holdDuration = sampleClampedNormalMs(TOUCH_HOLD_LATENCY_MS);
+        const endPoint = sampleTouchEndPoint(start, start.rect);
+        const movement = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
+        if (movement > Number.EPSILON) {
+          const moveProgress = randomUniform(0.4, 0.7);
+          await abortableDelay(holdDuration * moveProgress, signal);
+          const movePoint = interpolateTouchPoint(start, endPoint, moveProgress);
+          activePoint = movePoint;
+          const moveTouch = createSyntheticTouch(win, dispatchTarget, identifier, movePoint);
+          dispatchSyntheticTouch(win, dispatchTarget, 'touchmove', moveTouch, true);
+          await abortableDelay(holdDuration * (1 - moveProgress), signal);
+        } else {
+          await abortableDelay(holdDuration, signal);
+        }
         activePoint = endPoint;
         const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
@@ -1732,11 +1776,11 @@
     });
   }
 
-  function randomUniform(min, max) {
+  function randomUniform(min, max, random = Math.random) {
     const a = finite(min, 0);
     const b = finite(max, 0);
     if (b < a) throw new FlowError('ランダム待機の最大値が最小値未満です', 'INVALID_RANGE');
-    return a + Math.random() * (b - a);
+    return a + random() * (b - a);
   }
 
   function waitForGbfState(accepted, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '画面状態待ち' } = {}) {
