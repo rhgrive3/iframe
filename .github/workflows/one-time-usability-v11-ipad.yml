@@ -1,0 +1,39 @@
+name: One-time usability v11 iPad follow-up
+
+on:
+  push:
+    branches:
+      - ux/mobile-usability-v11
+    paths:
+      - .trigger-usability-v11-ipad
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply iPad follow-up
+        run: python3 .github/scripts/fix_usability_v11_ipad.py
+
+      - name: Validate source
+        run: |
+          node --check a.js
+          grep -q "(hover:none) and (pointer:coarse)" a.js
+          grep -q "setActiveTab(tab,{persist:false});saveState()" a.js
+
+      - name: Commit source and remove one-time files
+        run: |
+          rm -f .trigger-usability-v11-ipad
+          rm -f .github/scripts/fix_usability_v11_ipad.py
+          rm -f .github/workflows/one-time-usability-v11-ipad.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: cover iPad input zoom and persist edit flow"
+          git push
