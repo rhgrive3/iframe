@@ -1,12 +1,13 @@
 name: Apply Touch Consistency Patch
 
 on:
-  issues:
-    types: [opened, reopened]
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, synchronize]
 
 permissions:
   contents: write
-  issues: write
+  pull-requests: write
 
 concurrency:
   group: apply-touch-consistency-main
@@ -14,14 +15,14 @@ concurrency:
 
 jobs:
   patch:
-    if: github.event.issue.title == 'run-touch-consistency-finalizer-20260730'
+    if: github.event.pull_request.head.ref == 'experiment/touch-consistency-trigger'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Report start
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "touch consistency finalizer started at commit ${{ github.sha }}"
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body "touch consistency finalizer started at base ${{ github.sha }}"
       - uses: actions/checkout@v5
         with:
           ref: main
@@ -59,4 +60,4 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh issue comment "${{ github.event.issue.number }}" --body "touch consistency finalizer finished with status: ${{ job.status }}"
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body "touch consistency finalizer finished with status: ${{ job.status }}"
