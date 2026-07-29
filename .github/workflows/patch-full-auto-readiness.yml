@@ -6,6 +6,11 @@ on:
       - 'experiment/touch-events-scroll'
     paths:
       - '.github/workflows/patch-full-auto-readiness.yml'
+  pull_request:
+    branches:
+      - 'experiment/touch-events-scroll'
+    paths:
+      - '.full-auto-patch-trigger'
 
 permissions:
   contents: write
