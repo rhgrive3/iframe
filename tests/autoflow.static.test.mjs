@@ -67,3 +67,48 @@ test("user-derived condition summaries do not use innerHTML", () => {
   assert.doesNotMatch(source, /conditionTargetSummary[^;\n]*innerHTML/);
   assert.match(source, /setConditionTargetSummary/);
 });
+
+test("Granblue assistant explains state and recommends conditions", () => {
+  assert.match(source, /id="granblueAssistant"/);
+  assert.match(source, /id="conditionRecommendation"/);
+  assert.match(source, /function conditionRecommendationFor/);
+  assert.match(source, /function refreshGranblueAssistant/);
+  assert.match(source, /gbf_attack_ready/);
+  assert.match(source, /gbf_attack_not_ready/);
+  assert.match(source, /DOMにありますが画面には見えていません/);
+});
+
+test("condition choices explain existence visibility enabled and toggle states", () => {
+  assert.match(source, /HTML上に生成された時/);
+  assert.match(source, /実際に画面へ見えた時/);
+  assert.match(source, /disabled解除/);
+  assert.match(source, /classやaria属性だけ変化/);
+});
+
+test("first iframe load mirrors the parent page URL when no saved URL exists", () => {
+  assert.match(source, /normalizeUrl\(!savedInitial\|\|savedInitial==='about:blank'\?location\.href:savedInitial\)/);
+  assert.match(source, /urlInput\.value=initial;iframe\.src=initial/);
+  assert.doesNotMatch(source, /iframe\.src=initial\|\|'about:blank'/);
+});
+
+test("same-page initial iframe cannot recursively install itself in child frames", () => {
+  assert.match(source, /if \(window\.top !== window\) return;/);
+});
+
+test("Granblue presets bind their known stable selectors", () => {
+  assert.match(source, /conditionSelector\.value=preset\.startsWith\('gbf_full_auto_'\)\?'\.btn-auto':'\.btn-attack-start'/);
+  assert.match(source, /function findGranblueElement/);
+  assert.match(source, /if\(!state\.settingsOpen\|\|state\.activeTab!=='condition'\)return/);
+});
+
+test("legacy about blank state also falls back to the parent URL", () => {
+  assert.match(source, /!savedInitial\|\|savedInitial==='about:blank'\?location\.href:savedInitial/);
+  assert.match(source, /if\(state\.activeTab==='condition'\)requestAnimationFrame\(refreshGranblueAssistant\)/);
+});
+
+test("Granblue diagnosis exposes explicit user-facing states", () => {
+  assert.match(source, /未出現・非表示・押せない・ON\/OFF/);
+  assert.match(source, /current='攻撃中'/);
+  assert.match(source, /current='表示・押せる'/);
+  assert.match(source, /current='表示・押せない'/);
+});
