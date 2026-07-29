@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 13;
+  const APP_VERSION = 14;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -70,25 +70,25 @@
   shadow.innerHTML = `
     <style>
       :host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-      :host{--panel:rgba(18,20,27,.965);--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
+      :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:rgba(18,20,27,.965);--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
       button,input,select,textarea{font:inherit;color:var(--text)}
       button{min-height:44px;border:1px solid transparent;border-radius:11px;background:var(--surface);font-weight:760;touch-action:manipulation;cursor:pointer}
-      button:active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}
+      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}
       input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:rgba(0,0,0,.25);font-size:16px;outline:none}
       textarea{min-height:72px;resize:vertical}
       button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #c0c5ff;outline-offset:2px}
-      #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+      #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}:host(.ui-dragging) #frame{pointer-events:none}
       #browserBar{position:fixed;z-index:150;top:max(7px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(1080px,calc(100vw - 12px));display:grid;grid-template-columns:44px 44px 44px minmax(90px,1fr) 64px 44px;gap:5px;padding:5px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:0 12px 34px rgba(0,0,0,.36);backdrop-filter:blur(24px)}
       #browserBar.hidden{display:none}#browserBar button{height:44px;padding:0}#loadUrl{background:var(--accent)}
       #browserHandle{position:fixed;z-index:149;top:max(5px,env(safe-area-inset-top));left:50%;display:none;transform:translateX(-50%);width:58px;border-radius:0 0 14px 14px;background:var(--panel)}#browserHandle.visible{display:block}
-      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));height:min(820px,calc(100vh - 78px));display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}
-      #dock.compact{width:116px;height:52px;border-radius:27px}.compactOnly{display:none}#dock.compact .compactOnly{display:grid;grid-template-columns:58px 58px}#dock.compact .fullOnly{display:none!important}
+      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));width:min(780px,calc(100dvw - 16px));height:min(820px,calc(100vh - 78px));height:min(820px,calc(100dvh - 78px));max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}
+      #dock.compact{width:120px;height:56px;border-radius:28px}.compactOnly{display:none;width:100%;height:100%}#dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#dock.compact .fullOnly{display:none!important}
       #dockHeader{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;align-items:center;gap:5px;padding:6px;border-bottom:1px solid var(--line)}
-      #dockGrip{position:relative;background:transparent;touch-action:none;cursor:grab}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}
+      #dockGrip,#compactGrip{position:relative;background:transparent;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}#dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}
       .title{min-width:0}.title strong{display:block;font-size:13px}.title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;margin-top:2px}
       #mainTabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:7px;border-bottom:1px solid var(--line)}.mainTab.active{background:rgba(111,124,255,.22);border-color:rgba(111,124,255,.42)}
-      #pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain}.page.active{display:block}
-      .toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px}.toolbar .primary{background:var(--accent)}.toolbar .success{background:var(--green);color:#07170f}.toolbar .danger{background:rgba(240,100,109,.18);color:#ffbec2}.toolbar .warn{background:rgba(232,173,85,.15);color:#f7d49b}
+      #pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}.page.active{display:block}
+      .toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px;min-width:0}.toolbar .primary{background:var(--accent)}.toolbar .success{background:var(--green);color:#07170f}.toolbar .danger{background:rgba(240,100,109,.18);color:#ffbec2}.toolbar .warn{background:rgba(232,173,85,.15);color:#f7d49b}
       .card{margin-bottom:9px;padding:11px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font-size:13px;font-weight:820}.hint{color:var(--muted);font-size:11px;line-height:1.5}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.field{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px;font-weight:690}.span2{grid-column:1/-1}
       #workflowEditor{padding-bottom:100px}.empty{padding:28px 12px;border:1px dashed rgba(192,197,255,.35);border-radius:13px;color:var(--muted);text-align:center}.dropZone{height:15px;margin:1px 5px;border:1px dashed transparent;border-radius:7px}.dropZone.dragOver{border-color:#aeb5ff;background:rgba(111,124,255,.22)}
       .blockCard{position:relative;margin:6px 0;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;background:rgba(9,10,15,.55);overflow:hidden}.blockCard.category-gbf{border-left-color:var(--green)}.blockCard.category-control{border-left-color:var(--purple)}.blockCard.category-wait{border-left-color:var(--amber)}.blockCard.category-frame{border-left-color:#62b7ff}.blockCard.running{box-shadow:0 0 0 2px rgba(56,207,135,.55),0 10px 28px rgba(0,0,0,.3)}.blockCard.dragging{opacity:.48}
@@ -96,7 +96,7 @@
       .paletteGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.paletteButton{min-height:56px;padding:8px;text-align:left}.paletteButton strong{display:block;font-size:11px}.paletteButton small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px}.paletteButton.gbf{background:rgba(56,207,135,.10)}.paletteButton.control{background:rgba(160,131,255,.11)}.paletteButton.wait{background:rgba(232,173,85,.10)}.paletteButton.frame{background:rgba(98,183,255,.10)}
       #runBar{position:sticky;bottom:-10px;z-index:5;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px -1px -10px;padding:10px 1px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(18,20,27,.98) 22%)}#runWorkflow{background:var(--green);color:#07170f}#stopWorkflow{background:var(--red)}
       #legacyActionList{display:grid;gap:7px}.legacyRow{padding:9px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.16)}.legacyHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}.legacyTools{display:flex;gap:4px}.legacyTools button{min-width:40px;min-height:40px;padding:0 7px}
-      #markerLayer,#recordLayer{position:fixed;inset:0;pointer-events:none}#markerLayer{z-index:100}.marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;box-shadow:0 0 0 1px #fff,0 6px 18px rgba(0,0,0,.35)}.marker.selected{border-color:var(--green);background:rgba(56,207,135,.15)}#recordLayer.active{z-index:210;pointer-events:auto;background:rgba(255,60,90,.035);touch-action:none}.recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#ef4f68;font-size:10px;font-weight:850}
+      #markerLayer,#recordLayer{position:fixed;inset:0;pointer-events:none}#markerLayer{z-index:100}.marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;box-shadow:0 0 0 1px #fff,0 6px 18px rgba(0,0,0,.35)}.marker.selected{border-color:var(--green);background:rgba(56,207,135,.15)}#recordLayer.active{z-index:210;pointer-events:auto;background:rgba(255,60,90,.035);touch-action:none}.recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#ef4f68;font-size:10px;font-weight:850}
       #toast{position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);display:none;max-width:calc(100vw - 24px);padding:10px 14px;border:1px solid var(--line);border-radius:999px;color:#fff;background:rgba(18,20,27,.97);font-size:12px;box-shadow:0 12px 34px rgba(0,0,0,.4)}#toast.show{display:block}
       .logList{display:grid;gap:5px}.logEntry{display:grid;grid-template-columns:72px 80px minmax(0,1fr);gap:7px;padding:8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;line-height:1.45}.logEntry.error{color:#ffb7bc}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}.logTime{color:var(--muted);font-variant-numeric:tabular-nums}.errorBox{display:none;margin-bottom:8px;padding:10px;border:1px solid rgba(240,100,109,.38);border-radius:12px;background:rgba(240,100,109,.10);color:#ffc1c5;font-size:11px;line-height:1.5}.errorBox.show{display:block}
       .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
@@ -109,7 +109,7 @@
     <div id="browserBar"><button id="backFrame" aria-label="戻る">←</button><button id="forwardFrame" aria-label="進む">→</button><button id="reloadFrame" aria-label="再読込">↻</button><input id="urlInput" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す">⌃</button></div>
     <button id="browserHandle" aria-label="URLバーを表示">⌄</button>
     <div id="dock">
-      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く">⠿</button><button id="compactRun" aria-label="実行">▶</button></div>
+      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く"></button><button id="compactRun" aria-label="実行">▶</button></div>
       <div class="fullOnly" id="dockHeader"><button id="dockGrip" aria-label="メニューを移動"></button><div class="title"><strong>Scratch風オートフロー</strong><small id="statusText">準備完了</small></div><button id="toggleCompact" aria-label="小さくする">—</button><button id="closeApp" aria-label="終了">×</button></div>
       <div class="fullOnly" id="mainTabs"><button class="mainTab active" data-page="workflow">ワークフロー</button><button class="mainTab" data-page="legacy">旧マクロ</button><button class="mainTab" data-page="logs">ログ</button></div>
       <div class="fullOnly" id="pages">
@@ -185,6 +185,73 @@
   const int = (value, fallback = 0) => Math.round(finite(value, fallback));
   const nowId = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
   const sleepMicrotask = () => new Promise(resolve => queueMicrotask(resolve));
+
+  const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
+  const dragLock = { active: false, pointerId: null, owner: null, restore: null };
+
+  function consumeDragEvent(event, immediate = false) {
+    if (event?.cancelable) event.preventDefault();
+    if (immediate) event?.stopImmediatePropagation?.();
+    else event?.stopPropagation?.();
+  }
+
+  function acquireDragLock(event, owner) {
+    releaseDragLock();
+    consumeDragEvent(event, true);
+    dragLock.active = true;
+    dragLock.pointerId = event.pointerId;
+    dragLock.owner = owner;
+    root.classList.add('ui-dragging');
+    owner?.classList?.add('is-dragging');
+    try { owner?.setPointerCapture?.(event.pointerId); } catch {}
+
+    const targets = [document.documentElement, document.body].filter(Boolean);
+    const properties = ['touchAction', 'overscrollBehavior', 'userSelect', 'webkitUserSelect'];
+    const snapshots = targets.map(target => [target, Object.fromEntries(properties.map(property => [property, target.style[property]]))]);
+    for (const target of targets) {
+      target.style.touchAction = 'none';
+      target.style.overscrollBehavior = 'none';
+      target.style.userSelect = 'none';
+      target.style.webkitUserSelect = 'none';
+    }
+    dragLock.restore = () => {
+      for (const [target, snapshot] of snapshots) {
+        for (const property of properties) target.style[property] = snapshot[property];
+      }
+    };
+  }
+
+  function releaseDragLock(event = null, owner = dragLock.owner) {
+    if (!dragLock.active) return;
+    if (event && dragLock.pointerId != null && event.pointerId != null && event.pointerId !== dragLock.pointerId) return;
+    consumeDragEvent(event, true);
+    try {
+      if (owner?.hasPointerCapture?.(dragLock.pointerId)) owner.releasePointerCapture(dragLock.pointerId);
+    } catch {}
+    owner?.classList?.remove('is-dragging');
+    root.classList.remove('ui-dragging');
+    try { dragLock.restore?.(); } catch {}
+    dragLock.active = false;
+    dragLock.pointerId = null;
+    dragLock.owner = null;
+    dragLock.restore = null;
+  }
+
+  const suppressNativeDrag = event => {
+    if (dragLock.active) consumeDragEvent(event, true);
+  };
+  for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
+    window.addEventListener(type, suppressNativeDrag, { capture: true, passive: false });
+  }
+  const releaseDragOnBlur = () => releaseDragLock();
+  window.addEventListener('blur', releaseDragOnBlur, true);
+  addCleanup(() => {
+    releaseDragLock();
+    for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
+      window.removeEventListener(type, suppressNativeDrag, true);
+    }
+    window.removeEventListener('blur', releaseDragOnBlur, true);
+  });
 
   function normalizePopupText(value) {
     return String(value ?? '').replace(/\s+/g, '').trim();
@@ -923,11 +990,11 @@
       const definition = BLOCK_DEFINITIONS[block.type] || { category: 'control', label: block.type, description: '未対応' };
       const card = element('div', { className: `blockCard category-${definition.category}` });
       card.dataset.blockId = block.id;
-      card.draggable = !state.running;
+      card.draggable = !state.running && supportsNativeBlockDrag;
       card.classList.toggle('running', state.running?.currentBlockId === block.id);
       card.classList.toggle('collapsed', state.collapsed.has(block.id));
       card.addEventListener('dragstart', event => {
-        if (state.running) return event.preventDefault();
+        if (state.running || !supportsNativeBlockDrag || event.target.closest?.('button,input,select,textarea,label')) return event.preventDefault();
         state.dragBlockId = block.id;
         card.classList.add('dragging');
         event.dataTransfer.effectAllowed = 'move';
@@ -2460,7 +2527,7 @@
       const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
       const move = event => {
         if (!drag.active || event.pointerId !== drag.id) return;
-        event.preventDefault();
+        consumeDragEvent(event, true);
         action.cx = clamp(drag.baseX + event.clientX - drag.startX, 0, window.innerWidth);
         action.cy = clamp(drag.baseY + event.clientY - drag.startY, 0, window.innerHeight);
         marker.style.left = `${action.cx}px`;
@@ -2468,7 +2535,9 @@
       };
       const finish = event => {
         if (!drag.active || event.pointerId !== drag.id) return;
+        consumeDragEvent(event, true);
         drag.active = false;
+        releaseDragLock(event, marker);
         window.removeEventListener('pointermove', move, true);
         window.removeEventListener('pointerup', finish, true);
         window.removeEventListener('pointercancel', finish, true);
@@ -2477,7 +2546,7 @@
       };
       marker.addEventListener('pointerdown', event => {
         if (state.legacyRunning || state.recording || event.button !== 0) return;
-        event.preventDefault();
+        acquireDragLock(event, marker);
         drag.active = true;
         drag.id = event.pointerId;
         drag.startX = event.clientX;
@@ -3024,6 +3093,7 @@
   function setCompact(compact) {
     dock.classList.toggle('compact', compact);
     byId('toggleCompact').textContent = compact ? '□' : '—';
+    requestAnimationFrame(positionDock);
     saveLegacyState();
   }
 
@@ -3044,7 +3114,7 @@
     const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
     const move = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
-      event.preventDefault();
+      consumeDragEvent(event, true);
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
       drag.moved ||= Math.hypot(dx, dy) > 3;
@@ -3054,7 +3124,9 @@
     };
     const finish = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
       drag.active = false;
+      releaseDragLock(event, handle);
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', finish, true);
@@ -3063,7 +3135,7 @@
     };
     handle.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
-      event.preventDefault();
+      acquireDragLock(event, handle);
       const rect = dock.getBoundingClientRect();
       drag.active = true;
       drag.id = event.pointerId;
@@ -3077,6 +3149,7 @@
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
     }, { passive: false });
     addCleanup(() => {
+      if (drag.active) releaseDragLock(null, handle);
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', finish, true);
