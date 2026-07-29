@@ -104,6 +104,7 @@ jobs:
       - name: Verify syntax and regression tests
         run: |
           rm -f .touch-consistency-trigger
+          git checkout HEAD -- .github/workflows/apply-touch-consistency.yml .github/workflows/validate-autoflow.yml
           node --check a.js
           node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
       - name: Commit branch result
