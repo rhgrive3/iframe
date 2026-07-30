@@ -1,0 +1,147 @@
+name: Repository Patch Bridge
+
+on:
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: repo-patch-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: >-
+      github.actor == github.repository_owner &&
+      startsWith(github.event.issue.title, '[repo-patch]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout bridge implementation
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Parse request
+        id: request
+        continue-on-error: true
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee /tmp/repo-patch-parse.log) 2>&1
+          printf '%s' "$ISSUE_BODY" > /tmp/repo-patch-body.txt
+          cp .github/scripts/apply_repo_patch.py /tmp/apply_repo_patch.py
+          python /tmp/apply_repo_patch.py parse \
+            --body-file /tmp/repo-patch-body.txt \
+            --request-file /tmp/repo-patch-request.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Apply, validate, commit, and push
+        id: execute
+        if: steps.request.outcome == 'success'
+        continue-on-error: true
+        env:
+          TARGET_BRANCH: ${{ steps.request.outputs.target_branch }}
+          EXPECTED_HEAD_SHA: ${{ steps.request.outputs.expected_head_sha }}
+          COMMIT_MESSAGE: ${{ steps.request.outputs.commit_message }}
+          VALIDATION: ${{ steps.request.outputs.validation }}
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee /tmp/repo-patch.log) 2>&1
+
+          git check-ref-format --branch "$TARGET_BRANCH"
+          git fetch --no-tags origin \
+            "refs/heads/${TARGET_BRANCH}:refs/remotes/origin/${TARGET_BRANCH}"
+          git checkout --detach "refs/remotes/origin/${TARGET_BRANCH}"
+
+          actual_head="$(git rev-parse HEAD)"
+          if [[ "$actual_head" != "$EXPECTED_HEAD_SHA" ]]; then
+            echo "stale request: expected $EXPECTED_HEAD_SHA, current $actual_head"
+            exit 1
+          fi
+
+          python /tmp/apply_repo_patch.py apply \
+            --request-file /tmp/repo-patch-request.json \
+            --repo-root "$GITHUB_WORKSPACE"
+
+          git diff --check
+          if [[ -z "$(git status --porcelain)" ]]; then
+            echo 'request produced no repository changes'
+            exit 1
+          fi
+
+          case "$VALIDATION" in
+            none)
+              ;;
+            autoflow)
+              node --check a.js
+              node --test \
+                tests/autoflow.static.test.mjs \
+                test/touch-event-regression.test.mjs
+              ;;
+            *)
+              echo "unsupported validation profile: $VALIDATION"
+              exit 1
+              ;;
+          esac
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m "$COMMIT_MESSAGE"
+          new_head="$(git rev-parse HEAD)"
+          git push origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          echo "new_head=$new_head" >> "$GITHUB_OUTPUT"
+
+      - name: Report result
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          REQUEST_OUTCOME: ${{ steps.request.outcome }}
+          EXECUTE_OUTCOME: ${{ steps.execute.outcome }}
+          NEW_HEAD: ${{ steps.execute.outputs.new_head }}
+        with:
+          script: |
+            const fs = require('fs');
+            const succeeded = process.env.REQUEST_OUTCOME === 'success' && process.env.EXECUTE_OUTCOME === 'success';
+            let log = '';
+            for (const path of ['/tmp/repo-patch-parse.log', '/tmp/repo-patch.log']) {
+              try {
+                const part = fs.readFileSync(path, 'utf8');
+                if (part) log += `${part}\n`;
+              } catch {}
+            }
+            if (log.length > 45000) log = log.slice(-45000);
+            const summary = succeeded
+              ? `Repository patch applied successfully. New head: \`${process.env.NEW_HEAD}\``
+              : 'Repository patch failed. The target branch was not updated.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${summary}\n\n<details><summary>Execution log</summary>\n\n\`\`\`text\n${log}\n\`\`\`\n</details>`
+            });
+            if (succeeded) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+            }
+
+      - name: Fail workflow when patch failed
+        if: steps.request.outcome != 'success' || steps.execute.outcome != 'success'
+        run: exit 1
