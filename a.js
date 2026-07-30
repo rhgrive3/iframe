@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 25;
+  const APP_VERSION = 26;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -2199,7 +2199,7 @@
     await abortableDelay(actual * 1000, signal);
   }
 
-  async function refreshAssistList(config, context) {
+  async function refreshAssistList(config, context, { waitForCompletion = true } = {}) {
     const { signal } = context;
     await waitRandomized(config.baseDelaySec, config.jitterSec, signal);
     const doc = frameDocument();
@@ -2213,6 +2213,11 @@
     if (!refresh || !computedVisible(refresh)) throw new FlowError('救援一覧の更新ボタンが表示されていません', 'REFRESH_MISSING');
     if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
     const beforeSignature = assistListSignature(beforeList);
+    if (!waitForCompletion) {
+      await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
+      return { tapped: true, waitedForCompletion: false };
+    }
+
     let sawMutation = false;
     let sawLoading = false;
     let loadingEnded = false;
@@ -2220,7 +2225,7 @@
     try {
       const observationRoot = beforeList.parentElement || beforeList;
       observer = new MutationObserver(records => {
-        sawMutation = records.some(record =>
+        sawMutation ||= records.some(record =>
           record.target === observationRoot
           || record.target === beforeList
           || beforeList.contains(record.target)
@@ -2251,7 +2256,8 @@
         description: '救援一覧更新完了待ち'
       });
       await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
-      await waitPromise;
+      const completion = await waitPromise;
+      return { tapped: true, waitedForCompletion: true, completion };
     } finally {
       observer?.disconnect();
     }
@@ -2640,7 +2646,7 @@
       const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
       const ranked = rankAssistRows(rows, config.minimumHp);
       if (!ranked.length) {
-        await refreshAssistList(refreshConfig, context);
+        await refreshAssistList(refreshConfig, context, { waitForCompletion: false });
         continue;
       }
 

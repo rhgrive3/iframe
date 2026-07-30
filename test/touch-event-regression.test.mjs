@@ -157,6 +157,21 @@ test('assist refresh observes only the list region', () => {
   assert.doesNotMatch(block, /observer\.observe\(currentDoc\.documentElement/);
 });
 
+test('assist HP polling keeps tapping when a refresh produces no DOM mutation', () => {
+  const refreshStart = source.indexOf('async function refreshAssistList');
+  const refreshEnd = source.indexOf('function visibleSupporterRows', refreshStart);
+  const refreshBlock = source.slice(refreshStart, refreshEnd);
+  assert.match(refreshBlock, /\{ waitForCompletion = true \} = \{\}/);
+  assert.match(refreshBlock, /if \(!waitForCompletion\)/);
+  assert.match(refreshBlock, /return \{ tapped: true, waitedForCompletion: false \}/);
+  assert.match(refreshBlock, /sawMutation \|\|= records\.some/);
+
+  const flowStart = source.indexOf('async function assistSelectFullFlow');
+  const flowEnd = source.indexOf('function evaluateWorkflowCondition', flowStart);
+  const flowBlock = source.slice(flowStart, flowEnd);
+  assert.match(flowBlock, /refreshAssistList\(refreshConfig, context, \{ waitForCompletion: false \}\)/);
+});
+
 test('repo patch request builder emits guarded exact replacements', () => {
   const request = buildRequest({
     head: 'a'.repeat(40),
