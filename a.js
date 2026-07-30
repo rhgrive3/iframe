@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 27;
+  const APP_VERSION = 28;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -19,10 +19,12 @@
   const MAX_REPEAT_COUNT = 10_000;
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
+  const MAX_WORKFLOW_RESTARTS = 10_000;
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
   const MAX_LOGS = 100;
+  const BATTLE_END_MESSAGE = '敵が倒されたため、このバトルは終了しました。';
 
   const ERROR_MESSAGES = Object.freeze({
     MAX_ASSIST: '救援できるマルチバトルは最大3つまでです。',
@@ -46,6 +48,8 @@
     unclaimedRows: '#prt-unclaimed-list > .btn-multi-raid.lis-raid[data-href^="result_multi/"]',
     assistReturn: '#btn-link-quest-assist',
     battleScreen: '.cnt-raid-stage.multi',
+    battleResult: '.prt-command-end .btn-result',
+    battleEndNotice: '#pop .prt-rematch-fail, #pop-force .prt-rematch-fail, .txt-rematch-fail',
     fullAuto: '.btn-auto',
     attackStart: '.btn-attack-start',
     attackDummy: '.prt-attack-start-dummy',
@@ -1151,6 +1155,14 @@
     constructor(message = '停止しました') {
       super(message);
       this.name = 'FlowStop';
+    }
+  }
+
+  class FlowRestart extends Error {
+    constructor(message = 'ワークフローの先頭から再開します', details = null) {
+      super(message);
+      this.name = 'FlowRestart';
+      this.details = details;
     }
   }
 
@@ -2459,41 +2471,142 @@
     };
   }
 
-  async function ensureFullAuto(config, context) {
-    const { signal } = context;
-    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
-    const found = await monitorFrame(() => {
-      const doc = frameDocument();
-      const observed = fullAutoState(doc);
-      if (!observed.exists || !observed.visible) return false;
-      if (observed.on) return observed;
+  function battleObservationRoots(doc = frameDocument()) {
+    return [
+      doc.querySelector(SELECTORS.fullAuto),
+      doc.querySelector('#cnt-raid-information'),
+      doc.querySelector('.prt-command .prt-member'),
+      doc.querySelector(SELECTORS.turn),
+      doc.querySelector('.prt-command-end'),
+      doc.querySelector('#pop'),
+      doc.querySelector('#pop-force')
+    ].filter(Boolean);
+  }
 
-      const attack = attackSnapshot(doc);
-      const attackReady = Boolean(
-        attack.start
-        && attack.start.classList.contains('display-on')
-        && !attack.start.classList.contains('display-off')
-        && computedVisible(attack.start)
-        && !attack.dummyVisible
-        && !attack.cancelVisible
-        && !attack.actorAttacking
-      );
-      return attackReady ? observed : false;
-    }, {
-      signal,
-      timeoutMs: config.timeoutSec * 1000,
-      stableMs: DEFAULT_STABLE_MS,
-      description: 'フルオート操作可能状態待ち'
-    });
-    if (found.on) return { changed: false };
-    const pending = armPendingAutoAttack(config.timeoutSec * 1000, signal);
+  function detectBattleEndState(doc = frameDocument()) {
+    const stateInfo = detectScreenState(doc);
+    if (stateInfo.type === 'RESULT') return { type: 'RESULT', reason: 'リザルト画面を検出', url: currentFrameUrl() };
+    const notice = doc.querySelector(SELECTORS.battleEndNotice);
+    if (notice && computedVisible(notice)) {
+      const text = normalizePopupText(notice.textContent || '');
+      if (!text || text.includes(BATTLE_END_MESSAGE)) {
+        return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE, element: notice };
+      }
+    }
+    const resultButton = doc.querySelector(SELECTORS.battleResult);
+    if (resultButton && computedVisible(resultButton)) {
+      return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出', element: resultButton };
+    }
+    return null;
+  }
+
+  function safeBattleEndState() {
+    try { return detectBattleEndState(); } catch { return null; }
+  }
+
+  async function reloadForBattleEndProbe(config, context) {
+    const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
+    clearPendingAutoAttack('敵撃破判定のため再読み込みします');
+    let reloadError = null;
     try {
-      await jqTapStrict(found.button, { signal, label: 'フルオート' });
+      await performFrameOperation(() => frameWindow().location.reload(), {
+        signal: context.signal,
+        timeoutMs,
+        expectedScreen: 'auto',
+        requireChange: true
+      });
     } catch (error) {
-      if (state.pendingAutoAttack === pending) clearPendingAutoAttack('フルオート押下に失敗しました');
+      reloadError = error;
+    }
+    return { endState: safeBattleEndState(), state: safeDetectScreenState(), reloadError };
+  }
+
+  async function restartWorkflowAfterBattleEnd(config, context, endState) {
+    clearPendingAutoAttack('敵撃破を検出しました');
+    const route = String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0';
+    const expectedScreen = normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist');
+    const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
+    const targetUrl = gameRouteUrl(route);
+    context.setProgress?.('敵撃破を検出・復帰中');
+
+    let alreadyReady = false;
+    try {
+      const doc = frameDocument();
+      alreadyReady = currentFrameUrl() === targetUrl && pageBaseReady(doc) && expectedScreenMatches(expectedScreen, doc);
+    } catch {}
+
+    if (alreadyReady) {
+      await waitForFrameReady({ signal: context.signal, timeoutMs, expectedScreen, requireChange: false });
+    } else {
+      await performFrameOperation(() => { frameWindow().location.href = targetUrl; }, {
+        signal: context.signal,
+        timeoutMs,
+        expectedScreen,
+        requireChange: true
+      });
+    }
+
+    throw new FlowRestart('敵撃破を検出したため指定ページから先頭ブロックへ戻ります', { route, expectedScreen, endState });
+  }
+
+  async function ensureFullAuto(config, context, { allowReloadProbe = true } = {}) {
+    const { signal } = context;
+    try {
+      const initialEnd = safeBattleEndState();
+      if (initialEnd) return restartWorkflowAfterBattleEnd(config, context, initialEnd);
+
+      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+      const found = await monitorFrame(() => {
+        const doc = frameDocument();
+        const battleEnd = detectBattleEndState(doc);
+        if (battleEnd) return { battleEnd };
+
+        const observed = fullAutoState(doc);
+        if (!observed.exists || !observed.visible) return false;
+        if (observed.on) return observed;
+
+        const attack = attackSnapshot(doc);
+        const attackReady = Boolean(
+          attack.start
+          && attack.start.classList.contains('display-on')
+          && !attack.start.classList.contains('display-off')
+          && computedVisible(attack.start)
+          && !attack.dummyVisible
+          && !attack.cancelVisible
+          && !attack.actorAttacking
+        );
+        return attackReady ? observed : false;
+      }, {
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        stableMs: DEFAULT_STABLE_MS,
+        description: 'フルオート操作可能状態待ち',
+        observeRoots: battleObservationRoots
+      });
+
+      if (found.battleEnd) return restartWorkflowAfterBattleEnd(config, context, found.battleEnd);
+      if (found.on) return { changed: false };
+      const pending = armPendingAutoAttack(config.timeoutSec * 1000, signal);
+      try {
+        await jqTapStrict(found.button, { signal, label: 'フルオート' });
+      } catch (error) {
+        if (state.pendingAutoAttack === pending) clearPendingAutoAttack('フルオート押下に失敗しました');
+        throw error;
+      }
+      return { changed: true };
+    } catch (error) {
+      if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
+      if (error?.code === 'TIMEOUT' && allowReloadProbe) {
+        const visibleEnd = safeBattleEndState();
+        if (visibleEnd) return restartWorkflowAfterBattleEnd(config, context, visibleEnd);
+        const probe = await reloadForBattleEndProbe(config, context);
+        if (probe.endState) return restartWorkflowAfterBattleEnd(config, context, probe.endState);
+        if (!probe.reloadError && probe.state?.type === 'BATTLE') {
+          return ensureFullAuto(config, context, { allowReloadProbe: false });
+        }
+      }
       throw error;
     }
-    return { changed: true };
   }
 
   function elementDisplayOn(element) {
@@ -2983,7 +3096,8 @@
       currentBlockId: null,
       startedAt: performance.now(),
       cycle: 0,
-      totalCycles: null
+      totalCycles: null,
+      restartCount: 0
     };
     state.running = context;
     ui.runWorkflow.disabled = true;
@@ -3003,7 +3117,23 @@
         const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
         appendLog(`${cycleLabel}を開始`, '', workflow.name);
         setStatus(`${workflow.name} · ${cycleLabel}`);
-        await runBlockList(workflow.blocks, context);
+
+        while (!controller.signal.aborted) {
+          try {
+            await runBlockList(workflow.blocks, context);
+            break;
+          } catch (error) {
+            if (!(error instanceof FlowRestart)) throw error;
+            context.restartCount += 1;
+            if (context.restartCount > MAX_WORKFLOW_RESTARTS) {
+              throw new FlowError('敵撃破後の自動再開回数が安全上限に達しました', 'WORKFLOW_RESTART_LIMIT');
+            }
+            clearPendingAutoAttack('ワークフロー先頭から再開します');
+            setRunningBlock(context, null);
+            appendLog(error.message, 'warn', '自動復帰');
+            setStatus(`${workflow.name} · 先頭から再開`);
+          }
+        }
       }
       appendLog(`ワークフロー「${workflow.name}」が${cycle}周完了`, 'success');
       setStatus('ワークフロー完了');
