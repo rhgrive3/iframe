@@ -1,0 +1,2 @@
+Apply the persistent battle performance mode patch.
+The setting must remain active independently of workflow execution.
