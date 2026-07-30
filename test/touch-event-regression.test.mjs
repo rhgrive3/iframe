@@ -115,6 +115,28 @@ test('full-auto toggle waits for an observed attack transition instead of toggle
   assert.doesNotMatch(source, /lastFullAutoEnabledAt/);
 });
 
+test('mobile attack waiting observes transient controls and persistent battle progress', () => {
+  const monitorStart = source.indexOf('function monitorFrame');
+  const monitorEnd = source.indexOf('async function waitForFrameReady', monitorStart);
+  const monitor = source.slice(monitorStart, monitorEnd);
+  assert.match(monitor, /observeOnLightweight = false/);
+  assert.match(monitor, /observeCharacterData = false/);
+  assert.match(monitor, /intervalMs = null/);
+  assert.match(monitor, /lightweightMode && !observeOnLightweight/);
+  assert.match(monitor, /queueMicrotask\(run\)/);
+
+  const attackStart = source.indexOf('function battleProgressSignature');
+  const attackEnd = source.indexOf('async function recoverKnownPopup', attackStart);
+  const attack = source.slice(attackStart, attackEnd);
+  assert.match(attack, /\[id\^="enemy-hp"\]/);
+  assert.match(attack, /\.prt-command \.prt-member \.txt-hp-value/);
+  assert.match(attack, /progressChanged/);
+  assert.match(attack, /attackTransitionFromBaseline\(initial, snapshot\)/);
+  assert.ok((attack.match(/observeOnLightweight: true/g) || []).length >= 3);
+  assert.ok((attack.match(/observeCharacterData: true/g) || []).length >= 3);
+  assert.ok((attack.match(/intervalMs: 120/g) || []).length >= 3);
+});
+
 test('workflow-level finite and infinite loop settings are normalized, rendered and executed', () => {
   assert.match(source, /id="workflowLoopCount"/);
   assert.match(source, /id="workflowLoopMode"/);

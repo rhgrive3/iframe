@@ -117,8 +117,8 @@ test('failed observed actions are canceled and log DOM stays lightweight', () =>
 
 test('runtime hot paths avoid redundant document scans', () => {
   const monitor = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
-  assert.ok(monitor.includes('if (lightweightMode)'));
-  assert.ok(monitor.indexOf('if (lightweightMode)') < monitor.indexOf('typeof observeRoots'));
+  assert.ok(monitor.includes('if (lightweightMode && !observeOnLightweight)'));
+  assert.ok(monitor.indexOf('if (lightweightMode && !observeOnLightweight)') < monitor.indexOf('typeof observeRoots'));
   const ready = source.slice(source.indexOf('async function waitForFrameReady'), source.indexOf('async function performFrameOperation'));
   assert.ok(ready.includes('const baseline = requireChange ? (before || captureFrameState()) : null'));
   const running = source.slice(source.indexOf('function blockCardById'), source.indexOf('async function runBlockList'));
@@ -206,4 +206,14 @@ test('lightweight execution keeps only error logs and removes continuous overlay
   assert.ok(source.includes('function enterRuntimeCompactMode'));
   assert.ok(source.includes('leaveRuntimeCompactMode(restoreExpandedDock)'));
   assert.ok(source.includes("if (!lightweightMode) {\n      renderPalette();\n      renderWorkflowEditor();\n    }"));
+});
+
+test('narrow phones launch compact with a reduced editor footprint', () => {
+  assert.ok(source.includes("const narrowScreen = window.matchMedia?.('(max-width: 620px)').matches ?? false"));
+  assert.ok(source.includes('setBrowserHidden(state.legacy.browserHidden || narrowScreen)'));
+  assert.ok(source.includes('setCompact(state.legacy.compact || narrowScreen)'));
+  assert.ok(source.includes('width:min(390px,calc(100dvw - 18px))'));
+  assert.ok(source.includes('height:min(560px,66dvh)'));
+  assert.ok(source.includes('button{min-height:40px}'));
+  assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
 });

@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 37;
+  const APP_VERSION = 38;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -113,9 +113,9 @@
       #toast{position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);display:none;max-width:calc(100vw - 24px);padding:10px 14px;border:1px solid var(--line);border-radius:999px;color:#fff;background:rgba(18,20,27,.97);font-size:12px;box-shadow:0 12px 34px rgba(0,0,0,.4)}#toast.show{display:block}
       .logList{display:grid;gap:5px}.logEntry{display:grid;grid-template-columns:72px 80px minmax(0,1fr);gap:7px;padding:8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;line-height:1.45}.logEntry.error{color:#ffb7bc}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}.logTime{color:var(--muted);font-variant-numeric:tabular-nums}.errorBox{display:none;margin-bottom:8px;padding:10px;border:1px solid rgba(240,100,109,.38);border-radius:12px;background:rgba(240,100,109,.10);color:#ffc1c5;font-size:11px;line-height:1.5}.errorBox.show{display:block}
       .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
-      @media(max-width:620px){#dock{height:min(860px,calc(100vh - 70px))}.grid2,.grid3{grid-template-columns:1fr}.span2{grid-column:auto}.paletteGrid{grid-template-columns:1fr}.blockHead{grid-template-columns:36px minmax(0,1fr)}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:41px}.logEntry{grid-template-columns:58px 64px minmax(0,1fr)}}
-      @media(max-width:430px){#browserBar{grid-template-columns:42px 42px minmax(70px,1fr) 56px 42px}#forwardFrame{display:none}.toolbar>*{flex-basis:90px}}
-      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
+      @media(max-width:620px){#browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:36px 36px 36px minmax(70px,1fr) 50px 36px;gap:3px;padding:3px;border-radius:10px}#browserBar button,#browserBar input{height:36px;min-height:36px}#browserBar input{padding:4px 6px;font-size:14px}#dock{left:6px;width:min(390px,calc(100dvw - 18px));height:min(560px,66dvh);max-height:calc(100dvh - 54px);border-radius:12px}#dock.compact{width:104px;height:48px;border-radius:24px}#dockHeader{grid-template-columns:36px minmax(0,1fr) 36px 36px;gap:3px;padding:4px}.title strong{font-size:12px}.title small{font-size:10px}#mainTabs{gap:3px;padding:4px}.page{padding:6px}.card{margin-bottom:6px;padding:7px;border-radius:10px}.cardTitle{margin-bottom:6px}.grid2,.grid3{gap:5px}.toolbar{gap:4px}.toolbar>*{flex-basis:78px}.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.paletteButton{min-height:44px;padding:5px}.blockCard{margin:4px 0;border-radius:10px}.blockHead{grid-template-columns:32px minmax(0,1fr);gap:3px;padding:4px}.blockHead button,.legacyTools button{min-height:36px;height:36px}.blockBody{padding:6px}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:35px;gap:3px}.childArea{margin:0 5px 6px 12px;padding:4px}.logEntry{grid-template-columns:50px 58px minmax(0,1fr);gap:4px;padding:6px;font-size:10px}}
+      @media(max-width:430px){#browserBar{grid-template-columns:34px 34px minmax(66px,1fr) 48px 34px}#forwardFrame{display:none}.toolbar>*{flex-basis:72px}}
+      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}button{min-height:40px}input,select,textarea{min-height:40px}.blockHead button,.legacyTools button{min-height:36px;height:36px}}
     </style>
     <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="markerLayer"></div><div id="recordLayer"></div>
@@ -205,6 +205,7 @@
 
   const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
   const lightweightMode = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? false;
+  const narrowScreen = window.matchMedia?.('(max-width: 620px)').matches ?? false;
   const dragLock = { active: false, pointerId: null, owner: null, restore: null };
 
   function consumeDragEvent(event, immediate = false) {
@@ -1574,7 +1575,17 @@
       && hiddenOrAbsent(doc, '#ready');
   }
 
-  function monitorFrame(check, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '状態待ち', allowInterval = true, observeRoots = null } = {}) {
+  function monitorFrame(check, {
+    signal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    stableMs = 0,
+    description = '状態待ち',
+    allowInterval = true,
+    observeRoots = null,
+    observeOnLightweight = false,
+    observeCharacterData = false,
+    intervalMs = null
+  } = {}) {
     throwIfAborted(signal);
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -1611,7 +1622,7 @@
       const bindObserver = () => {
         let doc;
         try { doc = frameDocument(); } catch { return; }
-        if (lightweightMode) {
+        if (lightweightMode && !observeOnLightweight) {
           if (doc !== observedDoc) {
             observer?.disconnect();
             observer = null;
@@ -1642,11 +1653,19 @@
           stableSince = null;
           if (scheduled) return;
           scheduled = true;
-          requestAnimationFrame(() => { scheduled = false; evaluate(); });
+          const run = () => { scheduled = false; evaluate(); };
+          if (observeOnLightweight) queueMicrotask(run);
+          else requestAnimationFrame(run);
         });
         for (const rootNode of roots) {
           try {
-            observer.observe(rootNode, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
+            observer.observe(rootNode, {
+              subtree: true,
+              childList: true,
+              attributes: true,
+              attributeFilter: ['class', 'style'],
+              characterData: observeCharacterData
+            });
           } catch {}
         }
       };
@@ -1677,7 +1696,10 @@
       iframe.addEventListener('load', onFrameLoad);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
-      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : (lightweightMode ? 750 : 300));
+      if (allowInterval) {
+        const pollingInterval = intervalMs ?? (timeoutMs === 0 ? 1000 : (lightweightMode ? 750 : 300));
+        interval = setInterval(evaluate, Math.max(50, pollingInterval));
+      }
       bindObserver();
       evaluate();
     });
@@ -2831,6 +2853,7 @@
       doc.querySelector(SELECTORS.fullAuto),
       doc.querySelector('#cnt-raid-information'),
       doc.querySelector('.prt-command .prt-member'),
+      doc.querySelector('.prt-gauge-area'),
       doc.querySelector(SELECTORS.turn),
       doc.querySelector('.prt-command-end'),
       doc.querySelector('#pop'),
@@ -2984,6 +3007,19 @@
     return `${normalizePopupText(turn.textContent || '')}|${structure}`;
   }
 
+  function battleProgressSignature(doc = frameDocument()) {
+    const enemyHp = Array.from(doc.querySelectorAll('[id^="enemy-hp"]'), element =>
+      normalizePopupText(element.textContent || '')
+    ).join(',');
+    const memberHp = Array.from(doc.querySelectorAll('.prt-command .prt-member .txt-hp-value'), element =>
+      normalizePopupText(element.textContent || '')
+    ).join(',');
+    const memberGauge = Array.from(doc.querySelectorAll('.prt-command .prt-member .prt-gauge-special-inner'), element =>
+      element.style.width || element.getAttribute('style') || ''
+    ).join(',');
+    return `${turnSignature(doc)}|${enemyHp}|${memberHp}|${memberGauge}`;
+  }
+
   function attackSnapshot(doc = frameDocument()) {
     const start = doc.querySelector(SELECTORS.attackStart);
     const dummy = doc.querySelector(SELECTORS.attackDummy);
@@ -2996,7 +3032,8 @@
       dummyVisible: elementDisplayOn(dummy),
       cancelVisible: elementDisplayOn(cancel),
       actorAttacking: Boolean(doc.querySelector(SELECTORS.attackActor)),
-      turn: turnSignature(doc)
+      turn: turnSignature(doc),
+      progress: battleProgressSignature(doc)
     };
   }
 
@@ -3008,8 +3045,9 @@
     const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
     const startBecameHidden = Boolean(baseline.startVisible && !current.startVisible);
     const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
-    const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged;
-    return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
+    const progressChanged = Boolean(baseline.progress && current.progress && baseline.progress !== current.progress);
+    const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged || progressChanged;
+    return started ? { current, startReplaced, startBecameHidden, turnChanged, progressChanged } : false;
   }
 
   function clearPendingAutoAttack(reason = 'フルオート攻撃監視を解除しました') {
@@ -3039,7 +3077,10 @@
       timeoutMs,
       stableMs: 0,
       description: 'フルオート押下後の攻撃開始待ち',
-      observeRoots: battleObservationRoots
+      observeRoots: battleObservationRoots,
+      observeOnLightweight: true,
+      observeCharacterData: true,
+      intervalMs: 120
     }).then(
       result => ({ ok: true, result }),
       error => ({ ok: false, error })
@@ -3091,6 +3132,8 @@
         const battleEnd = detectBattleEndState(doc);
         if (battleEnd) return { battleEnd };
         const snapshot = attackSnapshot(doc);
+        const transition = attackTransitionFromBaseline(initial, snapshot);
+        if (transition) return { snapshot, alreadyAttacking: true, transition };
         if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
         const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
         return attackReady ? { snapshot, alreadyAttacking: false } : false;
@@ -3099,7 +3142,10 @@
         timeoutMs,
         stableMs: 0,
         description: 'フルオート攻撃受付待ち',
-        observeRoots: battleObservationRoots
+        observeRoots: battleObservationRoots,
+        observeOnLightweight: true,
+        observeCharacterData: true,
+        intervalMs: 120
       });
       if (armed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, armed.battleEnd);
       if (armed.alreadyAttacking) return armed;
@@ -3115,7 +3161,10 @@
         timeoutMs,
         stableMs: 0,
         description: 'フルオート攻撃開始待ち',
-        observeRoots: battleObservationRoots
+        observeRoots: battleObservationRoots,
+        observeOnLightweight: true,
+        observeCharacterData: true,
+        intervalMs: 120
       });
       if (transition.battleEnd) return restartWorkflowAfterBattleEnd(config, context, transition.battleEnd);
       return transition;
@@ -4816,8 +4865,8 @@
   renderLegacy();
   renderLogs();
   setPage('workflow');
-  setBrowserHidden(state.legacy.browserHidden);
-  setCompact(state.legacy.compact);
+  setBrowserHidden(state.legacy.browserHidden || narrowScreen);
+  setCompact(state.legacy.compact || narrowScreen);
   requestAnimationFrame(positionDock);
   const initialUrl = normalizeInitialUrl();
   urlInput.value = initialUrl;
