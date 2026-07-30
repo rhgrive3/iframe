@@ -1,0 +1,52 @@
+name: Finalize touch preventDefault compatibility
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: finalize-touch-prevent-default-compat
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: github.event.issue.title == 'run-touch-prevent-default-compat-20260730'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/touch-prevent-default-compat
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply, validate, and commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          exec > >(tee /tmp/finalizer.log) 2>&1
+          echo "finalizer start: $(git rev-parse HEAD)"
+          python .github/scripts/apply_touch_prevent_default_compat.py
+          status=$?
+          if [ "$status" -eq 0 ]; then node --check a.js; status=$?; fi
+          if [ "$status" -eq 0 ]; then timeout 120s node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs; status=$?; fi
+          if [ "$status" -eq 0 ]; then
+            rm .github/scripts/apply_touch_prevent_default_compat.py
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git commit -m 'fix: tolerate preventDefault in synthetic touch lifecycle'
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then git push origin HEAD:fix/touch-prevent-default-compat; status=$?; fi
+          echo "finalizer status: $status"
+          tail -c 50000 /tmp/finalizer.log > /tmp/finalizer-tail.log
+          gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body-file /tmp/finalizer-tail.log
+          exit "$status"
