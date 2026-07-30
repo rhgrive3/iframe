@@ -68,9 +68,14 @@
   const previous = window[GLOBAL_KEY];
   if (previous?.destroy) previous.destroy();
   document.getElementById(ROOT_ID)?.remove();
+  const focusBeforeInstall = document.activeElement;
+  const backgroundBody = document.body;
+  const backgroundWasInert = Boolean(backgroundBody?.inert);
+  const backgroundAriaHidden = backgroundBody?.getAttribute('aria-hidden') ?? null;
 
   const root = document.createElement('div');
   root.id = ROOT_ID;
+  root.lang = 'ja';
   Object.assign(root.style, {
     position: 'fixed',
     inset: '0',
@@ -82,75 +87,634 @@
   const shadow = root.attachShadow({ mode: 'open' });
   shadow.innerHTML = `
     <style>
-      :host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-      :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:#12141b;--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
+      :host,*{box-sizing:border-box;-webkit-tap-highlight-color:rgba(124,140,255,.16)}
+      :host{
+        display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;
+        --panel:#12141b;--panel-raised:#181b24;--panel-deep:#0d0f15;--surface:rgba(255,255,255,.055);
+        --surface2:rgba(255,255,255,.09);--surface3:rgba(255,255,255,.13);--line:rgba(255,255,255,.105);
+        --line-strong:rgba(255,255,255,.17);--text:#f5f7ff;--text-soft:#d8dcec;--muted:#939aac;
+        --accent:#7c8cff;--accent-strong:#4e5ccc;--accent-soft:rgba(124,140,255,.15);
+        --green:#46d495;--green-soft:rgba(70,212,149,.13);--red:#ff6b78;--red-soft:rgba(255,107,120,.13);
+        --amber:#f0b65c;--amber-soft:rgba(240,182,92,.13);--purple:#b197fc;--purple-soft:rgba(177,151,252,.13);
+        --blue:#66b8ff;--blue-soft:rgba(102,184,255,.13);--radius-xs:8px;--radius-sm:11px;
+        --radius-md:15px;--radius-lg:20px;--shadow-lg:0 24px 70px rgba(0,0,0,.52),0 2px 12px rgba(0,0,0,.32);
+        color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","Helvetica Neue",sans-serif;
+        font-size:14px;line-height:1.45;color:var(--text)
+      }
       button,input,select,textarea{font:inherit;color:var(--text)}
-      button{min-height:44px;border:1px solid transparent;border-radius:11px;background:var(--surface);font-weight:760;touch-action:manipulation;cursor:pointer}
-      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.45)}
-      input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:rgba(0,0,0,.25);font-size:16px;outline:none}
-      textarea{min-height:72px;resize:vertical}
-      button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #c0c5ff;outline-offset:2px}
-      #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}:host(.ui-dragging) #frame{pointer-events:none}
-      #browserBar{position:fixed;z-index:150;top:max(7px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(1080px,calc(100vw - 12px));display:grid;grid-template-columns:44px 44px 44px minmax(90px,1fr) 64px 44px;gap:5px;padding:5px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:none}
-      #browserBar.hidden{display:none}#browserBar button{height:44px;padding:0}#loadUrl{background:var(--accent)}
-      #browserHandle{position:fixed;z-index:149;top:max(5px,env(safe-area-inset-top));left:50%;display:none;transform:translateX(-50%);width:58px;border-radius:0 0 14px 14px;background:var(--panel)}#browserHandle.visible{display:block}
-      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));width:min(780px,calc(100dvw - 16px));height:min(820px,calc(100vh - 78px));height:min(820px,calc(100dvh - 78px));max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:none;overflow:hidden}
-      #dock.compact{width:120px;height:56px;border-radius:28px}.compactOnly{display:none;width:100%;height:100%}#dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#dock.compact .fullOnly{display:none!important}
-      #dockHeader{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;align-items:center;gap:5px;padding:6px;border-bottom:1px solid var(--line)}
-      #dockGrip,#compactGrip{position:relative;background:transparent;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}#dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}
-      .title{min-width:0}.title strong{display:block;font-size:13px}.title small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;margin-top:2px}
-      #mainTabs{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;padding:7px;border-bottom:1px solid var(--line)}.mainTab.active{background:rgba(111,124,255,.22);border-color:rgba(111,124,255,.42)}
-      #pages{flex:1;min-height:0;overflow:hidden}.page{display:none;height:100%;overflow:auto;padding:10px;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}.page.active{display:block}
-      .toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px;min-width:0}.toolbar .primary{background:var(--accent)}.toolbar .success{background:var(--green);color:#07170f}.toolbar .danger{background:rgba(240,100,109,.18);color:#ffbec2}.toolbar .warn{background:rgba(232,173,85,.15);color:#f7d49b}
-      .card{margin-bottom:9px;padding:11px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font-size:13px;font-weight:820}.hint{color:var(--muted);font-size:11px;line-height:1.5}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.field{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px;font-weight:690}.span2{grid-column:1/-1}
-      #workflowEditor{padding-bottom:100px}.empty{padding:28px 12px;border:1px dashed rgba(192,197,255,.35);border-radius:13px;color:var(--muted);text-align:center}.dropZone{height:15px;margin:1px 5px;border:1px dashed transparent;border-radius:7px}.dropZone.dragOver{border-color:#aeb5ff;background:rgba(111,124,255,.22)}
-      .blockCard{position:relative;margin:6px 0;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;background:rgba(9,10,15,.55);overflow:hidden}.blockCard.category-gbf{border-left-color:var(--green)}.blockCard.category-control{border-left-color:var(--purple)}.blockCard.category-wait{border-left-color:var(--amber)}.blockCard.category-frame{border-left-color:#62b7ff}.blockCard.running{outline:2px solid rgba(56,207,135,.55);outline-offset:-2px;box-shadow:none}.blockCard.dragging{opacity:.48}
-      .blockHead{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:5px;padding:6px;border-bottom:1px solid rgba(255,255,255,.08)}.blockHead button{min-height:38px;height:38px;padding:0 8px}.dragHandle{cursor:grab;touch-action:none}.blockName{min-width:0}.blockName strong{display:block;font-size:12px}.blockName small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.blockTools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}.blockTools button{min-width:38px;font-size:11px}.blockBody{padding:9px}.blockCard.collapsed .blockBody,.blockCard.collapsed .childArea{display:none}.childArea{margin:0 8px 9px 17px;padding:6px;border:1px dashed rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.018)}.childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;color:var(--muted);font-size:10px;font-weight:760}.progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border-radius:999px;background:rgba(56,207,135,.15);color:#a6edc8;font-size:10px}
-      .paletteGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.paletteButton{min-height:56px;padding:8px;text-align:left}.paletteButton strong{display:block;font-size:11px}.paletteButton small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px}.paletteButton.gbf{background:rgba(56,207,135,.10)}.paletteButton.control{background:rgba(160,131,255,.11)}.paletteButton.wait{background:rgba(232,173,85,.10)}.paletteButton.frame{background:rgba(98,183,255,.10)}
-      #runBar{position:sticky;bottom:-10px;z-index:5;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px -1px -10px;padding:10px 1px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(18,20,27,.98) 22%)}#runWorkflow{background:var(--green);color:#07170f}#stopWorkflow{background:var(--red)}
-      #legacyActionList{display:grid;gap:7px}.legacyRow{padding:9px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.16)}.legacyHead{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-bottom:7px}.legacyTools{display:flex;gap:4px}.legacyTools button{min-width:40px;min-height:40px;padding:0 7px}
-      #markerLayer,#recordLayer{position:fixed;inset:0;pointer-events:none}#markerLayer{z-index:100}.marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff675f;border-radius:50%;background:rgba(255,103,95,.14);color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;box-shadow:0 0 0 1px #fff,0 6px 18px rgba(0,0,0,.35)}.marker.selected{border-color:var(--green);background:rgba(56,207,135,.15)}#recordLayer.active{z-index:210;pointer-events:auto;background:rgba(255,60,90,.035);touch-action:none}.recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#ef4f68;font-size:10px;font-weight:850}
-      #toast{position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);display:none;max-width:calc(100vw - 24px);padding:10px 14px;border:1px solid var(--line);border-radius:999px;color:#fff;background:rgba(18,20,27,.97);font-size:12px;box-shadow:0 12px 34px rgba(0,0,0,.4)}#toast.show{display:block}
-      .logList{display:grid;gap:5px}.logEntry{display:grid;grid-template-columns:72px 80px minmax(0,1fr);gap:7px;padding:8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;line-height:1.45}.logEntry.error{color:#ffb7bc}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}.logTime{color:var(--muted);font-variant-numeric:tabular-nums}.errorBox{display:none;margin-bottom:8px;padding:10px;border:1px solid rgba(240,100,109,.38);border-radius:12px;background:rgba(240,100,109,.10);color:#ffc1c5;font-size:11px;line-height:1.5}.errorBox.show{display:block}
-      .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
-      #dock.is-running{border-color:rgba(56,207,135,.52)}
-      .title small{display:flex;align-items:center;gap:5px;min-width:0}.title small::before{content:'';flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}.title small[data-tone=running]::before{background:var(--green);box-shadow:0 0 0 3px rgba(56,207,135,.14)}.title small[data-tone=success]::before{background:var(--green)}.title small[data-tone=warn]::before{background:var(--amber)}.title small[data-tone=error]::before{background:var(--red)}
-      .mainTab{color:var(--muted);border-color:transparent}.mainTab[aria-selected=true]{color:var(--text)}
-      .saveState{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.saveState::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted)}.saveState[data-state=saving]::before{background:var(--amber)}.saveState[data-state=saved]::before{background:var(--green)}.saveState[data-state=error]{color:#ffc1c5}.saveState[data-state=error]::before{background:var(--red)}
-      .errorMessage{font-weight:720;overflow-wrap:anywhere}.errorActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:9px}.errorActions button{min-height:38px;padding:6px;font-size:11px}.errorActions .primary{background:var(--accent)}
-      .compactOnly #compactRun.is-stop{background:var(--red);color:#fff}
-      @media(prefers-reduced-motion:reduce){button:not(#dockGrip):not(#compactGrip):active{transform:none}*{scroll-behavior:auto!important}}
-      @media(max-width:620px){#browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:36px 36px 36px minmax(70px,1fr) 50px 36px;gap:3px;padding:3px;border-radius:10px}#browserBar button,#browserBar input{height:36px;min-height:36px}#browserBar input{padding:4px 6px;font-size:14px}#dock{left:6px;width:min(390px,calc(100dvw - 18px));height:min(560px,66dvh);max-height:calc(100dvh - 54px);border-radius:12px}#dock.compact{width:104px;height:48px;border-radius:24px}#dockHeader{grid-template-columns:36px minmax(0,1fr) 36px 36px;gap:3px;padding:4px}.title strong{font-size:12px}.title small{font-size:10px}#mainTabs{gap:3px;padding:4px}.page{padding:6px}.card{margin-bottom:6px;padding:7px;border-radius:10px}.cardTitle{margin-bottom:6px}.grid2,.grid3{gap:5px}.toolbar{gap:4px}.toolbar>*{flex-basis:78px}.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.paletteButton{min-height:44px;padding:5px}.blockCard{margin:4px 0;border-radius:10px}.blockHead{grid-template-columns:32px minmax(0,1fr);gap:3px;padding:4px}.blockHead button,.legacyTools button{min-height:36px;height:36px}.blockBody{padding:6px}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:35px;gap:3px}.childArea{margin:0 5px 6px 12px;padding:4px}.logEntry{grid-template-columns:50px 58px minmax(0,1fr);gap:4px;padding:6px;font-size:10px}}
-      @media(max-width:430px){#browserBar{grid-template-columns:34px 34px minmax(66px,1fr) 48px 34px}#forwardFrame{display:none}.toolbar>*{flex-basis:72px}}
-      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}button{min-height:40px}input,select,textarea{min-height:40px}.blockHead button,.legacyTools button{min-height:36px;height:36px}}
+      button{min-height:44px;border:1px solid var(--line);border-radius:var(--radius-sm);padding:0 14px;
+        background:var(--surface);font-size:12px;font-weight:720;letter-spacing:.01em;touch-action:manipulation;
+        cursor:pointer;transition:background-color .16s ease,border-color .16s ease,color .16s ease,transform .12s ease,opacity .16s ease
+      }
+      button:hover:not(:disabled){border-color:var(--line-strong);background:var(--surface2)}
+      button:not(#dockGrip):not(#compactGrip):active{transform:translateY(1px) scale(.985)}
+      button:disabled{opacity:.38;cursor:not-allowed;filter:saturate(.4)}
+      button.primary,#loadUrl{border-color:#7682e8;background:linear-gradient(180deg,#5967d8 0%,var(--accent-strong) 100%);color:#fff}
+      button.primary:hover:not(:disabled),#loadUrl:hover:not(:disabled){background:linear-gradient(180deg,#6270df 0%,#5361d2 100%)}
+      button.success{border-color:rgba(70,212,149,.35);background:var(--green-soft);color:#aef1cf}
+      button.danger{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffb5bc}
+      button.warn{border-color:rgba(240,182,92,.22);background:var(--amber-soft);color:#f8d49d}
+      button.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+      button.ghost:hover:not(:disabled){color:var(--text);background:var(--surface)}
+      input,select,textarea{
+        width:100%;min-height:44px;border:1px solid #5c6377;border-radius:var(--radius-sm);padding:9px 11px;
+        background:#0e1017;font-size:14px;line-height:1.35;outline:none;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease
+      }
+      input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:#737c92}
+      input:focus,select:focus,textarea:focus{border-color:rgba(124,140,255,.72);background:#10131c;box-shadow:0 0 0 3px rgba(124,140,255,.12)}
+      input[aria-invalid=true],select[aria-invalid=true],textarea[aria-invalid=true]{border-color:#d95867;box-shadow:0 0 0 3px rgba(255,107,120,.1)}
+      input::placeholder,textarea::placeholder{color:#7c8498;opacity:1}
+      input[type=checkbox]{width:20px;min-height:20px;height:20px;margin:4px 0;padding:0;accent-color:var(--accent);cursor:pointer}
+      input[type=number]{font-variant-numeric:tabular-nums}
+      select{cursor:pointer}
+      textarea{min-height:78px;resize:vertical}
+      button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{
+        outline:2px solid #bdc5ff;outline-offset:2px
+      }
+      ::-webkit-scrollbar{width:10px;height:10px}
+      ::-webkit-scrollbar-track{background:transparent}
+      ::-webkit-scrollbar-thumb{border:3px solid transparent;border-radius:999px;background:rgba(255,255,255,.17);background-clip:padding-box}
+      ::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26);background-clip:padding-box}
+      .srOnly{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+      #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
+      :host(.ui-dragging) #frame{pointer-events:none}
+
+      #browserBar{
+        position:fixed;z-index:150;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+        width:min(1060px,calc(100vw - 20px));display:grid;grid-template-columns:42px 42px 42px minmax(160px,1fr) 76px 42px;
+        gap:5px;padding:6px;border:1px solid var(--line-strong);border-radius:17px;background:rgba(18,20,27,.98);
+        box-shadow:0 12px 38px rgba(0,0,0,.38)
+      }
+      #browserBar.hidden{display:none}
+      #browserBar button{height:42px;min-height:42px;padding:0}
+      #browserBar .navButton{font-size:18px;color:var(--text-soft);background:transparent;border-color:transparent}
+      #browserBar .navButton:hover:not(:disabled){border-color:var(--line);background:var(--surface)}
+      #urlInput{height:42px;min-height:42px;border-color:#555c70;border-radius:10px;background:#0b0d13;padding-left:14px;font-size:13px}
+      #loadUrl{height:42px;min-height:42px;padding:0 12px;font-size:11px}
+      #hideBrowser{font-size:16px;color:var(--muted)}
+      #browserHandle{
+        position:fixed;z-index:149;top:max(5px,env(safe-area-inset-top));left:50%;display:none;transform:translateX(-50%);
+        width:66px;min-height:40px;height:40px;border-color:var(--line-strong);border-top:0;border-radius:0 0 13px 13px;
+        background:var(--panel);color:var(--muted);box-shadow:0 8px 26px rgba(0,0,0,.35)
+      }
+      #browserHandle.visible{display:block}
+
+      #dock{
+        position:fixed;z-index:180;left:10px;bottom:max(10px,env(safe-area-inset-bottom));
+        width:min(820px,calc(100vw - 20px));width:min(820px,calc(100dvw - 20px));
+        height:min(860px,calc(100vh - 86px));height:min(860px,calc(100dvh - 86px));
+        max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;
+        border:1px solid var(--line-strong);border-radius:var(--radius-lg);color:var(--text);
+        background:var(--panel);box-shadow:var(--shadow-lg);overflow:hidden;isolation:isolate
+      }
+      #dock::before{
+        content:'';position:absolute;z-index:-1;inset:0 0 auto;height:150px;pointer-events:none;
+        background:radial-gradient(ellipse at 12% -20%,rgba(124,140,255,.15),transparent 62%)
+      }
+      #dock.is-running{border-color:rgba(70,212,149,.48)}
+      #dock.compact{width:124px;height:58px;border-radius:29px}
+      .compactOnly{display:none;width:100%;height:100%}
+      #dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+      #dock.compact .fullOnly{display:none!important}
+      .compactOnly button{min-height:100%;border:0;border-radius:28px;background:transparent}
+      .compactOnly #compactRun{border-left:1px solid var(--line);border-radius:0 28px 28px 0;background:var(--green-soft);color:#aef1cf;font-size:15px}
+      .compactOnly #compactRun.is-stop{background:var(--red-soft);color:#ffc0c6}
+
+      #dockHeader{
+        flex:0 0 auto;display:grid;grid-template-columns:44px minmax(0,1fr) 40px 40px;align-items:center;
+        gap:6px;min-height:64px;padding:8px 10px;border-bottom:1px solid var(--line);background:rgba(10,12,18,.28)
+      }
+      #dockGrip,#compactGrip{
+        position:relative;padding:0;border-color:transparent;background:transparent;touch-action:none;cursor:grab;
+        user-select:none;-webkit-user-select:none;-webkit-user-drag:none
+      }
+      #dockGrip{width:40px;height:40px;min-height:40px;border:1px solid rgba(124,140,255,.2);border-radius:12px;background:var(--accent-soft)}
+      #dockGrip::before{
+        content:'';position:absolute;inset:13px;border-radius:2px;
+        background:radial-gradient(circle,#aeb7ff 1.5px,transparent 1.7px);background-size:6px 6px
+      }
+      #compactGrip::after{content:'⠿';font-size:19px;color:var(--muted)}
+      #dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}
+      #toggleCompact,#closeApp{width:40px;height:40px;min-height:40px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:17px}
+      #toggleCompact:hover:not(:disabled){color:var(--text);background:var(--surface)}
+      #closeApp:hover:not(:disabled){color:#ffc0c6;background:var(--red-soft)}
+      .title{min-width:0}
+      .title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:760;letter-spacing:.01em}
+      .title small{display:flex;align-items:center;gap:7px;min-width:0;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:10.5px}
+      .title small::before{content:'';flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}
+      .title small[data-tone=running]::before{background:var(--accent);box-shadow:0 0 0 4px rgba(124,140,255,.13);animation:statusPulse 1.8s ease-in-out infinite}
+      .title small[data-tone=success]::before{background:var(--green)}
+      .title small[data-tone=warn]::before{background:var(--amber)}
+      .title small[data-tone=error]::before{background:var(--red)}
+
+      #mainTabs{
+        flex:0 0 auto;position:relative;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:7px 10px;
+        border-bottom:1px solid var(--line);background:rgba(9,11,16,.34)
+      }
+      .mainTab{
+        position:relative;display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;height:40px;
+        border-color:transparent;border-radius:10px;background:transparent;color:var(--muted);font-size:11.5px
+      }
+      .mainTab:hover:not(:disabled){background:var(--surface);color:var(--text-soft)}
+      .mainTab[aria-selected=true]{border-color:rgba(124,140,255,.2);background:var(--accent-soft);color:#dfe3ff}
+      .mainTab[aria-selected=true]::after{content:'';position:absolute;right:18%;bottom:-8px;left:18%;height:2px;border-radius:2px;background:var(--accent)}
+      .tabIcon{display:grid;place-items:center;width:18px;height:18px;font-size:14px;line-height:1}
+
+      #pages{flex:1;min-height:0;overflow:hidden;background:linear-gradient(180deg,#11131a 0%,#0e1016 100%)}
+      .page{
+        display:none;height:100%;overflow:auto;padding:16px 16px 0;overscroll-behavior:contain;
+        -webkit-overflow-scrolling:touch;scrollbar-gutter:stable
+      }
+      .page.active{display:block}
+      #page-workflow.active{display:flex;flex-direction:column}
+      #page-workflow>*{flex-shrink:0}
+      #page-workflow>.pageIntro{order:0}
+      #workflowError{order:1}
+      .workflowSettings{order:2}
+      .editorCard{order:3}
+      .paletteCard{order:4}
+      .templateCard{order:5}
+      #runBar{order:6}
+      .pageIntro{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin:2px 2px 14px}
+      .pageIntroText{min-width:0}
+      .eyebrow{display:block;margin-bottom:4px;color:#9ba7ff;font-size:9px;font-weight:800;letter-spacing:.14em;text-transform:uppercase}
+      .pageIntro h2{margin:0;color:var(--text);font-size:18px;line-height:1.25;letter-spacing:-.01em}
+      .pageIntro p{margin:5px 0 0;color:var(--muted);font-size:11px;line-height:1.55}
+      .shortcutHint{
+        flex:0 0 auto;display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid var(--line);
+        border-radius:9px;background:rgba(0,0,0,.14);color:var(--muted);font-size:9.5px;white-space:nowrap
+      }
+      kbd{display:inline-grid;min-width:22px;height:20px;place-items:center;padding:0 5px;border:1px solid var(--line-strong);border-bottom-color:rgba(255,255,255,.23);border-radius:5px;background:var(--surface);color:var(--text-soft);font:600 9px/1 inherit}
+
+      .card{
+        position:relative;margin-bottom:12px;padding:15px;border:1px solid var(--line);border-radius:var(--radius-md);
+        background:rgba(255,255,255,.026)
+      }
+      .card::after{content:'';position:absolute;inset:0;pointer-events:none;border-radius:inherit;box-shadow:inset 0 1px 0 rgba(255,255,255,.025)}
+      .cardHeader,.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;font-size:12.5px;font-weight:780}
+      .workflowSettings>summary{list-style:none;cursor:pointer}
+      .workflowSettings>summary::-webkit-details-marker{display:none}
+      .workflowSettings>summary::after{content:'⌄';flex:0 0 auto;color:var(--muted);font-size:15px;transition:transform .16s ease}
+      .workflowSettings:not([open])>summary{margin-bottom:0}
+      .workflowSettings:not([open])>summary::after{transform:rotate(-90deg)}
+      .workflowSettings>summary .cardTitleGroup{flex:1 1 auto}
+      .cardTitleGroup{display:flex;align-items:center;gap:9px;min-width:0}
+      .sectionIcon{
+        flex:0 0 auto;display:grid;width:28px;height:28px;place-items:center;border:1px solid var(--line);
+        border-radius:9px;background:var(--surface);color:#c9ceff;font-size:13px
+      }
+      .cardHeading{min-width:0}
+      .cardHeading strong{display:block;font-size:12.5px;line-height:1.3}
+      .cardHeading small{display:block;margin-top:2px;color:var(--muted);font-size:9.5px;font-weight:520}
+      .hint{color:var(--muted);font-size:10.5px;font-weight:500;line-height:1.55}
+      .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+      .field{display:flex;min-width:0;flex-direction:column;gap:6px;color:#a8afc0;font-size:10px;font-weight:670;letter-spacing:.01em}
+      .field:focus-within{color:#ccd1e1}
+      .field>span{display:flex;align-items:center;min-height:15px}
+      .field:has(input[type=checkbox]){justify-content:flex-end}
+      .field:has(input[type=checkbox])>span{min-height:auto}
+      .span2{grid-column:1/-1}
+      .toolbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
+      .toolbar>*{flex:1 1 108px;min-width:0}
+      .toolbar.compactActions>*{flex:0 1 auto}
+      .toolbar button{min-height:40px;padding:0 12px;font-size:10.5px}
+      .workflowActions{padding-top:1px}
+      .workflowActions button{flex-basis:94px}
+      .workflowActions .secondaryAction{background:rgba(255,255,255,.035)}
+      .templateActions button{flex-basis:150px}
+
+      .saveState{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+      .saveState::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted)}
+      .saveState[data-state=saving]::before{background:var(--amber);animation:statusPulse 1.4s ease-in-out infinite}
+      .saveState[data-state=saved]::before{background:var(--green)}
+      .saveState[data-state=error]{color:#ffc1c6}
+      .saveState[data-state=error]::before{background:var(--red)}
+
+      .paletteCard{padding:0;overflow:hidden}
+      .paletteCard>summary{position:relative;z-index:1;margin:0;padding:14px 15px;list-style:none;cursor:pointer}
+      .paletteCard>summary::-webkit-details-marker{display:none}
+      .paletteCard>summary::after{content:'⌄';margin-left:auto;color:var(--muted);font-size:16px;transition:transform .16s ease}
+      .paletteCard:not([open])>summary::after{transform:rotate(-90deg)}
+      .paletteCard[open]>summary{border-bottom:1px solid var(--line)}
+      .paletteContent{padding:13px 15px 15px}
+      .paletteControls{display:grid;grid-template-columns:minmax(160px,1fr) auto;gap:8px;margin-bottom:10px}
+      .paletteSearchWrap{position:relative}
+      .paletteSearchWrap::before{content:'⌕';position:absolute;z-index:1;top:50%;left:12px;transform:translateY(-52%);color:var(--muted);font-size:16px;pointer-events:none}
+      #paletteSearch{padding-left:34px}
+      .paletteFilters{display:flex;gap:4px}
+      .paletteFilter{min-height:40px;height:40px;padding:0 10px;border-color:transparent;background:transparent;color:var(--muted);font-size:9.5px}
+      .paletteFilter[aria-pressed=true]{border-color:rgba(124,140,255,.23);background:var(--accent-soft);color:#dfe3ff}
+      .insertionNotice{
+        display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:11px;padding:9px 10px;
+        border:1px solid var(--line);border-radius:10px;background:rgba(0,0,0,.12)
+      }
+      .insertionNotice.active{border-color:rgba(124,140,255,.32);background:var(--accent-soft)}
+      #insertHint{margin:0}
+      #clearInsertion{display:none;flex:0 0 auto;min-height:32px;height:32px;padding:0 9px}
+      .insertionNotice.active #clearInsertion{display:block}
+      .paletteGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+      .paletteSection{grid-column:1/-1;display:grid;gap:7px}
+      .paletteSection+.paletteSection{margin-top:4px;padding-top:12px;border-top:1px solid rgba(255,255,255,.07)}
+      .paletteSectionHead{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 2px}
+      .paletteSectionTitle{display:flex;align-items:center;gap:7px;color:var(--text-soft);font-size:10px;font-weight:760}
+      .paletteSectionTitle::before{content:'';width:7px;height:7px;border-radius:2px;background:var(--accent)}
+      .paletteSection[data-category=gbf] .paletteSectionTitle::before{background:var(--green)}
+      .paletteSection[data-category=control] .paletteSectionTitle::before{background:var(--purple)}
+      .paletteSection[data-category=wait] .paletteSectionTitle::before{background:var(--amber)}
+      .paletteSection[data-category=frame] .paletteSectionTitle::before{background:var(--blue)}
+      .paletteCount{color:var(--muted);font-size:9px}
+      .paletteItems{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+      .paletteButton{position:relative;min-height:68px;padding:10px 11px 10px 14px;overflow:hidden;text-align:left;background:rgba(255,255,255,.03)}
+      .paletteButton::before{content:'＋';position:absolute;top:9px;right:10px;color:var(--muted);font-size:14px;font-weight:500}
+      .paletteButton::after{content:'';position:absolute;top:9px;bottom:9px;left:0;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+      .paletteButton:hover:not(:disabled){transform:translateY(-1px)}
+      .paletteButton strong{display:block;padding-right:20px;color:var(--text-soft);font-size:10.5px;line-height:1.35}
+      .paletteButton small{display:block;margin-top:4px;padding-right:12px;color:var(--muted);font-size:9px;font-weight:500;line-height:1.45}
+      .paletteButton.gbf::after{background:var(--green)}.paletteButton.control::after{background:var(--purple)}
+      .paletteButton.wait::after{background:var(--amber)}.paletteButton.frame::after{background:var(--blue)}
+      .paletteEmpty{grid-column:1/-1;padding:22px 12px;border:1px dashed var(--line-strong);border-radius:12px;color:var(--muted);font-size:10.5px;text-align:center}
+
+      .editorCard{padding-bottom:4px}
+      .editorCard>.cardHeader{margin-bottom:7px}
+      .statsPill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border:1px solid var(--line);border-radius:999px;background:rgba(0,0,0,.12);font-size:9.5px}
+      #workflowEditor{position:relative;padding:1px 0 94px}
+      .empty{display:grid;min-height:122px;place-items:center;padding:26px 16px;border:1px dashed rgba(124,140,255,.28);border-radius:13px;background:rgba(124,140,255,.035);color:var(--muted);font-size:10.5px;line-height:1.6;text-align:center}
+      .dropZone{position:relative;height:12px;margin:0 7px;border-radius:7px;transition:height .14s ease,background-color .14s ease}
+      .dropZone::after{content:'';position:absolute;top:50%;right:6px;left:6px;height:2px;transform:translateY(-50%) scaleX(.1);border-radius:2px;background:transparent;transition:transform .14s ease,background-color .14s ease}
+      .dropZone.dragOver{height:28px;background:rgba(124,140,255,.08)}
+      .dropZone.dragOver::after{transform:translateY(-50%) scaleX(1);background:var(--accent)}
+      .blockCard{
+        position:relative;margin:3px 0;border:1px solid var(--line);border-radius:14px;background:#12151d;
+        box-shadow:0 6px 18px rgba(0,0,0,.12);overflow:hidden;transition:border-color .16s ease,opacity .16s ease,transform .16s ease
+      }
+      .blockCard::before{content:'';position:absolute;z-index:2;top:0;bottom:0;left:0;width:4px;background:var(--accent)}
+      .blockCard.category-gbf::before{background:var(--green)}.blockCard.category-control::before{background:var(--purple)}
+      .blockCard.category-wait::before{background:var(--amber)}.blockCard.category-frame::before{background:var(--blue)}
+      .blockCard:hover{border-color:var(--line-strong)}
+      .blockCard.running{border-color:rgba(70,212,149,.56);outline:2px solid rgba(70,212,149,.24);outline-offset:1px;box-shadow:none}
+      .blockCard.running::after{content:'';position:absolute;z-index:4;top:0;right:0;left:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);animation:runSweep 1.8s linear infinite}
+      .blockCard.dragging{opacity:.45;transform:scale(.99)}
+      .blockHead{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:58px;padding:8px 9px 8px 10px;border-bottom:1px solid rgba(255,255,255,.065)}
+      .blockHead button{min-height:34px;height:34px}
+      .collapseToggle{position:relative;width:34px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:0}
+      .collapseToggle::before{content:'⌄';display:grid;place-items:center;font-size:17px;transition:transform .16s ease}
+      .blockCard.collapsed .collapseToggle::before{transform:rotate(-90deg)}
+      .blockName{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px;min-width:0}
+      .blockTypeBadge{grid-row:1/3;display:inline-flex;align-items:center;align-self:center;min-height:22px;padding:0 7px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--muted);font-size:8px;font-weight:760;white-space:nowrap}
+      .category-gbf .blockTypeBadge{border-color:rgba(70,212,149,.2);background:var(--green-soft);color:#a6e8c8}
+      .category-control .blockTypeBadge{border-color:rgba(177,151,252,.2);background:var(--purple-soft);color:#d6c7ff}
+      .category-wait .blockTypeBadge{border-color:rgba(240,182,92,.2);background:var(--amber-soft);color:#efd09c}
+      .category-frame .blockTypeBadge{border-color:rgba(102,184,255,.2);background:var(--blue-soft);color:#b9ddff}
+      .blockName strong{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-soft);font-size:11.5px;line-height:1.3}
+      .blockName small{grid-column:2/-1;display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:9px;line-height:1.3}
+      .blockName>.progressBadge{grid-column:3;grid-row:1/3}
+      .blockTools{display:flex;flex-wrap:nowrap;justify-content:flex-end;gap:3px}
+      .blockTools button{position:relative;min-width:34px;width:34px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:12px}
+      .blockTools button:hover:not(:disabled){border-color:var(--line);background:var(--surface);color:var(--text)}
+      .blockTools button.toolDelete:hover:not(:disabled){border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffb5bc}
+      .blockBody{padding:12px 12px 13px 14px;background:rgba(0,0,0,.08)}
+      .blockBody>.cardTitle{margin:14px 0 8px;padding-top:11px;border-top:1px solid var(--line);font-size:10px;color:var(--text-soft)}
+      .blockCard.collapsed .blockHead{border-bottom:0}
+      .blockCard.collapsed .blockContent{display:none}
+      .childArea{position:relative;margin:0 11px 11px 24px;padding:8px;border:1px solid rgba(255,255,255,.08);border-radius:11px;background:rgba(0,0,0,.12)}
+      .childArea::before{content:'';position:absolute;top:-8px;bottom:8px;left:-13px;width:1px;background:rgba(255,255,255,.13)}
+      .childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;padding:1px 2px 4px;color:var(--muted);font-size:9px;font-weight:740}
+      .childLabel button{min-height:30px;height:30px;padding:0 9px;border-color:transparent;background:transparent;color:#bfc6ff;font-size:9px}
+      .progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border:1px solid rgba(70,212,149,.18);border-radius:999px;background:var(--green-soft);color:#a6edc8;font-size:8.5px;white-space:nowrap}
+
+      #runBar{
+        position:sticky;z-index:6;bottom:0;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;
+        margin:0 -16px;padding:16px 16px calc(14px + env(safe-area-inset-bottom));
+        border-top:1px solid rgba(255,255,255,.08);background:rgba(14,16,22,.98)
+      }
+      #runBar button{min-height:48px;font-size:12px}
+      #runWorkflow{border-color:rgba(70,212,149,.34);background:linear-gradient(180deg,#54dda1 0%,#35bf82 100%);color:#071d13}
+      #runWorkflow:hover:not(:disabled){background:linear-gradient(180deg,#62e4aa 0%,#3dc98a 100%)}
+      #stopWorkflow{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffc0c6}
+
+      #legacyActionList{display:grid;gap:9px;padding-bottom:16px}
+      .legacyRow{padding:12px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025)}
+      .legacyRow.selected{border-color:rgba(124,140,255,.42);box-shadow:0 0 0 2px rgba(124,140,255,.08)}
+      .legacyHead{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.06)}
+      .legacySelect{min-height:36px;height:36px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 8px;border-color:transparent;background:transparent;color:var(--text-soft);font-size:11px;text-align:left}
+      .legacySelect[aria-pressed=true]{background:var(--accent-soft);color:#dfe3ff}
+      .legacyTools{display:flex;gap:3px}
+      .legacyTools button{min-width:34px;width:auto;min-height:34px;height:34px;padding:0 8px;border-color:transparent;background:transparent;color:var(--muted);font-size:9.5px}
+
+      #markerLayer,#recordLayer{position:fixed;inset:0;pointer-events:none}
+      #markerLayer{z-index:100}
+      .marker{position:fixed;width:44px;height:44px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #ff9189;border-radius:50%;background:#751f2d;color:#fff;font-size:10px;font-weight:850;pointer-events:auto;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-user-drag:none;box-shadow:0 0 0 2px #fff,0 0 0 4px rgba(0,0,0,.82),0 8px 22px rgba(0,0,0,.38)}
+      .marker.selected{border-color:#86efbd;background:#0d5b3a}
+      #recordLayer.active{z-index:210;pointer-events:auto;background:rgba(255,60,90,.035);touch-action:none}
+      .recordDot{position:fixed;width:28px;height:28px;transform:translate(-50%,-50%);display:grid;place-items:center;border:2px solid #fff;border-radius:50%;background:#ef4f68;font-size:10px;font-weight:850}
+      #recordToolbar{
+        position:fixed;z-index:230;top:max(16px,calc(env(safe-area-inset-top) + 8px));left:50%;transform:translateX(-50%);
+        width:min(520px,calc(100dvw - 24px));display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;
+        gap:7px;padding:8px;border:1px solid rgba(255,107,120,.36);border-radius:15px;background:rgba(18,20,27,.98);
+        box-shadow:0 16px 44px rgba(0,0,0,.45)
+      }
+      #recordToolbar[hidden]{display:none}
+      #recordToolbar button{min-height:38px;height:38px;padding:0 12px;font-size:10px}
+      .recordStatus{display:flex;align-items:center;gap:8px;min-width:0;padding-left:5px;color:var(--text-soft);font-size:10.5px;font-weight:700}
+      .recordStatus strong{display:inline-flex;min-width:36px;justify-content:center;padding:3px 6px;border-radius:999px;background:var(--red-soft);color:#ffc0c6;font-size:9px}
+      .recordPulse{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 4px rgba(255,107,120,.12);animation:statusPulse 1.3s ease-in-out infinite}
+
+      #toast{
+        position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translate(-50%,12px);
+        visibility:hidden;max-width:calc(100vw - 24px);padding:11px 15px;border:1px solid var(--line-strong);border-radius:12px;
+        color:#fff;background:rgba(18,20,27,.98);font-size:11px;line-height:1.4;opacity:0;
+        box-shadow:0 14px 38px rgba(0,0,0,.42);transition:opacity .18s ease,transform .18s ease,visibility .18s
+      }
+      #toast.show{visibility:visible;transform:translate(-50%,0);opacity:1}
+      .logList{display:grid}
+      .logEntry{display:grid;grid-template-columns:68px 96px minmax(0,1fr);gap:9px;padding:10px 8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:10.5px;line-height:1.5}
+      .logEntry:last-child{border-bottom:0}
+      .logEntry.error{color:#ffc0c6}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}
+      .logTime{color:var(--muted);font-variant-numeric:tabular-nums}
+      .errorBox{display:none;margin-bottom:12px;padding:12px;border:1px solid rgba(255,107,120,.36);border-radius:13px;background:var(--red-soft);color:#ffc8cd;font-size:10.5px;line-height:1.55}
+      .errorBox.show{display:block}
+      .errorMessage{font-weight:680;overflow-wrap:anywhere}
+      .errorActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+      .errorActions button{min-height:38px;padding:6px;font-size:10px}
+
+      @keyframes statusPulse{0%,100%{opacity:.58}50%{opacity:1}}
+      @keyframes runSweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+      @media(prefers-reduced-motion:reduce){
+        *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
+        button:not(#dockGrip):not(#compactGrip):active{transform:none}
+      }
+      @media(max-width:760px){
+        .paletteControls{grid-template-columns:1fr}
+        .paletteFilters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+        .paletteFilter{padding:0 5px}
+        .blockHead{grid-template-columns:38px minmax(0,1fr)}
+        .blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:46px}
+      }
+      @media(max-width:620px){
+        #browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:44px 44px 44px minmax(70px,1fr) 56px 44px;gap:3px;padding:3px;border-radius:10px}
+        #browserBar button,#browserBar input{height:44px;min-height:44px}
+        #browserBar input{padding:4px 8px;font-size:16px}
+        #loadUrl{font-size:10px}
+        #dock{left:6px;width:min(390px,calc(100dvw - 18px));height:min(560px,66dvh);max-height:calc(100dvh - 54px);border-radius:14px}
+        #dock.compact{width:104px;height:48px;border-radius:24px}
+        #dockHeader{grid-template-columns:40px minmax(0,1fr) 40px 40px;gap:3px;min-height:56px;padding:5px 7px}
+        #dockGrip,#toggleCompact,#closeApp{width:40px;height:40px;min-height:40px}
+        #dockGrip::before{inset:12px}
+        .title strong{font-size:11.5px}.title small{font-size:9px}
+        #mainTabs{gap:3px;padding:4px 6px}
+        .mainTab{height:44px;min-height:44px;font-size:10px}
+        .mainTab[aria-selected=true]::after{bottom:-5px}
+        .tabIcon{font-size:12px}
+        .page{padding:10px 9px 0}
+        .pageIntro{margin:0 1px 10px}
+        .pageIntro h2{font-size:15px}.pageIntro p{display:none}.eyebrow{font-size:8px}.shortcutHint{display:none}
+        .card{margin-bottom:8px;padding:10px;border-radius:11px}
+        .cardHeader,.cardTitle{margin-bottom:9px}
+        .sectionIcon{width:26px;height:26px}
+        .cardHeading strong{font-size:11px}.cardHeading small{font-size:8.5px}
+        .grid2,.grid3{gap:7px}
+        .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
+        .toolbar{gap:5px;margin-top:8px}.toolbar>*{flex-basis:78px}
+        .toolbar button{min-height:38px;padding:0 8px;font-size:9.5px}
+        .paletteCard{padding:0}
+        .paletteCard>summary{padding:11px}
+        .paletteContent{padding:10px}
+        .paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
+        .paletteItems{grid-template-columns:1fr;gap:5px}
+        .paletteFilters{overflow:auto;grid-template-columns:repeat(5,minmax(60px,1fr))}
+        .paletteButton{min-height:54px;padding:8px 9px 8px 12px}
+        .paletteButton strong{font-size:9.5px}.paletteButton small{font-size:8.5px}
+        .editorCard{padding-bottom:1px}
+        #workflowEditor{padding-bottom:82px}
+        .empty{min-height:96px}
+        .blockCard{margin:3px 0;border-radius:10px}
+        .blockHead{grid-template-columns:32px minmax(0,1fr);gap:4px;min-height:50px;padding:6px 6px 6px 8px}
+        .blockHead button,.legacyTools button{min-height:40px;height:40px}
+        .collapseToggle{width:30px}
+        .blockName{gap:5px}
+        .blockTypeBadge{padding:0 5px;font-size:7.5px}
+        .blockName strong{font-size:10px}.blockName small{font-size:8px}
+        .blockBody{padding:9px}
+        .blockTools{grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start;padding-left:35px;gap:2px}
+        .blockTools button{min-width:40px;width:40px}
+        .childArea{margin:0 6px 7px 15px;padding:5px}
+        #runBar{margin:0 -9px;padding:10px 9px calc(9px + env(safe-area-inset-bottom))}
+        #runBar button{min-height:43px}
+        .logEntry{grid-template-columns:50px 68px minmax(0,1fr);gap:5px;padding:7px 4px;font-size:9px}
+      }
+      @media(max-width:430px){
+        #browserBar{grid-template-columns:44px 44px minmax(66px,1fr) 52px 44px}
+        #forwardFrame{display:none}
+        .toolbar>*{flex-basis:72px}
+        .paletteFilter{font-size:8.5px}
+        .errorActions{grid-template-columns:1fr}
+        .grid2,.grid3{grid-template-columns:1fr}
+        .span2{grid-column:auto}
+        #recordToolbar{grid-template-columns:1fr 1fr}
+        .recordStatus{grid-column:1/-1;justify-content:center}
+      }
+      @media(hover:none) and (pointer:coarse){
+        #browserBar,#dock,.blockCard{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}
+        button{min-height:40px}
+        input,select,textarea{min-height:40px}
+        .blockHead button,.legacyTools button{min-height:40px;height:40px}
+        #recordToolbar button{min-height:44px;height:44px}
+        .paletteButton:hover:not(:disabled){transform:none}
+      }
+      @media(forced-colors:active){
+        #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
+        .blockCard::before,.paletteButton::after{width:5px}
+      }
     </style>
-    <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
+    <iframe id="frame" title="自動操作の対象ページ" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="markerLayer"></div><div id="recordLayer"></div>
-    <div id="browserBar" role="search" aria-label="iframe URL操作"><button id="backFrame" aria-label="戻る" title="戻る">←</button><button id="forwardFrame" aria-label="進む" title="進む">→</button><button id="reloadFrame" aria-label="再読込" title="再読込">↻</button><input id="urlInput" aria-label="表示するURL" placeholder="https://..." inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す" title="URLバーを隠す">⌃</button></div>
-    <button id="browserHandle" aria-label="URLバーを表示">⌄</button>
-    <div id="dock">
-      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く" aria-expanded="false" title="メニューを開く・移動"></button><button id="compactRun" aria-label="実行" title="実行">▶</button></div>
-      <div class="fullOnly" id="dockHeader"><button id="dockGrip" aria-label="メニューを移動"></button><div class="title"><strong>Scratch風オートフロー</strong><small id="statusText" role="status" aria-live="polite" data-tone="success">準備完了</small></div><button id="toggleCompact" aria-label="小さくする">—</button><button id="closeApp" aria-label="終了">×</button></div>
-      <div class="fullOnly" id="mainTabs" role="tablist" aria-label="操作モード"><button id="tab-workflow" class="mainTab active" role="tab" aria-selected="true" aria-controls="page-workflow" data-page="workflow">ワークフロー</button><button id="tab-legacy" class="mainTab" role="tab" aria-selected="false" aria-controls="page-legacy" tabindex="-1" data-page="legacy">旧マクロ</button><button id="tab-logs" class="mainTab" role="tab" aria-selected="false" aria-controls="page-logs" tabindex="-1" data-page="logs">ログ</button></div>
+    <div id="recordToolbar" role="dialog" aria-modal="true" aria-labelledby="recordToolbarTitle" hidden>
+      <div class="recordStatus"><span class="recordPulse" aria-hidden="true"></span><span id="recordToolbarTitle">タッチを記録中</span><strong id="recordCount" role="status" aria-live="polite">0件</strong></div>
+      <button id="recordCancel" class="ghost">キャンセル</button>
+      <button id="recordFinish" class="primary">記録を完了</button>
+    </div>
+    <div id="browserBar" role="navigation" aria-label="対象ページのナビゲーション">
+      <button id="backFrame" class="navButton" aria-label="戻る" title="戻る">‹</button>
+      <button id="forwardFrame" class="navButton" aria-label="進む" title="進む">›</button>
+      <button id="reloadFrame" class="navButton" aria-label="再読み込み" title="再読み込み">↻</button>
+      <label class="srOnly" for="urlInput">表示するURL</label>
+      <input id="urlInput" aria-label="表示するURL" placeholder="URLを入力" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false">
+      <button id="loadUrl">開く</button>
+      <button id="hideBrowser" class="navButton" aria-label="URLバーを隠す" title="URLバーを隠す">⌃</button>
+    </div>
+    <button id="browserHandle" aria-label="URLバーを表示" title="URLバーを表示">⌄</button>
+    <div id="dock" role="region" aria-label="AutoFlow Studio">
+      <div class="compactOnly">
+        <button id="compactGrip" aria-label="メニューを開く" aria-expanded="false" title="メニューを開く・移動"></button>
+        <button id="compactRun" aria-label="実行" title="実行">▶</button>
+      </div>
+      <div class="fullOnly" id="dockHeader">
+        <button id="dockGrip" aria-label="パネルを移動" title="ドラッグして移動"></button>
+        <div class="title">
+          <strong>AutoFlow Studio</strong>
+          <small id="statusText" data-tone="success">準備完了</small>
+        </div>
+        <button id="toggleCompact" aria-label="パネルを最小化" title="最小化">—</button>
+        <button id="closeApp" aria-label="AutoFlowを終了" title="終了">×</button>
+      </div>
+      <div class="fullOnly" id="mainTabs" role="tablist" aria-label="操作モード">
+        <button id="tab-workflow" class="mainTab active" role="tab" aria-selected="true" aria-controls="page-workflow" data-page="workflow"><span class="tabIcon" aria-hidden="true">◇</span><span>フロー</span></button>
+        <button id="tab-legacy" class="mainTab" role="tab" aria-selected="false" aria-controls="page-legacy" tabindex="-1" data-page="legacy"><span class="tabIcon" aria-hidden="true">◎</span><span>マクロ</span></button>
+        <button id="tab-logs" class="mainTab" role="tab" aria-selected="false" aria-controls="page-logs" tabindex="-1" data-page="logs"><span class="tabIcon" aria-hidden="true">≡</span><span>ログ</span></button>
+      </div>
       <div class="fullOnly" id="pages">
         <section id="page-workflow" class="page active" role="tabpanel" aria-labelledby="tab-workflow">
-          <div id="workflowError" class="errorBox" role="alert" aria-live="assertive" tabindex="-1"><div id="workflowErrorMessage" class="errorMessage"></div><div class="errorActions"><button id="workflowErrorRetry" class="primary">再実行</button><button id="workflowErrorLogs">ログを見る</button><button id="workflowErrorDismiss">閉じる</button></div></div>
-          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint saveState" role="status" aria-live="polite" data-state="saved">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label><label class="field">実行回数<input id="workflowLoopCount" type="number" min="1" max="999999" inputmode="numeric"></label><label class="field">ループ<select id="workflowLoopMode"><option value="count">指定回数</option><option value="infinite">無限ループ</option></select></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
-          <div class="card"><div class="cardTitle"><span>完成テンプレート</span><span class="hint">読込後は自由に編集可能</span></div><div class="grid2"><label class="field span2">テンプレート<select id="templateSelect"></select></label></div><div class="toolbar" style="margin-top:8px"><button id="replaceTemplate" class="primary">現在内容を置換</button><button id="appendTemplate">末尾へ追加</button></div></div>
-          <details class="card" open><summary class="cardTitle" style="cursor:pointer;margin:0">ブロックを追加</summary><div class="hint" id="insertHint" style="margin:8px 0">末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。</div><div id="palette" class="paletteGrid"></div></details>
-          <div class="card"><div class="cardTitle"><span>ブロック</span><span id="workflowStats" class="hint"></span></div><div id="workflowEditor"></div></div>
-          <div id="runBar" aria-label="ワークフロー実行操作"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>
+          <header class="pageIntro">
+            <div class="pageIntroText">
+              <span class="eyebrow">Workflow builder</span>
+              <h2>オートフローを設計</h2>
+              <p>ブロックを組み合わせて、実行順と条件を視覚的に設定します。</p>
+            </div>
+            <div class="shortcutHint" aria-label="キーボードショートカット"><kbd>⌘</kbd><kbd>↵</kbd><span>実行 / 停止</span></div>
+          </header>
+          <div id="workflowError" class="errorBox" role="alert" aria-live="assertive" tabindex="-1">
+            <div id="workflowErrorMessage" class="errorMessage"></div>
+            <div class="errorActions">
+              <button id="workflowErrorRetry" class="primary">再実行</button>
+              <button id="workflowErrorLogs">詳細ログ</button>
+              <button id="workflowErrorDismiss" class="ghost">閉じる</button>
+            </div>
+          </div>
+          <details id="workflowSettingsPanel" class="card workflowSettings" open>
+            <summary class="cardHeader">
+              <div class="cardTitleGroup">
+                <span class="sectionIcon" aria-hidden="true">◇</span>
+                <div class="cardHeading" role="heading" aria-level="3"><strong>ワークフロー設定</strong><small>保存と実行方法を管理</small></div>
+              </div>
+              <span id="autosaveState" class="hint saveState" role="status" aria-live="polite" data-state="saved">保存済み</span>
+            </summary>
+            <div class="grid2">
+              <label class="field span2"><span>ワークフロー</span><select id="workflowSelect"></select></label>
+              <label class="field span2"><span>表示名</span><input id="workflowName" maxlength="60" autocomplete="off"></label>
+              <label class="field"><span>実行回数</span><input id="workflowLoopCount" type="number" min="1" max="999999" inputmode="numeric"></label>
+              <label class="field"><span>ループ方式</span><select id="workflowLoopMode"><option value="count">指定回数</option><option value="infinite">無限ループ</option></select></label>
+            </div>
+            <div class="toolbar workflowActions">
+              <button id="newWorkflow" class="secondaryAction">＋ 新規</button>
+              <button id="renameWorkflow" class="secondaryAction">名前を保存</button>
+              <button id="duplicateWorkflow" class="secondaryAction">複製</button>
+              <button id="deleteWorkflow" class="danger">削除</button>
+              <button id="exportWorkflow" class="ghost">JSON出力</button>
+              <button id="importWorkflow" class="ghost">JSON読込</button>
+            </div>
+          </details>
+          <article class="card templateCard">
+            <div class="cardHeader">
+              <div class="cardTitleGroup">
+                <span class="sectionIcon" aria-hidden="true">✦</span>
+                <div class="cardHeading" role="heading" aria-level="3"><strong>クイックスタート</strong><small>完成テンプレートから始める</small></div>
+              </div>
+              <span class="hint">読込後も編集できます</span>
+            </div>
+            <div class="grid2"><label class="field span2"><span>テンプレート</span><select id="templateSelect"></select></label></div>
+            <div class="toolbar templateActions">
+              <button id="replaceTemplate" class="primary">現在の内容と置換</button>
+              <button id="appendTemplate">末尾へ追加</button>
+            </div>
+          </article>
+          <details class="card paletteCard">
+            <summary class="cardTitle">
+              <div class="cardTitleGroup">
+                <span class="sectionIcon" aria-hidden="true">＋</span>
+                <div class="cardHeading" role="heading" aria-level="3"><strong>ブロックライブラリ</strong><small>検索してフローへ追加</small></div>
+              </div>
+            </summary>
+            <div class="paletteContent">
+              <div class="paletteControls">
+                <div class="paletteSearchWrap"><label class="srOnly" for="paletteSearch">ブロックを検索</label><input id="paletteSearch" type="search" placeholder="ブロックを検索..." autocomplete="off"></div>
+                <div class="paletteFilters" role="group" aria-label="ブロックカテゴリ">
+                  <button class="paletteFilter" data-category="all" aria-pressed="true">すべて</button>
+                  <button class="paletteFilter" data-category="gbf" aria-pressed="false">ゲーム</button>
+                  <button class="paletteFilter" data-category="control" aria-pressed="false">制御</button>
+                  <button class="paletteFilter" data-category="wait" aria-pressed="false">待機</button>
+                  <button class="paletteFilter" data-category="frame" aria-pressed="false">画面</button>
+                </div>
+              </div>
+              <div id="insertionNotice" class="insertionNotice">
+                <span class="hint" id="insertHint">フローの末尾へ追加します。各ブロックから挿入先を変更できます。</span>
+                <button id="clearInsertion" class="ghost" type="button">解除</button>
+              </div>
+              <span id="paletteStatus" class="srOnly" role="status" aria-live="polite"></span>
+              <div id="palette" class="paletteGrid"></div>
+            </div>
+          </details>
+          <article class="card editorCard">
+            <div class="cardHeader">
+              <div class="cardTitleGroup">
+                <span class="sectionIcon" aria-hidden="true">⌁</span>
+                <div class="cardHeading" role="heading" aria-level="3"><strong>フローステップ</strong><small>上から順に実行</small></div>
+              </div>
+              <span id="workflowStats" class="hint statsPill"></span>
+            </div>
+            <div class="toolbar compactActions" role="group" aria-label="ブロック表示操作">
+              <button id="expandAllBlocks" class="ghost">すべて展開</button>
+              <button id="collapseAllBlocks" class="ghost">すべて折りたたむ</button>
+            </div>
+            <div id="workflowEditor"></div>
+          </article>
+          <div id="runBar" role="group" aria-label="ワークフロー実行操作">
+            <button id="runWorkflow">▶ フローを実行</button>
+            <button id="stopWorkflow" disabled>■ 停止</button>
+          </div>
         </section>
         <section id="page-legacy" class="page" role="tabpanel" aria-labelledby="tab-legacy" hidden>
-          <div class="card"><div class="cardTitle"><span>旧固定マクロ</span><span class="hint">v1〜v12保存データ互換</span></div><div class="toolbar"><button id="legacyAddClick">クリック</button><button id="legacyAddNavigate">URL移動</button><button id="legacyAddWait">条件待ち</button><button id="legacyRecord" class="warn">タッチ記録</button></div></div>
-          <div class="card"><div class="grid3"><label class="field">回数<input id="legacyCount" type="number" min="1" max="999999"></label><label class="field">時間ずれms<input id="legacyJitter" type="number" min="0" max="5000"></label><label class="field">位置ずれpx<input id="legacyPositionJitter" type="number" min="0" max="30" step="0.5"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacyRun" class="success">▶ 実行</button><button id="legacyStop" class="danger" disabled>■ 停止</button></div></div>
-          <div class="card"><div class="cardTitle"><span>保存スロット</span><span class="hint">既存プリセット互換</span></div><div class="grid3"><label class="field">スロット<select id="legacyPresetSlot"></select></label><label class="field span2">名前<input id="legacyPresetName" maxlength="40"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacySavePreset">保存</button><button id="legacyLoadPreset">読込</button><button id="legacyDeletePreset" class="danger">削除</button></div></div>
+          <header class="pageIntro">
+            <div class="pageIntroText"><span class="eyebrow">Classic macro</span><h2>固定マクロ</h2><p>クリック位置やURL移動を、従来形式のまま管理します。</p></div>
+          </header>
+          <article class="card">
+            <div class="cardHeader">
+              <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">＋</span><div class="cardHeading" role="heading" aria-level="3"><strong>アクションを追加</strong><small>v1〜v12 保存データ互換</small></div></div>
+            </div>
+            <div class="toolbar">
+              <button id="legacyAddClick">クリック</button>
+              <button id="legacyAddNavigate">URL移動</button>
+              <button id="legacyAddWait">条件待ち</button>
+              <button id="legacyRecord" class="warn">● タッチ記録</button>
+            </div>
+          </article>
+          <article class="card">
+            <div class="cardHeader"><div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">↻</span><div class="cardHeading" role="heading" aria-level="3"><strong>実行設定</strong><small>回数とランダム幅</small></div></div></div>
+            <div class="grid3">
+              <label class="field"><span>実行回数</span><input id="legacyCount" type="number" min="1" max="999999"></label>
+              <label class="field"><span>時間ずれ (ms)</span><input id="legacyJitter" type="number" min="0" max="5000"></label>
+              <label class="field"><span>位置ずれ (px)</span><input id="legacyPositionJitter" type="number" min="0" max="30" step="0.5"></label>
+            </div>
+            <div class="toolbar"><button id="legacyRun" class="success">▶ マクロを実行</button><button id="legacyStop" class="danger" disabled>■ 停止</button></div>
+          </article>
+          <article class="card">
+            <div class="cardHeader">
+              <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">▣</span><div class="cardHeading" role="heading" aria-level="3"><strong>保存スロット</strong><small>既存プリセットと互換</small></div></div>
+            </div>
+            <div class="grid3">
+              <label class="field"><span>スロット</span><select id="legacyPresetSlot"></select></label>
+              <label class="field span2"><span>プリセット名</span><input id="legacyPresetName" maxlength="40" autocomplete="off"></label>
+            </div>
+            <div class="toolbar"><button id="legacySavePreset" class="primary">保存</button><button id="legacyLoadPreset">読み込む</button><button id="legacyDeletePreset" class="danger">削除</button></div>
+          </article>
           <div id="legacyActionList"></div>
         </section>
-        <section id="page-logs" class="page" role="tabpanel" aria-labelledby="tab-logs" hidden><div class="card"><div class="cardTitle"><span>実行ログ</span><button id="clearLogs">消去</button></div><div id="logList" class="logList"></div></div></section>
+        <section id="page-logs" class="page" role="tabpanel" aria-labelledby="tab-logs" hidden>
+          <header class="pageIntro">
+            <div class="pageIntroText"><span class="eyebrow">Diagnostics</span><h2>実行ログ</h2><p>実行中に発生したエラーと復旧に必要な情報を確認できます。</p></div>
+          </header>
+          <article class="card">
+            <div class="cardHeader">
+              <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">≡</span><div class="cardHeading" role="heading" aria-level="3"><strong>エラー履歴</strong><small>直近20件を保持</small></div></div>
+              <button id="clearLogs" class="ghost">すべて消去</button>
+            </div>
+            <div id="logList" class="logList"></div>
+          </article>
+        </section>
       </div>
     </div>
-    <div id="toast" role="status" aria-live="polite"></div>
+    <div id="toast"></div>
+    <div id="announcer" class="srOnly" role="status" aria-live="polite" aria-atomic="true"></div>
     <input id="importFile" type="file" accept="application/json,.json" hidden>
   `;
 
@@ -166,11 +730,13 @@
   const ui = {
     status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'), errorMessage: byId('workflowErrorMessage'),
     browserBar: byId('browserBar'), browserHandle: byId('browserHandle'), workflowSelect: byId('workflowSelect'), workflowName: byId('workflowName'),
-    templateSelect: byId('templateSelect'), palette: byId('palette'), insertHint: byId('insertHint'), workflowStats: byId('workflowStats'),
+    templateSelect: byId('templateSelect'), palette: byId('palette'), paletteSearch: byId('paletteSearch'), paletteStatus: byId('paletteStatus'), insertHint: byId('insertHint'),
+    insertionNotice: byId('insertionNotice'), clearInsertion: byId('clearInsertion'), workflowStats: byId('workflowStats'),
     workflowLoopCount: byId('workflowLoopCount'), workflowLoopMode: byId('workflowLoopMode'),
     runWorkflow: byId('runWorkflow'), stopWorkflow: byId('stopWorkflow'), legacyList: byId('legacyActionList'), legacyCount: byId('legacyCount'),
     legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
-    legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList')
+    legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
+    recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer')
   };
 
   const state = {
@@ -178,10 +744,13 @@
     page: 'workflow',
     logs: [],
     toastTimer: null,
+    announceFrame: null,
     autosaveTimer: null,
     workflows: null,
     selectedWorkflowId: null,
     insertion: null,
+    paletteCategory: 'all',
+    paletteQuery: '',
     dragBlockId: null,
     running: null,
     blockProgress: new Map(),
@@ -193,6 +762,7 @@
     recording: false,
     recordedPoints: [],
     recordStartedAt: 0,
+    recordReturnFocus: null,
     activeRecordPointers: new Map(),
     pendingAutoAttack: null,
     runningCard: null,
@@ -287,17 +857,32 @@
     Object.entries(ERROR_MESSAGES).map(([key, value]) => [key, normalizePopupText(value)])
   );
 
+  function announce(message) {
+    const next = String(message ?? '');
+    if (state.announceFrame) cancelAnimationFrame(state.announceFrame);
+    ui.announcer.textContent = '';
+    state.announceFrame = requestAnimationFrame(() => {
+      state.announceFrame = null;
+      if (!state.destroyed) ui.announcer.textContent = next;
+    });
+  }
+
   function setStatus(message) {
     const next = String(message ?? '');
     if (lightweightMode && (state.running || state.legacyRunning) && !/(?:エラー|停止|完了)/.test(next)) return;
-    if (ui.status.textContent !== next) ui.status.textContent = next;
+    if (ui.status.textContent !== next) {
+      ui.status.textContent = next;
+      announce(next);
+    }
     const tone = /(?:エラー|失敗)/.test(next)
       ? 'error'
       : /停止/.test(next)
         ? 'warn'
         : /(?:完了|準備完了|保存済み)/.test(next)
           ? 'success'
-          : (state.running || state.legacyRunning)
+          : /(?:読込中|記録中)/.test(next)
+            ? 'running'
+            : (state.running || state.legacyRunning || state.recording)
             ? 'running'
             : 'idle';
     ui.status.dataset.tone = tone;
@@ -306,8 +891,10 @@
 
   function toast(message) {
     clearTimeout(state.toastTimer);
-    ui.toast.textContent = String(message ?? '');
+    const next = String(message ?? '');
+    ui.toast.textContent = next;
     ui.toast.classList.add('show');
+    announce(next);
     state.toastTimer = setTimeout(() => ui.toast.classList.remove('show'), 2200);
   }
 
@@ -351,7 +938,7 @@
     state.logs.push(log);
     if (state.logs.length > MAX_LOGS) state.logs.splice(0, state.logs.length - MAX_LOGS);
     if (state.page !== 'logs') return;
-    ui.logList.querySelector('.hint')?.remove();
+    ui.logList.querySelector('.logEmpty')?.remove();
     ui.logList.append(createLogRow(log));
     while (ui.logList.children.length > MAX_LOGS) ui.logList.firstElementChild?.remove();
     scheduleLogScroll();
@@ -361,7 +948,7 @@
     ui.logList.textContent = '';
     if (!state.logs.length) {
       const empty = document.createElement('div');
-      empty.className = 'hint';
+      empty.className = 'empty logEmpty';
       empty.textContent = 'エラーが発生するとここに記録されます。';
       ui.logList.append(empty);
       return;
@@ -387,9 +974,11 @@
     });
   }
 
-  function clearWorkflowError() {
+  function clearWorkflowError({ restoreFocus = true } = {}) {
+    const hadFocus = ui.error.contains(shadow.activeElement);
     ui.error.classList.remove('show');
     ui.errorMessage.textContent = '';
+    if (hadFocus && restoreFocus) requestAnimationFrame(() => ui.runWorkflow.focus({ preventScroll: true }));
   }
 
   const CONDITION_OPTIONS = Object.freeze([
@@ -432,6 +1021,12 @@
   });
 
   const CATEGORY_LABELS = Object.freeze({ gbf: 'グラブル', control: '制御', wait: '待機', frame: 'iframe' });
+  const CATEGORY_META = Object.freeze({
+    gbf: { label: 'ゲーム操作', description: 'グラブル固有の操作' },
+    control: { label: 'フロー制御', description: '分岐・反復・停止' },
+    wait: { label: '待機と監視', description: '時間・状態を待つ' },
+    frame: { label: 'ページ操作', description: '移動・再読込・準備待ち' }
+  });
 
   function blockLabel(type) {
     return BLOCK_DEFINITIONS[type]?.label || `不明ブロック (${type})`;
@@ -818,6 +1413,18 @@
     return count;
   }
 
+  function setAllBlocksCollapsed(collapsed) {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    walkBlocks(workflow.blocks, block => {
+      if (collapsed) state.collapsed.add(block.id);
+      else state.collapsed.delete(block.id);
+      return null;
+    });
+    renderWorkflowEditor();
+    announce(collapsed ? 'すべてのブロックを折りたたみました' : 'すべてのブロックを展開しました');
+  }
+
   function isDescendant(block, targetId) {
     if (block.id === targetId) return true;
     return [...(block.children || []), ...(block.elseChildren || [])].some(child => isDescendant(child, targetId));
@@ -826,6 +1433,7 @@
   function removeBlockById(id) {
     const location = findBlockLocation(id);
     if (!location) return null;
+    resetInsertion();
     const [removed] = location.list.splice(location.index, 1);
     return removed;
   }
@@ -838,6 +1446,7 @@
       block.children === targetList || block.elseChildren === targetList ? block : null
     );
     if (targetOwner && isDescendant(moving, targetOwner.id)) return false;
+    resetInsertion();
     location.list.splice(location.index, 1);
     let index = clamp(int(targetIndex, targetList.length), 0, targetList.length);
     if (location.list === targetList && location.index < index) index -= 1;
@@ -852,6 +1461,7 @@
     if (!location) return;
     const next = location.index + direction;
     if (next < 0 || next >= location.list.length) return;
+    resetInsertion();
     [location.list[location.index], location.list[next]] = [location.list[next], location.list[location.index]];
     touchWorkflow();
     renderWorkflowEditor();
@@ -865,6 +1475,7 @@
       toast('直前のブロックは入れ子を持てません');
       return;
     }
+    resetInsertion();
     location.list.splice(location.index, 1);
     previous.children.push(location.block);
     touchWorkflow();
@@ -876,6 +1487,7 @@
     if (!location?.parent) return;
     const parentLocation = findBlockLocation(location.parent.id);
     if (!parentLocation) return;
+    resetInsertion();
     location.list.splice(location.index, 1);
     parentLocation.list.splice(parentLocation.index + 1, 0, location.block);
     touchWorkflow();
@@ -885,18 +1497,36 @@
   function setInsertion(list, index, description) {
     state.insertion = { list, index };
     ui.insertHint.textContent = `${description}へ追加します。`;
-    ui.palette.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    ui.insertionNotice.classList.add('active');
+    ui.palette.closest('details').open = true;
+    const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    ui.palette.scrollIntoView({ behavior, block: 'center' });
+    requestAnimationFrame(() => ui.paletteSearch.focus({ preventScroll: true }));
+    announce(`追加先を${description}に設定しました`);
+  }
+
+  function resetInsertion({ notify = false } = {}) {
+    state.insertion = null;
+    ui.insertHint.textContent = 'フローの末尾へ追加します。各ブロックから挿入先を変更できます。';
+    ui.insertionNotice.classList.remove('active');
+    if (notify) toast('追加先をフロー末尾に戻しました');
   }
 
   function addBlockAtInsertion(type) {
     const workflow = currentWorkflow();
     if (!workflow || state.running) return;
-    const target = state.insertion || { list: workflow.blocks, index: workflow.blocks.length };
+    const insertionIsCurrent = state.insertion && (
+      state.insertion.list === workflow.blocks ||
+      walkBlocks(workflow.blocks, block =>
+        block.children === state.insertion.list || block.elseChildren === state.insertion.list ? true : null
+      )
+    );
+    const target = insertionIsCurrent ? state.insertion : { list: workflow.blocks, index: workflow.blocks.length };
     target.list.splice(clamp(target.index, 0, target.list.length), 0, createBlock(type));
-    state.insertion = null;
-    ui.insertHint.textContent = '末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。';
+    resetInsertion();
     touchWorkflow();
     renderWorkflowEditor();
+    toast(`「${blockLabel(type)}」を追加しました`);
   }
 
   function element(tag, options = {}, children = []) {
@@ -922,14 +1552,22 @@
     input.max = String(max);
     input.step = String(step);
     input.inputMode = 'decimal';
-    input.addEventListener('change', () => onChange(input));
+    input.addEventListener('change', () => {
+      let normalized = clamp(finite(input.value, value), min, max);
+      if (Number.isInteger(Number(step)) && Number(step) >= 1) normalized = Math.round(normalized);
+      input.value = String(normalized);
+      onChange(input);
+    });
     return input;
   }
 
-  function textInput(value, onChange, placeholder = '') {
+  function textInput(value, onChange, placeholder = '', readNormalizedValue = null) {
     const input = element('input', { type: 'text', value });
     input.placeholder = placeholder;
-    input.addEventListener('change', () => onChange(input));
+    input.addEventListener('change', () => {
+      onChange(input);
+      if (readNormalizedValue) input.value = String(readNormalizedValue() ?? '');
+    });
     return input;
   }
 
@@ -948,10 +1586,7 @@
     updater(block.config);
     const normalized = normalizeBlock(block);
     block.config = normalized.config;
-    if (normalized.children) block.children = normalized.children;
-    if (normalized.elseChildren) block.elseChildren = normalized.elseChildren;
     touchWorkflow();
-    renderWorkflowEditor();
   }
 
   function renderCandidates(block, container) {
@@ -961,7 +1596,7 @@
       const name = textInput(candidate.name, input => updateBlockConfig(block, config => {
         config.supporterCandidates = normalizeCandidates(config.supporterCandidates);
         config.supporterCandidates[index].name = input.value;
-      }), '召喚石名（完全一致）');
+      }), '召喚石名（完全一致）', () => block.config.supporterCandidates[index].name);
       const level = numberInput(candidate.minimumLevel, 0, 9999, 1, input => updateBlockConfig(block, config => {
         config.supporterCandidates = normalizeCandidates(config.supporterCandidates);
         config.supporterCandidates[index].minimumLevel = finite(input.value, 0);
@@ -981,11 +1616,11 @@
     const selector = textInput(condition.selector, input => updateBlockConfig(block, config => {
       config[configKey] = normalizeConditionConfig(config[configKey]);
       config[configKey].selector = input.value;
-    }), '.selector または #id');
+    }), '.selector または #id', () => block.config[configKey].selector);
     const value = textInput(condition.value, input => updateBlockConfig(block, config => {
       config[configKey] = normalizeConditionConfig(config[configKey]);
       config[configKey].value = input.value;
-    }), 'URLに含む文字など');
+    }), 'URLに含む文字など', () => block.config[configKey].value);
     grid.append(field('条件', type), field('セレクタ', selector), field('比較値', value));
     container.append(grid);
   }
@@ -1005,7 +1640,10 @@
           else accepted = false;
           config.assistSlots = [...slots].sort((a, b) => a - b);
         });
-        if (!accepted) input.checked = true;
+        if (!accepted) {
+          input.checked = true;
+          announce('救援番号は1件以上選択してください');
+        }
       });
       grid.append(field(`救援${slot}`, input));
     }
@@ -1050,7 +1688,8 @@
         const recoveryRoute = textInput(
           config.battleEndRoute,
           input => updateBlockConfig(block, next => { next.battleEndRoute = input.value; }),
-          '#quest/assist/multi/0'
+          '#quest/assist/multi/0',
+          () => block.config.battleEndRoute
         );
         grid.append(field('敵撃破時の戻り先ルート', recoveryRoute));
         const recoveryScreen = selectInput(config.battleEndExpectedScreen, [
@@ -1085,7 +1724,12 @@
         renderConditionFields(block, container);
         return;
       case 'stop': {
-        const reason = textInput(config.reason, input => updateBlockConfig(block, next => { next.reason = input.value; }), '停止理由');
+        const reason = textInput(
+          config.reason,
+          input => updateBlockConfig(block, next => { next.reason = input.value; }),
+          '停止理由',
+          () => block.config.reason
+        );
         grid.append(field('停止理由', reason));
         break;
       }
@@ -1112,7 +1756,12 @@
         break;
       }
       case 'iframeRoute': {
-        const route = textInput(config.route, input => updateBlockConfig(block, next => { next.route = input.value; }), '#quest/assist/multi/0');
+        const route = textInput(
+          config.route,
+          input => updateBlockConfig(block, next => { next.route = input.value; }),
+          '#quest/assist/multi/0',
+          () => block.config.route
+        );
         grid.append(field('ゲーム内ルート', route));
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         const expected = selectInput(config.expectedScreen, [
@@ -1142,12 +1791,27 @@
     return zone;
   }
 
+  function focusBlockControl(blockId, action = 'toggle', message = '') {
+    requestAnimationFrame(() => {
+      const card = blockCardById(blockId);
+      const preferred = card?.querySelector(`[data-action="${action}"]`);
+      const control = preferred && !preferred.disabled ? preferred : card?.querySelector('.collapseToggle');
+      control?.focus({ preventScroll: true });
+      if (message) announce(message);
+    });
+  }
+
   function renderBlockList(blocks, host, depth = 0, branchName = 'blocks') {
     host.append(createDropZone(blocks, 0));
     blocks.forEach((block, index) => {
       const definition = BLOCK_DEFINITIONS[block.type] || { category: 'control', label: block.type, description: '未対応' };
       const card = element('div', { className: `blockCard category-${definition.category}` });
+      const contentId = `blockContent-${String(block.id).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
       card.dataset.blockId = block.id;
+      card.dataset.depth = String(depth);
+      card.setAttribute('role', 'group');
+      card.setAttribute('aria-label', `${index + 1}. ${definition.label}`);
+      if (state.running?.currentBlockId === block.id) card.setAttribute('aria-current', 'step');
       card.draggable = !state.running && supportsNativeBlockDrag;
       card.classList.toggle('running', state.running?.currentBlockId === block.id);
       card.classList.toggle('collapsed', state.collapsed.has(block.id));
@@ -1164,49 +1828,83 @@
         shadow.querySelectorAll('.dropZone.dragOver').forEach(zone => zone.classList.remove('dragOver'));
       });
 
-      const collapse = element('button', { className: 'dragHandle', text: state.collapsed.has(block.id) ? '＋' : '−', title: '折りたたみ' });
+      const isCollapsed = state.collapsed.has(block.id);
+      const collapse = element('button', {
+        className: 'collapseToggle',
+        text: isCollapsed ? '展開' : '折りたたむ',
+        title: isCollapsed ? '設定を展開' : '設定を折りたたむ',
+        dataset: { action: 'toggle' },
+        attrs: {
+          'aria-label': isCollapsed ? `${definition.label}を展開` : `${definition.label}を折りたたむ`,
+          'aria-expanded': String(!isCollapsed),
+          'aria-controls': contentId
+        }
+      });
       collapse.addEventListener('click', () => {
         if (state.collapsed.has(block.id)) state.collapsed.delete(block.id); else state.collapsed.add(block.id);
         renderWorkflowEditor();
+        focusBlockControl(block.id, 'toggle', state.collapsed.has(block.id) ? 'ブロックを折りたたみました' : 'ブロックを展開しました');
       });
       const name = element('div', { className: 'blockName' }, [
+        element('span', { className: 'blockTypeBadge', text: CATEGORY_LABELS[definition.category] }),
         element('strong', { text: definition.label }),
         element('small', { text: definition.description })
       ]);
       const progress = state.blockProgress.get(block.id);
       if (progress) name.append(element('span', { className: 'progressBadge', text: progress }));
       const tools = element('div', { className: 'blockTools' });
-      const tool = (text, title, handler) => {
-        const button = element('button', { text, title });
-        button.disabled = Boolean(state.running);
-        button.addEventListener('click', handler);
+      const tool = (text, title, handler, { action, disabled = false, className = '', restoreFocus = true } = {}) => {
+        const button = element('button', {
+          text, title, className, dataset: { action }, attrs: { 'aria-label': `${definition.label}：${title}` }
+        });
+        button.disabled = Boolean(state.running || disabled);
+        button.addEventListener('click', () => {
+          const focusId = handler();
+          if (restoreFocus) focusBlockControl(typeof focusId === 'string' ? focusId : block.id, action, title);
+        });
         tools.append(button);
       };
-      tool('↑', '上へ', () => moveBlockSibling(block.id, -1));
-      tool('↓', '下へ', () => moveBlockSibling(block.id, 1));
-      tool('→', '直前の親へ入れる', () => indentBlock(block.id));
-      tool('←', '親から外へ出す', () => outdentBlock(block.id));
-      tool('複製', '複製', () => {
+      tool('↑', 'ひとつ上へ移動', () => moveBlockSibling(block.id, -1), { action: 'move-up', disabled: index === 0 });
+      tool('↓', 'ひとつ下へ移動', () => moveBlockSibling(block.id, 1), { action: 'move-down', disabled: index === blocks.length - 1 });
+      tool('→', '直前のブロックの内側へ移動', () => indentBlock(block.id), {
+        action: 'indent', disabled: index === 0 || !BLOCK_DEFINITIONS[blocks[index - 1]?.type]?.container
+      });
+      tool('←', '親ブロックの外へ移動', () => outdentBlock(block.id), { action: 'outdent', disabled: !findBlockLocation(block.id)?.parent });
+      tool('⧉', 'ブロックを複製', () => {
         const location = findBlockLocation(block.id);
-        location.list.splice(location.index + 1, 0, cloneBlock(block));
+        const copy = cloneBlock(block);
+        resetInsertion();
+        location.list.splice(location.index + 1, 0, copy);
         touchWorkflow();
         renderWorkflowEditor();
-      });
-      tool('＋下', 'この直後へ追加', () => {
+        return copy.id;
+      }, { action: 'duplicate' });
+      tool('＋', 'このブロックの直後へ追加', () => {
         const location = findBlockLocation(block.id);
         setInsertion(location.list, location.index + 1, `「${definition.label}」の直後`);
+      }, { action: 'insert-after', restoreFocus: false });
+      if (definition.container) tool('↳', '子ブロックを追加', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`), {
+        action: 'insert-child', restoreFocus: false
       });
-      if (definition.container) tool('＋子', '子ブロックへ追加', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`));
-      tool('削除', '削除', () => {
+      tool('×', 'ブロックを削除', () => {
+        const location = findBlockLocation(block.id);
+        const focusTarget = location?.list[location.index + 1] || location?.list[location.index - 1] || location?.parent;
         removeBlockById(block.id);
         touchWorkflow();
         renderWorkflowEditor();
-      });
+        toast(`「${definition.label}」を削除しました`);
+        if (focusTarget) focusBlockControl(focusTarget.id, 'toggle');
+        else {
+          ui.palette.closest('details').open = true;
+          requestAnimationFrame(() => ui.paletteSearch.focus());
+        }
+      }, { action: 'delete', className: 'toolDelete', restoreFocus: false });
       const head = element('div', { className: 'blockHead' }, [collapse, name, tools]);
       const body = element('div', { className: 'blockBody' });
       renderBlockConfig(block, body);
       if (state.running) body.querySelectorAll('input,select,textarea,button').forEach(control => { control.disabled = true; });
-      card.append(head, body);
+      const content = element('div', { className: 'blockContent', attrs: { id: contentId } }, [body]);
+      card.append(head, content);
 
       if (definition.container) {
         const childArea = element('div', { className: 'childArea' });
@@ -1218,7 +1916,7 @@
         childLabel.lastElementChild.addEventListener('click', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`));
         childArea.append(childLabel);
         renderBlockList(block.children, childArea, depth + 1, 'children');
-        card.append(childArea);
+        content.append(childArea);
       }
       if (definition.elseBranch) {
         const elseArea = element('div', { className: 'childArea' });
@@ -1227,7 +1925,7 @@
         elseLabel.lastElementChild.addEventListener('click', () => setInsertion(block.elseChildren, block.elseChildren.length, '条件不成立側'));
         elseArea.append(elseLabel);
         renderBlockList(block.elseChildren, elseArea, depth + 1, 'elseChildren');
-        card.append(elseArea);
+        content.append(elseArea);
       }
       host.append(card, createDropZone(blocks, index + 1));
     });
@@ -1246,8 +1944,10 @@
     ui.workflowLoopCount.disabled = Boolean(state.running || workflow.loopInfinite);
     const loopLabel = workflow.loopInfinite ? '無限ループ' : `${workflow.loopCount}回実行`;
     ui.workflowStats.textContent = `${countBlocks(workflow.blocks)}ブロック · ${loopLabel}`;
+    byId('expandAllBlocks').disabled = Boolean(state.running || !workflow.blocks.length);
+    byId('collapseAllBlocks').disabled = Boolean(state.running || !workflow.blocks.length);
     if (!workflow.blocks.length) {
-      workflowEditor.append(element('div', { className: 'empty', text: 'ブロックがありません。上のパレットまたは完成テンプレートから追加してください。' }));
+      workflowEditor.append(element('div', { className: 'empty', text: 'まだブロックがありません。「ブロックライブラリ」またはクイックスタートから追加してください。' }));
       return;
     }
     renderBlockList(workflow.blocks, workflowEditor);
@@ -1264,15 +1964,44 @@
 
   function renderPalette() {
     ui.palette.textContent = '';
-    for (const [type, definition] of Object.entries(BLOCK_DEFINITIONS)) {
-      const button = element('button', { className: `paletteButton ${definition.category}` }, [
-        element('strong', { text: `${CATEGORY_LABELS[definition.category]}：${definition.label}` }),
-        element('small', { text: definition.description })
-      ]);
-      button.disabled = Boolean(state.running);
-      button.addEventListener('click', () => addBlockAtInsertion(type));
-      ui.palette.append(button);
+    const query = state.paletteQuery.trim().toLocaleLowerCase('ja');
+    let visibleCount = 0;
+    for (const category of Object.keys(CATEGORY_META)) {
+      if (state.paletteCategory !== 'all' && state.paletteCategory !== category) continue;
+      const matches = Object.entries(BLOCK_DEFINITIONS).filter(([, definition]) => {
+        if (definition.category !== category) return false;
+        if (!query) return true;
+        return `${definition.label} ${definition.description} ${CATEGORY_LABELS[category]}`.toLocaleLowerCase('ja').includes(query);
+      });
+      if (!matches.length) continue;
+      visibleCount += matches.length;
+      const meta = CATEGORY_META[category];
+      const items = element('div', { className: 'paletteItems' });
+      for (const [type, definition] of matches) {
+        const button = element('button', {
+          className: `paletteButton ${definition.category}`,
+          attrs: { 'aria-label': `${definition.label}を追加` }
+        }, [
+          element('strong', { text: definition.label }),
+          element('small', { text: definition.description })
+        ]);
+        button.disabled = Boolean(state.running);
+        button.addEventListener('click', () => addBlockAtInsertion(type));
+        items.append(button);
+      }
+      ui.palette.append(element('section', {
+        className: 'paletteSection',
+        attrs: { 'data-category': category, 'aria-label': meta.label }
+      }, [
+        element('div', { className: 'paletteSectionHead' }, [
+          element('span', { className: 'paletteSectionTitle', text: meta.label }),
+          element('span', { className: 'paletteCount', text: `${matches.length}種類` })
+        ]),
+        items
+      ]));
     }
+    if (!visibleCount) ui.palette.append(element('div', { className: 'paletteEmpty', text: '条件に一致するブロックがありません。' }));
+    ui.paletteStatus.textContent = `${visibleCount}件のブロックを表示`;
   }
 
   function renderTemplateSelect() {
@@ -3468,6 +4197,7 @@
 
   function clearRunningBlockUi() {
     state.runningCard?.classList.remove('running');
+    state.runningCard?.removeAttribute('aria-current');
     state.runningBadge?.remove();
     state.runningCard = null;
     state.runningBadge = null;
@@ -3483,6 +4213,7 @@
     const card = blockCardById(block.id);
     state.runningCard = card;
     card?.classList.add('running');
+    card?.setAttribute('aria-current', 'step');
     if (card && progress) {
       const badge = element('span', { className: 'progressBadge', text: progress });
       card.querySelector('.blockName')?.append(badge);
@@ -3501,6 +4232,7 @@
       card = blockCardById(block.id);
       state.runningCard = card;
       card?.classList.add('running');
+      card?.setAttribute('aria-current', 'step');
     }
     if (!card) return;
     let badge = state.runningBadge;
@@ -3657,6 +4389,7 @@
     if (state.running || state.legacyRunning) return;
     const workflow = currentWorkflow();
     if (!workflow?.blocks.length) return toast('実行するブロックがありません');
+    const restoreRunFocus = shadow.activeElement === ui.runWorkflow || shadow.activeElement === byId('compactRun');
     clearWorkflowError();
     const controller = new AbortController();
     const context = {
@@ -3676,6 +4409,7 @@
       renderPalette();
       renderWorkflowEditor();
     }
+    if (restoreRunFocus) requestAnimationFrame(() => (lightweightMode ? byId('compactRun') : ui.stopWorkflow).focus({ preventScroll: true }));
     appendLog(`ワークフロー「${workflow.name}」を開始`);
     try {
       const loopCount = clamp(int(workflow.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
@@ -3728,6 +4462,7 @@
       syncRunControls();
       renderPalette();
       renderWorkflowEditor();
+      if (restoreRunFocus) requestAnimationFrame(() => ui.runWorkflow.focus({ preventScroll: true }));
     }
   }
 
@@ -3859,8 +4594,8 @@
       settingsOpen: source.settingsOpen !== false,
       browserHidden: Boolean(source.browserHidden),
       compact: Boolean(source.compact),
-      dockX: Number.isFinite(Number(source.dockX)) ? Number(source.dockX) : null,
-      dockY: Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null
+      dockX: source.dockX != null && Number.isFinite(Number(source.dockX)) ? Number(source.dockX) : null,
+      dockY: source.dockY != null && Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null
     };
   }
 
@@ -3913,7 +4648,15 @@
   function saveLegacyState() {
     if (!state.legacy) return;
     const snapshot = legacySnapshot();
-    state.legacy = normalizeLegacyState(snapshot);
+    const normalized = normalizeLegacyState(snapshot);
+    const liveActions = new Map(state.legacy.actions.map(action => [action.id, action]));
+    normalized.actions = normalized.actions.map(action => {
+      const live = liveActions.get(action.id);
+      if (!live) return action;
+      Object.assign(live, action);
+      return live;
+    });
+    Object.assign(state.legacy, normalized);
     state.selectedLegacyId = state.legacy.selectedId;
     state.nextLegacyId = state.legacy.nextId;
     try {
@@ -3964,7 +4707,7 @@
     const normalized = normalizeLegacyState({ ...legacySnapshot(), actions: state.legacy.actions });
     const replacement = normalized.actions.find(item => item.id === action.id);
     if (replacement) Object.assign(action, replacement);
-    renderLegacy();
+    renderLegacyMarkers();
     saveLegacyState();
   }
 
@@ -3975,6 +4718,7 @@
     [state.legacy.actions[index], state.legacy.actions[next]] = [state.legacy.actions[next], state.legacy.actions[index]];
     renderLegacy();
     saveLegacyState();
+    return action.id;
   }
 
   function removeLegacyAction(action) {
@@ -3985,6 +4729,7 @@
     state.legacy.selectedId = state.selectedLegacyId;
     renderLegacy();
     saveLegacyState();
+    return state.selectedLegacyId;
   }
 
   function duplicateLegacyAction(action) {
@@ -4001,6 +4746,7 @@
     state.legacy.selectedId = copy.id;
     renderLegacy();
     saveLegacyState();
+    return copy.id;
   }
 
   function legacyConditionEditor(action) {
@@ -4024,29 +4770,61 @@
     return grid;
   }
 
+  function focusLegacyControl(actionId, actionName = 'select', message = '') {
+    requestAnimationFrame(() => {
+      const row = Array.from(shadow.querySelectorAll('.legacyRow')).find(candidate => candidate.dataset.actionId === String(actionId));
+      const preferred = row?.querySelector(`[data-action="${actionName}"]`);
+      const control = preferred && !preferred.disabled ? preferred : row?.querySelector('.legacySelect') || byId('legacyAddClick');
+      control?.focus({ preventScroll: true });
+      if (message) announce(message);
+    });
+  }
+
   function renderLegacyAction(action, index) {
-    const row = element('div', { className: 'legacyRow' });
+    const row = element('div', {
+      className: 'legacyRow',
+      dataset: { actionId: String(action.id) },
+      attrs: { role: 'group', 'aria-label': legacyActionName(action, index) }
+    });
     row.classList.toggle('selected', action.id === state.selectedLegacyId);
-    const title = element('strong', { text: legacyActionName(action, index) });
-    const tools = element('div', { className: 'legacyTools' });
-    const tool = (text, handler) => {
-      const button = element('button', { text });
-      button.disabled = Boolean(state.legacyRunning || state.recording);
-      button.addEventListener('click', handler);
-      tools.append(button);
-    };
-    tool('↑', () => moveLegacyAction(action, -1));
-    tool('↓', () => moveLegacyAction(action, 1));
-    tool('複製', () => duplicateLegacyAction(action));
-    tool('削除', () => removeLegacyAction(action));
-    const head = element('div', { className: 'legacyHead' }, [title, tools]);
-    head.addEventListener('click', event => {
-      if (event.target.closest('button')) return;
+    const title = element('button', {
+      className: 'legacySelect',
+      text: legacyActionName(action, index),
+      dataset: { action: 'select' },
+      attrs: { 'aria-pressed': String(action.id === state.selectedLegacyId) }
+    });
+    title.addEventListener('click', () => {
       state.selectedLegacyId = action.id;
       state.legacy.selectedId = action.id;
-      renderLegacy();
+      shadow.querySelectorAll('.legacyRow').forEach(candidate => {
+        const selected = candidate.dataset.actionId === String(action.id);
+        candidate.classList.toggle('selected', selected);
+        candidate.querySelector('.legacySelect')?.setAttribute('aria-pressed', String(selected));
+      });
+      renderLegacyMarkers();
       saveLegacyState();
+      announce(`${legacyActionName(action, index)}を選択しました`);
     });
+    const tools = element('div', { className: 'legacyTools' });
+    const tool = (text, label, actionName, handler, disabled = false) => {
+      const button = element('button', {
+        text,
+        title: label,
+        dataset: { action: actionName },
+        attrs: { 'aria-label': `${legacyActionName(action, index)}：${label}` }
+      });
+      button.disabled = Boolean(state.legacyRunning || state.recording || disabled);
+      button.addEventListener('click', () => {
+        const focusId = handler();
+        focusLegacyControl(focusId ?? action.id, actionName, label);
+      });
+      tools.append(button);
+    };
+    tool('↑', 'ひとつ上へ移動', 'move-up', () => moveLegacyAction(action, -1), index === 0);
+    tool('↓', 'ひとつ下へ移動', 'move-down', () => moveLegacyAction(action, 1), index === state.legacy.actions.length - 1);
+    tool('⧉', '複製', 'duplicate', () => duplicateLegacyAction(action));
+    tool('×', '削除', 'delete', () => removeLegacyAction(action));
+    const head = element('div', { className: 'legacyHead' }, [title, tools]);
     row.append(head);
     const common = element('div', { className: 'grid2' });
     const enabled = element('input', { type: 'checkbox' });
@@ -4088,15 +4866,36 @@
     if (state.page !== 'legacy' || state.recording) return;
     state.legacy.actions.forEach((action, index) => {
       if (action.type !== 'click' || action.targetMode !== 'point') return;
-      const marker = element('div', { className: 'marker', text: String(index + 1), attrs: { tabindex: '0', role: 'button' } });
+      const markerLabel = () => `動作${index + 1}の保存位置、X ${Math.round(action.cx)}、Y ${Math.round(action.cy)}`;
+      const marker = element('div', {
+        className: 'marker',
+        text: String(index + 1),
+        title: markerLabel(),
+        dataset: { actionId: String(action.id) },
+        attrs: {
+          tabindex: '0',
+          role: 'button',
+          'aria-label': markerLabel(),
+          'aria-pressed': String(action.id === state.selectedLegacyId)
+        }
+      });
       marker.classList.toggle('selected', action.id === state.selectedLegacyId);
       marker.style.left = `${action.cx}px`;
       marker.style.top = `${action.cy}px`;
       marker.addEventListener('click', () => {
         state.selectedLegacyId = action.id;
         state.legacy.selectedId = action.id;
-        renderLegacy();
+        shadow.querySelectorAll('.legacyRow').forEach(candidate => {
+          const selected = candidate.dataset.actionId === String(action.id);
+          candidate.classList.toggle('selected', selected);
+          candidate.querySelector('.legacySelect')?.setAttribute('aria-pressed', String(selected));
+        });
+        renderLegacyMarkers();
         saveLegacyState();
+        requestAnimationFrame(() => {
+          const nextMarker = Array.from(markerLayer.children).find(candidate => candidate.dataset.actionId === String(action.id));
+          nextMarker?.focus({ preventScroll: true });
+        });
       });
       const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
       const move = event => {
@@ -4132,6 +4931,11 @@
         window.addEventListener('pointercancel', finish, { capture: true, passive: false });
       }, { passive: false });
       marker.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          marker.click();
+          return;
+        }
         const amount = event.shiftKey ? 10 : 1;
         const delta = { ArrowLeft: [-amount, 0], ArrowRight: [amount, 0], ArrowUp: [0, -amount], ArrowDown: [0, amount] }[event.key];
         if (!delta) return;
@@ -4140,7 +4944,11 @@
         action.cy = clamp(action.cy + delta[1], 0, window.innerHeight);
         marker.style.left = `${action.cx}px`;
         marker.style.top = `${action.cy}px`;
+        marker.title = markerLabel();
+        marker.setAttribute('aria-label', markerLabel());
         saveLegacyState();
+        renderLegacyListOnly();
+        announce(markerLabel());
       });
       markerLayer.append(marker);
     });
@@ -4327,12 +5135,14 @@
 
   async function startLegacy() {
     if (state.legacyRunning || state.running || state.recording || !state.legacy.actions.length) return;
+    const restoreRunFocus = shadow.activeElement === ui.legacyRun || shadow.activeElement === byId('compactRun');
     const controller = new AbortController();
     const token = { controller, signal: controller.signal };
     state.legacyRunning = token;
     const restoreExpandedDock = enterRuntimeCompactMode();
     syncRunControls();
     if (!lightweightMode) renderLegacy();
+    if (restoreRunFocus) requestAnimationFrame(() => (lightweightMode ? byId('compactRun') : ui.legacyStop).focus({ preventScroll: true }));
     saveLegacyState();
     appendLog('旧マクロを開始');
     try {
@@ -4363,6 +5173,7 @@
       leaveRuntimeCompactMode(restoreExpandedDock);
       syncRunControls();
       renderLegacy();
+      if (restoreRunFocus) requestAnimationFrame(() => ui.legacyRun.focus({ preventScroll: true }));
     }
   }
 
@@ -4452,21 +5263,26 @@
 
   function startLegacyRecording() {
     if (state.recording || state.running || state.legacyRunning) return;
+    state.recordReturnFocus = shadow.activeElement;
     state.recording = true;
     state.recordedPoints = [];
     state.activeRecordPointers.clear();
     state.recordStartedAt = performance.now();
     recordLayer.textContent = '';
     recordLayer.classList.add('active');
+    ui.recordCount.textContent = '0件';
+    ui.recordToolbar.hidden = false;
     clearLegacyMarkers();
-    setStatus('タッチ記録中。終了するには旧マクロの「タッチ記録」を再度押してください');
-    toast('記録中。ボタンを再度押すと確定します');
+    setStatus('タッチ記録中');
+    toast('画面をタッチして記録します');
+    requestAnimationFrame(() => byId('recordFinish').focus());
   }
 
   function finishLegacyRecording({ apply = true } = {}) {
     if (!state.recording) return;
     state.recording = false;
     recordLayer.classList.remove('active');
+    ui.recordToolbar.hidden = true;
     state.activeRecordPointers.clear();
     if (apply && state.recordedPoints.length) {
       if (state.legacy.recordMode !== 'append') state.legacy.actions = state.legacy.actions.filter(action => action.type !== 'click');
@@ -4491,6 +5307,12 @@
     renderLegacy();
     saveLegacyState();
     setStatus('記録終了');
+    const returnFocus = state.recordReturnFocus;
+    state.recordReturnFocus = null;
+    requestAnimationFrame(() => {
+      if (returnFocus?.isConnected) returnFocus.focus();
+      else byId('legacyRecord').focus();
+    });
   }
 
   function recordPointerDown(event) {
@@ -4526,13 +5348,14 @@
     state.activeRecordPointers.delete(event.pointerId);
     state.recordedPoints.push({ startedAt: item.startedAt, x: item.x, y: item.y, holdMs: performance.now() - item.absoluteStart });
     item.dot.textContent = String(state.recordedPoints.length);
+    ui.recordCount.textContent = `${state.recordedPoints.length}件`;
   }
 
   function selectWorkflow(id) {
     if (!state.workflows.workflows.some(workflow => workflow.id === id)) return;
     state.selectedWorkflowId = id;
     state.workflows.currentId = id;
-    state.insertion = null;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
   }
@@ -4543,6 +5366,7 @@
     state.workflows.workflows.push(workflow);
     state.selectedWorkflowId = workflow.id;
     state.workflows.currentId = workflow.id;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
     toast('新しいワークフローを作成しました');
@@ -4552,7 +5376,12 @@
     const workflow = currentWorkflow();
     if (!workflow || state.running) return;
     const name = String(ui.workflowName.value || '').trim().slice(0, 60);
-    if (!name) return toast('名前を入力してください');
+    if (!name) {
+      ui.workflowName.setAttribute('aria-invalid', 'true');
+      ui.workflowName.focus();
+      return toast('ワークフロー名を入力してください');
+    }
+    ui.workflowName.removeAttribute('aria-invalid');
     workflow.name = name;
     workflow.updatedAt = Date.now();
     saveWorkflowStore({ immediate: true });
@@ -4572,6 +5401,7 @@
     state.workflows.workflows.push(workflow);
     state.selectedWorkflowId = workflow.id;
     state.workflows.currentId = workflow.id;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
     toast('ワークフローを複製しました');
@@ -4587,6 +5417,7 @@
     const next = state.workflows.workflows[index] || state.workflows.workflows[index - 1];
     state.selectedWorkflowId = next.id;
     state.workflows.currentId = next.id;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
     toast('ワークフローを削除しました');
@@ -4601,7 +5432,7 @@
     if (mode === 'replace') workflow.blocks = blocks;
     else workflow.blocks.push(...blocks);
     workflow.updatedAt = Date.now();
-    state.insertion = null;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowEditor();
     toast(`「${template[1]}」を${mode === 'replace' ? '読み込み' : '追加'}しました`);
@@ -4647,12 +5478,14 @@
     }
     state.selectedWorkflowId = workflows.at(-1).id;
     state.workflows.currentId = state.selectedWorkflowId;
+    resetInsertion();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
     toast(`${fileName}を読み込みました`);
   }
 
   function setPage(page) {
+    const focusedPage = shadow.activeElement?.closest?.('.page');
     state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
     shadow.querySelectorAll('.mainTab').forEach(button => {
       const active = button.dataset.page === state.page;
@@ -4667,11 +5500,18 @@
     });
     if (state.page === 'logs') renderLogs();
     renderLegacyMarkers();
+    if (focusedPage && focusedPage.id !== `page-${state.page}`) {
+      requestAnimationFrame(() => byId(`tab-${state.page}`).focus({ preventScroll: true }));
+    }
   }
 
   function setBrowserHidden(hidden) {
+    const hadFocus = ui.browserBar.contains(shadow.activeElement);
+    const handleHadFocus = shadow.activeElement === ui.browserHandle;
     ui.browserBar.classList.toggle('hidden', hidden);
     ui.browserHandle.classList.toggle('visible', hidden);
+    if (hadFocus && hidden) requestAnimationFrame(() => ui.browserHandle.focus({ preventScroll: true }));
+    if (handleHadFocus && !hidden) requestAnimationFrame(() => urlInput.focus({ preventScroll: true }));
     saveLegacyState();
   }
 
@@ -4679,7 +5519,8 @@
     'workflowSelect', 'workflowName', 'newWorkflow', 'renameWorkflow', 'duplicateWorkflow', 'deleteWorkflow',
     'importWorkflow', 'templateSelect', 'replaceTemplate', 'appendTemplate', 'legacyAddClick', 'legacyAddNavigate',
     'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
-    'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset'
+    'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset', 'paletteSearch',
+    'clearInsertion', 'expandAllBlocks', 'collapseAllBlocks'
   ]);
 
   function syncRunControls() {
@@ -4696,6 +5537,7 @@
       const control = byId(id);
       if (control) control.disabled = isRunning;
     }
+    shadow.querySelectorAll('.paletteFilter').forEach(control => { control.disabled = isRunning; });
     const compactRun = byId('compactRun');
     compactRun.textContent = isRunning ? '■' : '▶';
     compactRun.classList.toggle('is-stop', isRunning);
@@ -4712,7 +5554,10 @@
     byId('toggleCompact').textContent = '□';
     byId('toggleCompact').setAttribute('aria-expanded', 'false');
     byId('compactGrip').setAttribute('aria-expanded', 'false');
-    requestAnimationFrame(positionDock);
+    requestAnimationFrame(() => {
+      positionDock();
+      byId('compactRun').focus({ preventScroll: true });
+    });
     return true;
   }
 
@@ -4726,11 +5571,15 @@
   }
 
   function setCompact(compact) {
+    const focusMoves = dock.contains(shadow.activeElement);
     dock.classList.toggle('compact', compact);
     byId('toggleCompact').textContent = compact ? '□' : '—';
     byId('toggleCompact').setAttribute('aria-expanded', String(!compact));
     byId('compactGrip').setAttribute('aria-expanded', String(!compact));
-    requestAnimationFrame(positionDock);
+    requestAnimationFrame(() => {
+      positionDock();
+      if (focusMoves) (compact ? byId('compactGrip') : byId(`tab-${state.page}`)).focus({ preventScroll: true });
+    });
     saveLegacyState();
   }
 
@@ -4738,10 +5587,19 @@
     const rect = dock.getBoundingClientRect();
     const width = rect.width || 780;
     const height = rect.height || 600;
-    if (!Number.isFinite(state.dockX)) state.dockX = 8;
-    if (!Number.isFinite(state.dockY)) state.dockY = Math.max(8, window.innerHeight - height - 8);
-    state.dockX = clamp(state.dockX, 4, Math.max(4, window.innerWidth - width - 4));
-    state.dockY = clamp(state.dockY, 4, Math.max(4, window.innerHeight - height - 4));
+    const viewport = window.visualViewport;
+    const viewportLeft = finite(viewport?.offsetLeft, 0);
+    const viewportTop = finite(viewport?.offsetTop, 0);
+    const viewportWidth = finite(viewport?.width, window.innerWidth);
+    const viewportHeight = finite(viewport?.height, window.innerHeight);
+    const minX = viewportLeft + 4;
+    const minY = viewportTop + 4;
+    const maxX = Math.max(minX, viewportLeft + viewportWidth - width - 4);
+    const maxY = Math.max(minY, viewportTop + viewportHeight - height - 4);
+    if (!Number.isFinite(state.dockX)) state.dockX = viewportLeft + 8;
+    if (!Number.isFinite(state.dockY)) state.dockY = Math.max(minY, viewportTop + viewportHeight - height - 8);
+    state.dockX = clamp(state.dockX, minX, maxX);
+    state.dockY = clamp(state.dockY, minY, maxY);
     dock.style.left = `${state.dockX}px`;
     dock.style.top = `${state.dockY}px`;
     dock.style.bottom = 'auto';
@@ -4785,11 +5643,32 @@
       window.addEventListener('pointerup', finish, { capture: true, passive: false });
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
     }, { passive: false });
+    const keyMove = event => {
+      if (handle.id === 'compactGrip' && (event.key === 'Enter' || event.key === ' ')) {
+        event.preventDefault();
+        setCompact(false);
+        byId('tab-workflow').focus({ preventScroll: true });
+        return;
+      }
+      const amount = event.shiftKey ? 24 : 8;
+      const delta = {
+        ArrowLeft: [-amount, 0], ArrowRight: [amount, 0], ArrowUp: [0, -amount], ArrowDown: [0, amount]
+      }[event.key];
+      if (!delta) return;
+      event.preventDefault();
+      const rect = dock.getBoundingClientRect();
+      state.dockX = rect.left + delta[0];
+      state.dockY = rect.top + delta[1];
+      positionDock();
+      saveLegacyState();
+    };
+    handle.addEventListener('keydown', keyMove);
     addCleanup(() => {
       if (drag.active) releaseDragLock(null, handle);
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', finish, true);
+      handle.removeEventListener('keydown', keyMove);
     });
   }
 
@@ -4802,10 +5681,19 @@
 
   async function loadUrlFromBar() {
     const raw = String(urlInput.value || '').trim();
-    if (!raw) return;
+    if (!raw) {
+      urlInput.setAttribute('aria-invalid', 'true');
+      urlInput.focus();
+      return toast('URLを入力してください');
+    }
     let destination;
     try { destination = /^https?:/i.test(raw) ? new URL(raw).href : new URL(raw, currentFrameUrl() || location.href).href; }
-    catch { return toast('URLが不正です'); }
+    catch {
+      urlInput.setAttribute('aria-invalid', 'true');
+      urlInput.focus();
+      return toast('URLの形式を確認してください');
+    }
+    urlInput.removeAttribute('aria-invalid');
     urlInput.value = destination;
     saveLegacyState();
     setStatus('読込中');
@@ -4828,6 +5716,7 @@
     if (state.recording) finishLegacyRecording({ apply: false });
     clearTimeout(state.toastTimer);
     clearTimeout(state.autosaveTimer);
+    if (state.announceFrame) cancelAnimationFrame(state.announceFrame);
     clearLegacyMarkers();
     for (const callback of cleanup) {
       try { callback(); } catch {}
@@ -4839,6 +5728,14 @@
       iframe.src = 'about:blank';
     } catch {}
     root.remove();
+    if (backgroundBody) {
+      backgroundBody.inert = backgroundWasInert;
+      if (backgroundAriaHidden == null) backgroundBody.removeAttribute('aria-hidden');
+      else backgroundBody.setAttribute('aria-hidden', backgroundAriaHidden);
+    }
+    if (!backgroundWasInert && focusBeforeInstall?.isConnected) {
+      requestAnimationFrame(() => focusBeforeInstall.focus?.({ preventScroll: true }));
+    }
     if (window[GLOBAL_KEY]?.destroy === destroy) delete window[GLOBAL_KEY];
   }
 
@@ -4867,9 +5764,42 @@
       mainTabs[nextIndex].focus();
     });
   });
-  byId('workflowErrorRetry').addEventListener('click', () => { clearWorkflowError(); startWorkflow(); });
+  byId('workflowErrorRetry').addEventListener('click', () => {
+    const hadFocus = ui.error.contains(shadow.activeElement);
+    clearWorkflowError({ restoreFocus: false });
+    startWorkflow();
+    if (hadFocus) {
+      requestAnimationFrame(() => (state.running ? ui.stopWorkflow : ui.runWorkflow).focus({ preventScroll: true }));
+    }
+  });
   byId('workflowErrorLogs').addEventListener('click', () => setPage('logs'));
   byId('workflowErrorDismiss').addEventListener('click', clearWorkflowError);
+  ui.paletteSearch.addEventListener('input', () => {
+    state.paletteQuery = ui.paletteSearch.value;
+    renderPalette();
+  });
+  ui.paletteSearch.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !ui.paletteSearch.value) return;
+    event.stopPropagation();
+    ui.paletteSearch.value = '';
+    state.paletteQuery = '';
+    renderPalette();
+  });
+  shadow.querySelectorAll('.paletteFilter').forEach(button => {
+    button.addEventListener('click', () => {
+      state.paletteCategory = button.dataset.category;
+      shadow.querySelectorAll('.paletteFilter').forEach(candidate => {
+        candidate.setAttribute('aria-pressed', String(candidate === button));
+      });
+      renderPalette();
+    });
+  });
+  ui.clearInsertion.addEventListener('click', () => {
+    resetInsertion({ notify: true });
+    requestAnimationFrame(() => ui.paletteSearch.focus({ preventScroll: true }));
+  });
+  byId('expandAllBlocks').addEventListener('click', () => setAllBlocksCollapsed(false));
+  byId('collapseAllBlocks').addEventListener('click', () => setAllBlocksCollapsed(true));
 
   ui.workflowSelect.addEventListener('change', () => selectWorkflow(ui.workflowSelect.value));
   ui.workflowName.addEventListener('change', renameCurrentWorkflow);
@@ -4902,6 +5832,8 @@
   byId('legacyAddNavigate').addEventListener('click', () => addLegacyAction('navigate'));
   byId('legacyAddWait').addEventListener('click', () => addLegacyAction('wait'));
   byId('legacyRecord').addEventListener('click', () => state.recording ? finishLegacyRecording({ apply: true }) : startLegacyRecording());
+  byId('recordFinish').addEventListener('click', () => finishLegacyRecording({ apply: true }));
+  byId('recordCancel').addEventListener('click', () => finishLegacyRecording({ apply: false }));
   ui.legacyRun.addEventListener('click', startLegacy);
   ui.legacyStop.addEventListener('click', () => stopLegacy());
   for (const input of [ui.legacyCount, ui.legacyJitter, ui.legacyPositionJitter]) input.addEventListener('change', () => {
@@ -4961,6 +5893,16 @@
   installDockDrag(byId('compactGrip'));
 
   shadow.addEventListener('keydown', event => {
+    if (state.recording && event.key === 'Tab') {
+      const controls = [byId('recordCancel'), byId('recordFinish')];
+      const current = controls.indexOf(shadow.activeElement);
+      const next = event.shiftKey
+        ? controls[(current <= 0 ? controls.length : current) - 1]
+        : controls[(current + 1) % controls.length];
+      event.preventDefault();
+      next.focus();
+      return;
+    }
     if (event.key === 'Escape') {
       if (state.recording) finishLegacyRecording({ apply: false });
       else stopEverything('Escape');
@@ -4972,6 +5914,10 @@
     }
   });
 
+  if (backgroundBody) {
+    backgroundBody.inert = true;
+    backgroundBody.setAttribute('aria-hidden', 'true');
+  }
   document.documentElement.append(root);
   stopRuntimeTelemetry(window);
   loadWorkflowStore();
@@ -4983,10 +5929,14 @@
   renderLegacy();
   renderLogs();
   syncRunControls();
+  byId('workflowSettingsPanel').open = !narrowScreen;
   setPage('workflow');
   setBrowserHidden(state.legacy.browserHidden || narrowScreen);
   setCompact(state.legacy.compact || narrowScreen);
-  requestAnimationFrame(positionDock);
+  requestAnimationFrame(() => {
+    positionDock();
+    (dock.classList.contains('compact') ? byId('compactGrip') : byId('tab-workflow')).focus({ preventScroll: true });
+  });
   const initialUrl = normalizeInitialUrl();
   urlInput.value = initialUrl;
   iframe.src = initialUrl;
