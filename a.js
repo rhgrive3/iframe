@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 38;
+  const APP_VERSION = 39;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -385,7 +385,8 @@
   ]);
 
   const BLOCK_DEFINITIONS = Object.freeze({
-    gbfAssistSelect: { category: 'gbf', label: '救援を評価して参加する', description: 'HPと人数を評価し、例外・サポーター・編成確認まで処理' },
+    gbfAssistSelect: { category: 'gbf', label: '救援を評価して参加する（HP以上）', description: '設定HP以上と人数を評価し、例外・サポーター・編成確認まで処理' },
+    gbfAssistSelectBelow: { category: 'gbf', label: '救援を評価して参加する（HP以下）', description: '設定HP以下と人数を評価し、例外・サポーター・編成確認まで処理' },
     gbfSupporterAuto: { category: 'gbf', label: 'サポーターを自動選択する', description: 'ゲーム側の自動選択ボタンをtap' },
     gbfSupporterConditional: { category: 'gbf', label: 'サポーターを条件選択する', description: '第1〜第3候補と最高レベルフォールバック' },
     gbfDeckConfirm: { category: 'gbf', label: '編成確認OKを押す', description: '前面エラーを優先して編成開始を確認' },
@@ -424,6 +425,8 @@
     switch (type) {
       case 'gbfAssistSelect':
         return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
+      case 'gbfAssistSelectBelow':
+        return { maximumHp: 10, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
       case 'gbfSupporterAuto':
         return { timeoutSec: 15 };
       case 'gbfSupporterConditional':
@@ -515,6 +518,17 @@
       case 'gbfAssistSelect':
         block.config = {
           minimumHp: clamp(finite(config.minimumHp, 50), 0, 100),
+          baseDelaySec: clamp(finite(config.baseDelaySec, 0.6), 0, 600),
+          jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
+          timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
+          maxAttempts: clamp(int(config.maxAttempts, 10000), 1, 100000),
+          assistSlots: normalizeAssistSlots(config.assistSlots),
+          supporterCandidates: normalizeCandidates(config.supporterCandidates)
+        };
+        break;
+      case 'gbfAssistSelectBelow':
+        block.config = {
+          maximumHp: clamp(finite(config.maximumHp, 10), 0, 100),
           baseDelaySec: clamp(finite(config.baseDelaySec, 0.6), 0, 600),
           jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
           timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
@@ -711,7 +725,8 @@
   }
 
   const TEMPLATES = Object.freeze([
-    ['gbf-assist', 'グラブル：救援を評価して参加', () => [createBlock('gbfAssistSelect')]],
+    ['gbf-assist', 'グラブル：救援を評価して参加（HP以上）', () => [createBlock('gbfAssistSelect')]],
+    ['gbf-assist-below', 'グラブル：救援を評価して参加（HP以下）', () => [createBlock('gbfAssistSelectBelow')]],
     ['gbf-unclaimed', 'グラブル：未確認バトルをすべて確認', () => [createBlock('gbfUnclaimedAll')]],
     ['gbf-supporter', 'グラブル：サポーター条件選択', () => [createBlock('gbfSupporterConditional')]],
     ['gbf-fullauto', 'グラブル：フルオートをON', () => [createBlock('gbfEnsureFullAuto')]],
@@ -979,7 +994,9 @@
     ));
     switch (block.type) {
       case 'gbfAssistSelect':
-        addNumber('最低残HP（%）', 'minimumHp', 0, 100, 0.1);
+      case 'gbfAssistSelectBelow': {
+        const below = block.type === 'gbfAssistSelectBelow';
+        addNumber(below ? '最大残HP（%）' : '最低残HP（%）', below ? 'maximumHp' : 'minimumHp', 0, 100, 0.1);
         addNumber('更新基準時間（秒）', 'baseDelaySec', 0, 600, 0.1);
         addNumber('更新ずれ時間 ±秒', 'jitterSec', 0, 600, 0.1);
         addNumber('状態待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
@@ -988,6 +1005,7 @@
         renderAssistSlots(block, container);
         renderCandidates(block, container);
         return;
+      }
       case 'gbfSupporterConditional':
         addNumber('候補待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         container.append(grid);
@@ -2506,10 +2524,10 @@
     };
   }
 
-  function rankAssistRows(rows, minimumHp = 50) {
+  function rankAssistRows(rows, hpThreshold = 50, comparison = 'atLeast') {
     return [...rows].map(parseAssistRow).filter(item =>
       Number.isFinite(item.hp)
-      && item.hp >= minimumHp
+      && (comparison === 'atMost' ? item.hp <= hpThreshold : item.hp >= hpThreshold)
       && Number.isInteger(item.currentPeople)
       && item.currentPeople > 0
     ).sort((a, b) => {
@@ -3243,9 +3261,10 @@
     }, context);
   }
 
-  async function assistSelectFullFlow(config, context) {
+  async function assistSelectFullFlow(config, context, hpComparison = 'atLeast') {
     const { signal } = context;
     const refreshConfig = { baseDelaySec: config.baseDelaySec, jitterSec: config.jitterSec, timeoutSec: config.timeoutSec };
+    const hpThreshold = hpComparison === 'atMost' ? config.maximumHp : config.minimumHp;
     const selectedSlots = normalizeAssistSlots(config.assistSlots);
     const cyclesAssistSlots = selectedSlots.length > 1;
     let slotCursor = 0;
@@ -3270,7 +3289,7 @@
       const doc = frameDocument();
       assertNoUnknownPopup(doc);
       const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
-      const ranked = rankAssistRows(rows, config.minimumHp);
+      const ranked = rankAssistRows(rows, hpThreshold, hpComparison);
       if (cyclesAssistSlots && !selectedSlots.includes(activeAssistSlot(doc))) {
         const slot = selectedSlots[slotCursor % selectedSlots.length];
         slotCursor = (slotCursor + 1) % selectedSlots.length;
@@ -3477,7 +3496,10 @@
     try {
       switch (block.type) {
         case 'gbfAssistSelect':
-          await assistSelectFullFlow(block.config, blockContext);
+          await assistSelectFullFlow(block.config, blockContext, 'atLeast');
+          break;
+        case 'gbfAssistSelectBelow':
+          await assistSelectFullFlow(block.config, blockContext, 'atMost');
           break;
         case 'gbfSupporterAuto': {
           const result = await selectSupporterAuto(block.config, blockContext);

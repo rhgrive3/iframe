@@ -217,3 +217,16 @@ test('narrow phones launch compact with a reduced editor footprint', () => {
   assert.ok(source.includes('button{min-height:40px}'));
   assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
 });
+
+test('assist HP threshold blocks use inclusive above and below comparisons', () => {
+  assert.ok(source.includes("gbfAssistSelectBelow: { category: 'gbf'"));
+  assert.ok(source.includes('maximumHp: 10'));
+  const rank = source.slice(source.indexOf('function rankAssistRows'), source.indexOf('function findAssistRowByRaidId'));
+  assert.ok(rank.includes("comparison === 'atMost'"));
+  assert.ok(rank.includes('item.hp <= hpThreshold'));
+  assert.ok(rank.includes('item.hp >= hpThreshold'));
+  const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
+  assert.ok(flow.includes("hpComparison === 'atMost' ? config.maximumHp : config.minimumHp"));
+  const execute = source.slice(source.indexOf('async function executeWorkflowBlock'), source.indexOf('async function runWorkflow'));
+  assert.ok(execute.includes("assistSelectFullFlow(block.config, blockContext, 'atMost')"));
+});
