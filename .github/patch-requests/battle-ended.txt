@@ -1,1 +1,2 @@
 Apply the battle-ended workflow condition patch.
+Retriggered before the battle performance settings patch.
