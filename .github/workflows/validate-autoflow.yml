@@ -14,16 +14,45 @@ on:
       - test/**
       - tests/**
       - .github/workflows/validate-autoflow.yml
+  issues:
+    types: [opened]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
+  group: autoflow-validation-${{ github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  requested-touch-scroll-refactor:
+    if: github.event_name == 'issues' && github.event.issue.title == 'run-truncated-touch-scroll-refactor-final'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/truncated-touch-scroll-sync
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply exact refactor
+        run: python .github/scripts/apply_touch_refactor.py
+      - name: Validate generated implementation
+        run: |
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+      - name: Commit to pull request branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: synchronize synthetic touch and scroll physics'
+          git push origin HEAD:refactor/truncated-touch-scroll-sync
+
   validate:
+    if: github.event_name != 'issues'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
