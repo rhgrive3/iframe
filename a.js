@@ -2439,8 +2439,14 @@
   function turnSignature(doc = frameDocument()) {
     const turn = doc.querySelector(SELECTORS.turn);
     if (!turn) return '';
-    const classes = Array.from(turn.children, child => child.className || '').join(',');
-    return `${turn.textContent || ''}|${classes}`;
+    const nodes = Array.from(turn.children).flatMap(child => [child, ...child.querySelectorAll('*')]);
+    const structure = nodes.map(node => {
+      const attributes = Array.from(node.attributes, attribute => `${attribute.name}=${attribute.value}`)
+        .sort()
+        .join(',');
+      return `${node.tagName}:${attributes}`;
+    }).join('|');
+    return `${turn.textContent || ''}|${structure}`;
   }
 
   function attackSnapshot(doc = frameDocument()) {
