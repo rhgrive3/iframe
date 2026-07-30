@@ -280,7 +280,7 @@
     return;
   }
 
-  const APP_VERSION = 46;
+  const APP_VERSION = 47;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1231,9 +1231,45 @@
   const dragLock = { active: false, pointerId: null, owner: null, restore: null };
 
 
+  function bootstrapBattlePerformanceFrameRuntime(win) {
+    if (!win || win === window) return null;
+    try {
+      if (new URL(win.location.href).origin !== location.origin) return null;
+      let runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
+      if (!runtime?.setEnabled) {
+        const bootstrap = win.Function(
+          'BATTLE_PERFORMANCE_STORAGE_KEY',
+          'BATTLE_PERFORMANCE_MESSAGE_TYPE',
+          'BATTLE_PERFORMANCE_RUNTIME_KEY',
+          'BATTLE_PERFORMANCE_STYLE_ID',
+          'BATTLE_PERFORMANCE_TRANSPARENT_IMAGE',
+          `
+            const readBattlePerformanceSetting = ${readBattlePerformanceSetting.toString()};
+            const installBattlePerformanceChildRuntime = ${installBattlePerformanceChildRuntime.toString()};
+            installBattlePerformanceChildRuntime();
+          `
+        );
+        bootstrap(
+          BATTLE_PERFORMANCE_STORAGE_KEY,
+          BATTLE_PERFORMANCE_MESSAGE_TYPE,
+          BATTLE_PERFORMANCE_RUNTIME_KEY,
+          BATTLE_PERFORMANCE_STYLE_ID,
+          BATTLE_PERFORMANCE_TRANSPARENT_IMAGE
+        );
+        runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
+      }
+      runtime?.setEnabled(state.battlePerformanceEnabled);
+      return runtime || null;
+    } catch {
+      return null;
+    }
+  }
+
   function syncBattlePerformanceFrame() {
     try {
-      iframe.contentWindow?.postMessage({
+      const win = iframe.contentWindow;
+      bootstrapBattlePerformanceFrameRuntime(win);
+      win?.postMessage({
         type: BATTLE_PERFORMANCE_MESSAGE_TYPE,
         enabled: state.battlePerformanceEnabled
       }, location.origin);

@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 46'));
+  assert.ok(source.includes('const APP_VERSION = 47'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -313,4 +313,15 @@ test('battle performance child runtime preserves logic while suppressing heavy m
   assert.ok(child.includes("canvas.id === 'canvas'"));
   assert.ok(!child.includes('Ticker.removeAllEventListeners'));
   assert.ok(!child.includes('Stage.update ='));
+});
+
+
+test('battle performance mode bootstraps into a same-origin iframe when only the controller was injected', () => {
+  assert.ok(source.includes('function bootstrapBattlePerformanceFrameRuntime(win)'));
+  assert.ok(source.includes('const bootstrap = win.Function('));
+  assert.ok(source.includes('readBattlePerformanceSetting.toString()'));
+  assert.ok(source.includes('installBattlePerformanceChildRuntime.toString()'));
+  const sync = source.slice(source.indexOf('function syncBattlePerformanceFrame'), source.indexOf('function setBattlePerformanceEnabled'));
+  assert.ok(sync.includes('bootstrapBattlePerformanceFrameRuntime(win);'));
+  assert.ok(sync.indexOf('bootstrapBattlePerformanceFrameRuntime(win);') < sync.indexOf('postMessage'));
 });
