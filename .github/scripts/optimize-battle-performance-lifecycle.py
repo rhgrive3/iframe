@@ -141,7 +141,7 @@ test('battle performance polling only runs while the persistent setting is enabl
   assert.ok(child.includes('function startPoll()'));
   assert.ok(child.includes('function stopPoll()'));
   assert.ok(child.includes('if (pollTimer != null) return;'));
-  assert.ok(child.includes('window.addEventListener(\'pagehide\', stopPoll, { once: true })'));
+  assert.ok(child.includes('window.addEventListener(\\'pagehide\\', stopPoll, { once: true })'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
   assert.ok(enabled.includes('startPoll();'));
   assert.ok(enabled.includes('stopPoll();'));
