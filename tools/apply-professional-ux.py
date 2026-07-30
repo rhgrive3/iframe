@@ -1,0 +1,421 @@
+from pathlib import Path
+
+path = Path('a.js')
+source = path.read_text(encoding='utf-8')
+
+
+def replace_once(old: str, new: str, label: str) -> None:
+    global source
+    count = source.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected exactly one match, found {count}')
+    source = source.replace(old, new, 1)
+
+
+replace_once('  const APP_VERSION = 38;', '  const APP_VERSION = 39;', 'version')
+
+replace_once(
+    "      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}",
+    "      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.45)}",
+    'disabled button styling',
+)
+
+extra_css = """      #dock.is-running{border-color:rgba(56,207,135,.52)}
+      .title small{display:flex;align-items:center;gap:5px;min-width:0}.title small::before{content:'';flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}.title small[data-tone=running]::before{background:var(--green);box-shadow:0 0 0 3px rgba(56,207,135,.14)}.title small[data-tone=success]::before{background:var(--green)}.title small[data-tone=warn]::before{background:var(--amber)}.title small[data-tone=error]::before{background:var(--red)}
+      .mainTab{color:var(--muted);border-color:transparent}.mainTab[aria-selected=true]{color:var(--text)}
+      .saveState{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.saveState::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted)}.saveState[data-state=saving]::before{background:var(--amber)}.saveState[data-state=saved]::before{background:var(--green)}.saveState[data-state=error]{color:#ffc1c5}.saveState[data-state=error]::before{background:var(--red)}
+      .errorMessage{font-weight:720;overflow-wrap:anywhere}.errorActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:9px}.errorActions button{min-height:38px;padding:6px;font-size:11px}.errorActions .primary{background:var(--accent)}
+      .compactOnly #compactRun.is-stop{background:var(--red);color:#fff}
+      @media(prefers-reduced-motion:reduce){button:not(#dockGrip):not(#compactGrip):active{transform:none}*{scroll-behavior:auto!important}}
+"""
+replace_once(
+    '      @media(max-width:620px){',
+    extra_css + '      @media(max-width:620px){',
+    'professional UX CSS',
+)
+
+replace_once(
+    '<div id="browserBar"><button id="backFrame" aria-label="戻る">←</button><button id="forwardFrame" aria-label="進む">→</button><button id="reloadFrame" aria-label="再読込">↻</button><input id="urlInput" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す">⌃</button></div>',
+    '<div id="browserBar" role="search" aria-label="iframe URL操作"><button id="backFrame" aria-label="戻る" title="戻る">←</button><button id="forwardFrame" aria-label="進む" title="進む">→</button><button id="reloadFrame" aria-label="再読込" title="再読込">↻</button><input id="urlInput" aria-label="表示するURL" placeholder="https://..." inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す" title="URLバーを隠す">⌃</button></div>',
+    'browser bar semantics',
+)
+replace_once(
+    '<div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く"></button><button id="compactRun" aria-label="実行">▶</button></div>',
+    '<div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く" aria-expanded="false" title="メニューを開く・移動"></button><button id="compactRun" aria-label="実行" title="実行">▶</button></div>',
+    'compact controls',
+)
+replace_once(
+    '<small id="statusText">準備完了</small>',
+    '<small id="statusText" role="status" aria-live="polite" data-tone="success">準備完了</small>',
+    'status live region',
+)
+replace_once(
+    '<div class="fullOnly" id="mainTabs"><button class="mainTab active" data-page="workflow">ワークフロー</button><button class="mainTab" data-page="legacy">旧マクロ</button><button class="mainTab" data-page="logs">ログ</button></div>',
+    '<div class="fullOnly" id="mainTabs" role="tablist" aria-label="操作モード"><button id="tab-workflow" class="mainTab active" role="tab" aria-selected="true" aria-controls="page-workflow" data-page="workflow">ワークフロー</button><button id="tab-legacy" class="mainTab" role="tab" aria-selected="false" aria-controls="page-legacy" tabindex="-1" data-page="legacy">旧マクロ</button><button id="tab-logs" class="mainTab" role="tab" aria-selected="false" aria-controls="page-logs" tabindex="-1" data-page="logs">ログ</button></div>',
+    'tab semantics',
+)
+replace_once(
+    '<section id="page-workflow" class="page active">',
+    '<section id="page-workflow" class="page active" role="tabpanel" aria-labelledby="tab-workflow">',
+    'workflow tabpanel',
+)
+replace_once(
+    '<section id="page-legacy" class="page">',
+    '<section id="page-legacy" class="page" role="tabpanel" aria-labelledby="tab-legacy" hidden>',
+    'legacy tabpanel',
+)
+replace_once(
+    '<section id="page-logs" class="page">',
+    '<section id="page-logs" class="page" role="tabpanel" aria-labelledby="tab-logs" hidden>',
+    'logs tabpanel',
+)
+replace_once(
+    '<div id="workflowError" class="errorBox"></div>',
+    '<div id="workflowError" class="errorBox" role="alert" aria-live="assertive" tabindex="-1"><div id="workflowErrorMessage" class="errorMessage"></div><div class="errorActions"><button id="workflowErrorRetry" class="primary">再実行</button><button id="workflowErrorLogs">ログを見る</button><button id="workflowErrorDismiss">閉じる</button></div></div>',
+    'recoverable workflow error',
+)
+replace_once(
+    '<span id="autosaveState" class="hint">保存済み</span>',
+    '<span id="autosaveState" class="hint saveState" role="status" aria-live="polite" data-state="saved">保存済み</span>',
+    'autosave state',
+)
+replace_once(
+    '<div id="runBar"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>',
+    '<div id="runBar" aria-label="ワークフロー実行操作"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>',
+    'run bar semantics',
+)
+
+replace_once(
+    "    status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'),",
+    "    status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'), errorMessage: byId('workflowErrorMessage'),",
+    'UI references',
+)
+
+replace_once(
+    """  function setStatus(message) {
+    const next = String(message ?? '');
+    if (lightweightMode && (state.running || state.legacyRunning) && !/(?:エラー|停止|完了)/.test(next)) return;
+    if (ui.status.textContent !== next) ui.status.textContent = next;
+  }
+""",
+    """  function setStatus(message) {
+    const next = String(message ?? '');
+    if (lightweightMode && (state.running || state.legacyRunning) && !/(?:エラー|停止|完了)/.test(next)) return;
+    if (ui.status.textContent !== next) ui.status.textContent = next;
+    const tone = /(?:エラー|失敗)/.test(next)
+      ? 'error'
+      : /停止/.test(next)
+        ? 'warn'
+        : /(?:完了|準備完了|保存済み)/.test(next)
+          ? 'success'
+          : (state.running || state.legacyRunning)
+            ? 'running'
+            : 'idle';
+    ui.status.dataset.tone = tone;
+    ui.status.title = next;
+  }
+""",
+    'status tone',
+)
+
+replace_once(
+    """  function showWorkflowError(error, block = null) {
+    const workflow = currentWorkflow();
+    const screen = safeDetectScreenState();
+    const message = error?.message || String(error);
+    ui.error.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
+    ui.error.classList.add('show');
+    appendLog(message, 'error', block ? blockLabel(block.type) : '実行');
+  }
+
+  function clearWorkflowError() {
+    ui.error.classList.remove('show');
+    ui.error.textContent = '';
+  }
+""",
+    """  function showWorkflowError(error, block = null) {
+    const workflow = currentWorkflow();
+    const screen = safeDetectScreenState();
+    const message = error?.message || String(error);
+    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
+    ui.error.classList.add('show');
+    appendLog(message, 'error', block ? blockLabel(block.type) : '実行');
+    setPage('workflow');
+    requestAnimationFrame(() => {
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      ui.error.scrollIntoView({ block: 'start', behavior });
+      ui.error.focus({ preventScroll: true });
+    });
+  }
+
+  function clearWorkflowError() {
+    ui.error.classList.remove('show');
+    ui.errorMessage.textContent = '';
+  }
+""",
+    'error recovery UI',
+)
+
+replace_once(
+    """  function saveWorkflowStore({ immediate = false } = {}) {
+    ui.autosave.textContent = '保存中';
+""",
+    """  function setAutosaveStatus(status) {
+    const labels = { saving: '保存中', saved: '保存済み', error: '保存失敗' };
+    ui.autosave.textContent = labels[status] || labels.saved;
+    ui.autosave.dataset.state = status;
+  }
+
+  function saveWorkflowStore({ immediate = false } = {}) {
+    setAutosaveStatus('saving');
+""",
+    'autosave helper',
+)
+replace_once("        ui.autosave.textContent = '保存済み';", "        setAutosaveStatus('saved');", 'autosave success')
+replace_once("        ui.autosave.textContent = '保存失敗';", "        setAutosaveStatus('error');", 'autosave failure')
+
+replace_once(
+    """  function setPage(page) {
+    state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
+    shadow.querySelectorAll('.mainTab').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
+    shadow.querySelectorAll('.page').forEach(section => section.classList.toggle('active', section.id === `page-${state.page}`));
+    if (state.page === 'logs') renderLogs();
+    renderLegacyMarkers();
+  }
+""",
+    """  function setPage(page) {
+    state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
+    shadow.querySelectorAll('.mainTab').forEach(button => {
+      const active = button.dataset.page === state.page;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    shadow.querySelectorAll('.page').forEach(section => {
+      const active = section.id === `page-${state.page}`;
+      section.classList.toggle('active', active);
+      section.hidden = !active;
+    });
+    if (state.page === 'logs') renderLogs();
+    renderLegacyMarkers();
+  }
+""",
+    'accessible page state',
+)
+
+run_state_helpers = """  const RUN_LOCKED_CONTROL_IDS = Object.freeze([
+    'workflowSelect', 'workflowName', 'newWorkflow', 'renameWorkflow', 'duplicateWorkflow', 'deleteWorkflow',
+    'importWorkflow', 'templateSelect', 'replaceTemplate', 'appendTemplate', 'legacyAddClick', 'legacyAddNavigate',
+    'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
+    'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset'
+  ]);
+
+  function syncRunControls() {
+    const workflowRunning = Boolean(state.running);
+    const legacyRunning = Boolean(state.legacyRunning);
+    const isRunning = workflowRunning || legacyRunning;
+    ui.runWorkflow.disabled = isRunning;
+    ui.stopWorkflow.disabled = !workflowRunning;
+    ui.legacyRun.disabled = isRunning || state.recording || !state.legacy?.actions?.length;
+    ui.legacyStop.disabled = !legacyRunning;
+    ui.workflowLoopMode.disabled = isRunning;
+    ui.workflowLoopCount.disabled = isRunning || Boolean(currentWorkflow()?.loopInfinite);
+    for (const id of RUN_LOCKED_CONTROL_IDS) {
+      const control = byId(id);
+      if (control) control.disabled = isRunning;
+    }
+    const compactRun = byId('compactRun');
+    compactRun.textContent = isRunning ? '■' : '▶';
+    compactRun.classList.toggle('is-stop', isRunning);
+    compactRun.setAttribute('aria-label', isRunning ? '実行を停止' : '実行');
+    compactRun.title = isRunning ? '実行を停止' : '実行';
+    dock.classList.toggle('is-running', isRunning);
+    dock.setAttribute('aria-busy', String(isRunning));
+    if (isRunning) ui.status.dataset.tone = 'running';
+  }
+
+"""
+replace_once(
+    '  function enterRuntimeCompactMode() {',
+    run_state_helpers + '  function enterRuntimeCompactMode() {',
+    'runtime control synchronizer',
+)
+
+replace_once(
+    """    dock.classList.add('compact');
+    byId('toggleCompact').textContent = '□';
+    requestAnimationFrame(positionDock);
+""",
+    """    dock.classList.add('compact');
+    byId('toggleCompact').textContent = '□';
+    byId('toggleCompact').setAttribute('aria-expanded', 'false');
+    byId('compactGrip').setAttribute('aria-expanded', 'false');
+    requestAnimationFrame(positionDock);
+""",
+    'runtime compact accessibility',
+)
+replace_once(
+    """    dock.classList.remove('compact');
+    byId('toggleCompact').textContent = '—';
+    requestAnimationFrame(positionDock);
+""",
+    """    dock.classList.remove('compact');
+    byId('toggleCompact').textContent = '—';
+    byId('toggleCompact').setAttribute('aria-expanded', 'true');
+    byId('compactGrip').setAttribute('aria-expanded', 'true');
+    requestAnimationFrame(positionDock);
+""",
+    'runtime expand accessibility',
+)
+replace_once(
+    """  function setCompact(compact) {
+    dock.classList.toggle('compact', compact);
+    byId('toggleCompact').textContent = compact ? '□' : '—';
+    requestAnimationFrame(positionDock);
+    saveLegacyState();
+  }
+""",
+    """  function setCompact(compact) {
+    dock.classList.toggle('compact', compact);
+    byId('toggleCompact').textContent = compact ? '□' : '—';
+    byId('toggleCompact').setAttribute('aria-expanded', String(!compact));
+    byId('compactGrip').setAttribute('aria-expanded', String(!compact));
+    requestAnimationFrame(positionDock);
+    saveLegacyState();
+  }
+""",
+    'compact state accessibility',
+)
+
+replace_once(
+    """    state.running = context;
+    const restoreExpandedDock = enterRuntimeCompactMode();
+    ui.runWorkflow.disabled = true;
+    ui.stopWorkflow.disabled = false;
+""",
+    """    state.running = context;
+    const restoreExpandedDock = enterRuntimeCompactMode();
+    syncRunControls();
+""",
+    'workflow start controls',
+)
+replace_once(
+    """      state.blockProgress.clear();
+      ui.runWorkflow.disabled = false;
+      ui.stopWorkflow.disabled = true;
+      renderPalette();
+""",
+    """      state.blockProgress.clear();
+      syncRunControls();
+      renderPalette();
+""",
+    'workflow finish controls',
+)
+replace_once(
+    """    state.legacyRunning = token;
+    const restoreExpandedDock = enterRuntimeCompactMode();
+    ui.legacyRun.disabled = true;
+    ui.legacyStop.disabled = false;
+""",
+    """    state.legacyRunning = token;
+    const restoreExpandedDock = enterRuntimeCompactMode();
+    syncRunControls();
+""",
+    'legacy start controls',
+)
+replace_once(
+    """      leaveRuntimeCompactMode(restoreExpandedDock);
+      ui.legacyRun.disabled = false;
+      ui.legacyStop.disabled = true;
+      renderLegacy();
+""",
+    """      leaveRuntimeCompactMode(restoreExpandedDock);
+      syncRunControls();
+      renderLegacy();
+""",
+    'legacy finish controls',
+)
+replace_once(
+    '    const busy = Boolean(state.legacyRunning || state.recording);',
+    '    const busy = Boolean(state.running || state.legacyRunning || state.recording);',
+    'legacy busy state',
+)
+
+replace_once(
+    """    const template = findTemplate(ui.templateSelect.value);
+    const blocks = template[2]().map(normalizeBlock);
+    if (mode === 'replace') workflow.blocks = blocks;
+""",
+    """    const template = findTemplate(ui.templateSelect.value);
+    if (mode === 'replace' && workflow.blocks.length && !confirm(`現在の${workflow.blocks.length}ブロックを「${template[1]}」で置換しますか？`)) return;
+    const blocks = template[2]().map(normalizeBlock);
+    if (mode === 'replace') workflow.blocks = blocks;
+""",
+    'template replacement confirmation',
+)
+
+replace_once(
+    "  byId('closeApp').addEventListener('click', destroy);",
+    "  byId('closeApp').addEventListener('click', () => { if ((state.running || state.legacyRunning) && !confirm('実行中です。停止して終了しますか？')) return; destroy(); });",
+    'close confirmation',
+)
+replace_once(
+    "  shadow.querySelectorAll('.mainTab').forEach(button => button.addEventListener('click', () => setPage(button.dataset.page)));",
+    """  const mainTabs = Array.from(shadow.querySelectorAll('.mainTab'));
+  mainTabs.forEach((button, index) => {
+    button.addEventListener('click', () => setPage(button.dataset.page));
+    button.addEventListener('keydown', event => {
+      let nextIndex = null;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % mainTabs.length;
+      else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + mainTabs.length) % mainTabs.length;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = mainTabs.length - 1;
+      if (nextIndex == null) return;
+      event.preventDefault();
+      setPage(mainTabs[nextIndex].dataset.page);
+      mainTabs[nextIndex].focus();
+    });
+  });
+  byId('workflowErrorRetry').addEventListener('click', () => { clearWorkflowError(); startWorkflow(); });
+  byId('workflowErrorLogs').addEventListener('click', () => setPage('logs'));
+  byId('workflowErrorDismiss').addEventListener('click', clearWorkflowError);""",
+    'tab keyboard and error actions',
+)
+
+replace_once(
+    """  renderLegacy();
+  renderLogs();
+  setPage('workflow');
+""",
+    """  renderLegacy();
+  renderLogs();
+  syncRunControls();
+  setPage('workflow');
+""",
+    'initial run control state',
+)
+
+path.write_text(source, encoding='utf-8')
+
+test_path = Path('tests/autoflow.static.test.mjs')
+tests = test_path.read_text(encoding='utf-8')
+marker = "test('professional UX exposes truthful runtime and accessible recovery state'"
+if marker not in tests:
+    tests += """
+
+test('professional UX exposes truthful runtime and accessible recovery state', () => {
+  assert.ok(source.includes('const APP_VERSION = 39'));
+  assert.ok(source.includes('function syncRunControls()'));
+  assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
+  assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
+  assert.ok(source.includes("dock.setAttribute('aria-busy', String(isRunning))"));
+  assert.ok(source.includes('role="tablist"'));
+  assert.ok(source.includes('aria-selected="true"'));
+  assert.ok(source.includes("button.setAttribute('aria-selected', String(active))"));
+  assert.ok(source.includes('section.hidden = !active'));
+  assert.ok(source.includes('id="workflowErrorRetry"'));
+  assert.ok(source.includes("setAutosaveStatus('saving')"));
+  assert.ok(source.includes("if (mode === 'replace' && workflow.blocks.length"));
+});
+"""
+    test_path.write_text(tests, encoding='utf-8')
