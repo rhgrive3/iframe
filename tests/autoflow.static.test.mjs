@@ -149,8 +149,12 @@ test('tap-backed state waits share immediate cancellation cleanup', () => {
   assert.ok(!unclaimed.includes('querySelectorAll(SELECTORS.unclaimedRows)'));
 });
 
-test('game-route navigation recreates the iframe browsing context', () => {
-  const helper = source.slice(source.indexOf('function replaceFrame'), source.indexOf('function computedVisible'));
+test('game-route navigation tears down and recreates the iframe browsing context', () => {
+  const helper = source.slice(source.indexOf('function stopRuntimeTelemetry'), source.indexOf('function computedVisible'));
+  assert.ok(helper.includes('async function replaceFrame'));
+  assert.ok(helper.includes('releaseFrameRuntime(previousFrame)'));
+  assert.ok(helper.includes('await blankFrame(previousFrame)'));
+  assert.ok(helper.includes("location.replace('about:blank')"));
   assert.ok(helper.includes('const nextFrame = previousFrame.cloneNode(false)'));
   assert.ok(helper.includes('previousFrame.replaceWith(nextFrame)'));
   assert.ok(helper.includes('iframe = nextFrame'));
@@ -158,9 +162,31 @@ test('game-route navigation recreates the iframe browsing context', () => {
   const routeStart = source.lastIndexOf("case 'iframeRoute'");
   const route = source.slice(routeStart, source.indexOf("case 'iframeReady'", routeStart));
   assert.ok(route.includes('const before = captureFrameState()'));
-  assert.ok(route.includes('replaceFrame(gameRouteUrl(block.config.route))'));
+  assert.ok(route.includes('await replaceFrame(gameRouteUrl(block.config.route))'));
   assert.ok(route.includes('await waitForFrameReady'));
   assert.ok(!route.includes('frameWindow().location.href'));
+});
+
+test('battle-end recovery explicitly releases Granblue graphics and telemetry before recycling', () => {
+  const helper = source.slice(source.indexOf('function stopRuntimeTelemetry'), source.indexOf('function computedVisible'));
+  for (const token of [
+    'stopSessionReplayRecording',
+    'stopSession',
+    'Game?.router?.move',
+    'content_close',
+    'destroyImages',
+    'Ticker?.removeAllEventListeners',
+    'Sound?.reset',
+    'WebAudioPlugin?.reset',
+    'WEBGL_lose_context',
+    'canvas.width = 0',
+    "querySelectorAll?.('audio,video')"
+  ]) assert.ok(helper.includes(token), `missing teardown token: ${token}`);
+
+  const restart = source.slice(source.indexOf('async function restartWorkflowAfterBattleEnd'), source.indexOf('async function ensureFullAuto'));
+  assert.ok(restart.includes('await replaceFrame(targetUrl)'));
+  assert.ok(restart.includes('const before = captureFrameState()'));
+  assert.ok(!restart.includes('frameWindow().location.href = targetUrl'));
 });
 
 test('lightweight execution keeps only error logs and removes continuous overlay compositing', () => {

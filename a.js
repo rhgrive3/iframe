@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 36;
+  const APP_VERSION = 37;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1328,7 +1328,116 @@
     }
   }
 
+  function stopRuntimeTelemetry(win) {
+    try {
+      win?.DD_RUM?.stopSessionReplayRecording?.();
+      win?.DD_RUM?.stopSession?.();
+    } catch {}
+  }
+
+  function releaseCanvasResources(doc) {
+    if (!doc?.querySelectorAll) return;
+    for (const canvas of doc.querySelectorAll('canvas')) {
+      try {
+        const declaredContext = `${canvas.getAttribute('dena-context') || ''} ${canvas.getAttribute('cjs-context') || ''}`.toLowerCase();
+        if (declaredContext.includes('webgl')) {
+          const gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+          gl?.getExtension?.('WEBGL_lose_context')?.loseContext?.();
+        }
+      } catch {}
+      try {
+        canvas.width = 0;
+        canvas.height = 0;
+      } catch {}
+    }
+  }
+
+  function releaseFrameRuntime(frame) {
+    if (!frame) return;
+    try {
+      const win = frame.contentWindow;
+      const doc = frame.contentDocument;
+      stopRuntimeTelemetry(win);
+
+      let routerCleaned = false;
+      try {
+        if (typeof win?.Game?.router?.move === 'function') {
+          win.Game.router.move();
+          routerCleaned = true;
+        }
+      } catch {}
+      if (!routerCleaned) {
+        try { win?.Game?.view?.content_close?.(); } catch {}
+        try { win?.Game?.view?.destroyImages?.(); } catch {}
+      }
+
+      try { win?.Backbone?.history?.stop?.(); } catch {}
+      try { win?.createjs?.Ticker?.removeAllEventListeners?.(); } catch {}
+      try {
+        const ticker = win?.createjs?.Ticker;
+        if (ticker?._timerId != null) {
+          if (ticker._raf) {
+            const cancel = win.cancelAnimationFrame || win.webkitCancelAnimationFrame;
+            cancel?.call(win, ticker._timerId);
+          } else {
+            win.clearTimeout(ticker._timerId);
+          }
+          ticker._timerId = null;
+        }
+      } catch {}
+      try { win?.createjs?.Sound?.stop?.(); } catch {}
+      try { win?.createjs?.Sound?.reset?.(true); } catch {}
+      try { win?.createjs?.WebAudioPlugin?.reset?.(); } catch {}
+
+      releaseCanvasResources(doc);
+      try {
+        for (const media of doc?.querySelectorAll?.('audio,video') || []) {
+          try { media.pause?.(); } catch {}
+          try {
+            media.removeAttribute('src');
+            media.load?.();
+          } catch {}
+        }
+      } catch {}
+      try {
+        if (win?.Game) win.Game.view = null;
+        win.stage = null;
+        win.exportRoot = null;
+        win.cjs = null;
+        win.lib = null;
+        win.images = null;
+      } catch {}
+      try { win?.stop?.(); } catch {}
+    } catch {}
+  }
+
+  function blankFrame(frame) {
+    return new Promise(resolve => {
+      let settled = false;
+      let timer = null;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        frame.removeEventListener('load', finish);
+        resolve();
+      };
+      frame.addEventListener('load', finish);
+      timer = setTimeout(finish, 400);
+      try { frame.contentWindow.location.replace('about:blank'); }
+      catch {
+        try { frame.src = 'about:blank'; }
+        catch { finish(); }
+      }
+    });
+  }
+
   function handleFrameLoad() {
+    const loadedFrame = iframe;
+    stopRuntimeTelemetry(loadedFrame?.contentWindow);
+    setTimeout(() => {
+      if (!state.destroyed && iframe === loadedFrame) stopRuntimeTelemetry(loadedFrame?.contentWindow);
+    }, 1200);
     try {
       urlInput.value = iframe.contentWindow.location.href;
       state.legacy.url = urlInput.value;
@@ -1343,10 +1452,14 @@
     frame.addEventListener('load', handleFrameLoad);
   }
 
-  function replaceFrame(destination) {
+  async function replaceFrame(destination) {
     const targetUrl = String(destination || '').trim();
     if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
     const previousFrame = iframe;
+    previousFrame.removeEventListener('load', handleFrameLoad);
+    releaseFrameRuntime(previousFrame);
+    await blankFrame(previousFrame);
+    await new Promise(resolve => setTimeout(resolve, 0));
     const nextFrame = previousFrame.cloneNode(false);
     nextFrame.removeAttribute('src');
     bindFrameLoad(nextFrame);
@@ -2780,10 +2893,13 @@
     if (alreadyReady) {
       await waitForFrameReady({ signal: context.signal, timeoutMs, expectedScreen, requireChange: false });
     } else {
-      await performFrameOperation(() => { frameWindow().location.href = targetUrl; }, {
+      const before = captureFrameState();
+      await replaceFrame(targetUrl);
+      await waitForFrameReady({
         signal: context.signal,
         timeoutMs,
         expectedScreen,
+        before,
         requireChange: true
       });
     }
@@ -3404,7 +3520,7 @@
           break;
         case 'iframeRoute': {
           const before = captureFrameState();
-          replaceFrame(gameRouteUrl(block.config.route));
+          await replaceFrame(gameRouteUrl(block.config.route));
           await waitForFrameReady({
             signal: context.signal,
             timeoutMs: block.config.timeoutSec * 1000,
@@ -4534,16 +4650,20 @@
     catch { return location.href; }
   }
 
-  function loadUrlFromBar() {
+  async function loadUrlFromBar() {
     const raw = String(urlInput.value || '').trim();
     if (!raw) return;
     let destination;
     try { destination = /^https?:/i.test(raw) ? new URL(raw).href : new URL(raw, currentFrameUrl() || location.href).href; }
     catch { return toast('URLが不正です'); }
     urlInput.value = destination;
-    iframe.src = destination;
     saveLegacyState();
     setStatus('読込中');
+    try {
+      await replaceFrame(destination);
+    } catch (error) {
+      toast(`URL移動失敗: ${error.message}`);
+    }
   }
 
   function stopEverything(reason = '停止') {
@@ -4563,6 +4683,11 @@
       try { callback(); } catch {}
     }
     cleanup.clear();
+    try {
+      iframe.removeEventListener('load', handleFrameLoad);
+      releaseFrameRuntime(iframe);
+      iframe.src = 'about:blank';
+    } catch {}
     root.remove();
     if (window[GLOBAL_KEY]?.destroy === destroy) delete window[GLOBAL_KEY];
   }
@@ -4681,6 +4806,7 @@
   });
 
   document.documentElement.append(root);
+  stopRuntimeTelemetry(window);
   loadWorkflowStore();
   loadLegacyState();
   renderTemplateSelect();
