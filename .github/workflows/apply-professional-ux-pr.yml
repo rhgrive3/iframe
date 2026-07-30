@@ -1,6 +1,11 @@
 name: Apply professional UX patch in PR
 
 on:
+  push:
+    branches:
+      - 'ux/professional-controller'
+    paths:
+      - '.github/workflows/apply-professional-ux-pr.yml'
   pull_request:
     branches:
       - main
@@ -18,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}
+          ref: ux/professional-controller
           fetch-depth: 0
 
       - name: Apply UX patch
@@ -41,4 +46,4 @@ jobs:
           git add a.js tests/autoflow.static.test.mjs
           git rm .github/workflows/apply-professional-ux-pr.yml tools/apply-professional-ux.py
           git commit -m 'feat: professionalize controller UX'
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin HEAD:ux/professional-controller
