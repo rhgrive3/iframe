@@ -148,3 +148,17 @@ test('tap-backed state waits share immediate cancellation cleanup', () => {
   assert.ok(unclaimed.includes('const topRow = doc.querySelector(SELECTORS.unclaimedRows)'));
   assert.ok(!unclaimed.includes('querySelectorAll(SELECTORS.unclaimedRows)'));
 });
+
+test('game-route navigation recreates the iframe browsing context', () => {
+  const helper = source.slice(source.indexOf('function replaceFrame'), source.indexOf('function computedVisible'));
+  assert.ok(helper.includes('const nextFrame = previousFrame.cloneNode(false)'));
+  assert.ok(helper.includes('previousFrame.replaceWith(nextFrame)'));
+  assert.ok(helper.includes('iframe = nextFrame'));
+  assert.ok(helper.includes('bindFrameLoad(nextFrame)'));
+  const routeStart = source.lastIndexOf("case 'iframeRoute'");
+  const route = source.slice(routeStart, source.indexOf("case 'iframeReady'", routeStart));
+  assert.ok(route.includes('const before = captureFrameState()'));
+  assert.ok(route.includes('replaceFrame(gameRouteUrl(block.config.route))'));
+  assert.ok(route.includes('await waitForFrameReady'));
+  assert.ok(!route.includes('frameWindow().location.href'));
+});

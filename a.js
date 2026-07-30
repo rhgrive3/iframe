@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 34;
+  const APP_VERSION = 35;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -148,7 +148,7 @@
   `;
 
   const byId = id => shadow.getElementById(id);
-  const iframe = byId('frame');
+  let iframe = byId('frame');
   const urlInput = byId('urlInput');
   const dock = byId('dock');
   const workflowEditor = byId('workflowEditor');
@@ -1324,6 +1324,35 @@
     } catch {
       return urlInput.value || iframe.src || '';
     }
+  }
+
+  function handleFrameLoad() {
+    try {
+      urlInput.value = iframe.contentWindow.location.href;
+      state.legacy.url = urlInput.value;
+      saveLegacyState();
+      if (!state.running && !state.legacyRunning) setStatus('読込完了');
+    } catch {
+      if (!state.running && !state.legacyRunning) setStatus('読込完了・別オリジン');
+    }
+  }
+
+  function bindFrameLoad(frame) {
+    frame.addEventListener('load', handleFrameLoad);
+  }
+
+  function replaceFrame(destination) {
+    const targetUrl = String(destination || '').trim();
+    if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
+    const previousFrame = iframe;
+    const nextFrame = previousFrame.cloneNode(false);
+    nextFrame.removeAttribute('src');
+    bindFrameLoad(nextFrame);
+    iframe = nextFrame;
+    previousFrame.replaceWith(nextFrame);
+    nextFrame.src = targetUrl;
+    if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = nextFrame;
+    return nextFrame;
   }
 
   function computedVisible(element) {
@@ -3367,14 +3396,18 @@
             requireChange: true
           });
           break;
-        case 'iframeRoute':
-          await performFrameOperation(() => { frameWindow().location.href = gameRouteUrl(block.config.route); }, {
+        case 'iframeRoute': {
+          const before = captureFrameState();
+          replaceFrame(gameRouteUrl(block.config.route));
+          await waitForFrameReady({
             signal: context.signal,
             timeoutMs: block.config.timeoutSec * 1000,
             expectedScreen: block.config.expectedScreen,
+            before,
             requireChange: true
           });
           break;
+        }
         case 'iframeReady':
           await waitForFrameReady({
             signal: context.signal,
@@ -4587,16 +4620,7 @@
     }
   });
 
-  iframe.addEventListener('load', () => {
-    try {
-      urlInput.value = iframe.contentWindow.location.href;
-      state.legacy.url = urlInput.value;
-      saveLegacyState();
-      if (!state.running && !state.legacyRunning) setStatus('読込完了');
-    } catch {
-      if (!state.running && !state.legacyRunning) setStatus('読込完了・別オリジン');
-    }
-  });
+  bindFrameLoad(iframe);
 
   const resizeHandler = () => {
     positionDock();
