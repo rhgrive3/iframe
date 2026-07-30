@@ -217,3 +217,19 @@ test('narrow phones launch compact with a reduced editor footprint', () => {
   assert.ok(source.includes('button{min-height:40px}'));
   assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
 });
+
+
+test('professional UX exposes truthful runtime and accessible recovery state', () => {
+  assert.ok(source.includes('const APP_VERSION = 39'));
+  assert.ok(source.includes('function syncRunControls()'));
+  assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
+  assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
+  assert.ok(source.includes("dock.setAttribute('aria-busy', String(isRunning))"));
+  assert.ok(source.includes('role="tablist"'));
+  assert.ok(source.includes('aria-selected="true"'));
+  assert.ok(source.includes("button.setAttribute('aria-selected', String(active))"));
+  assert.ok(source.includes('section.hidden = !active'));
+  assert.ok(source.includes('id="workflowErrorRetry"'));
+  assert.ok(source.includes("setAutosaveStatus('saving')"));
+  assert.ok(source.includes("if (mode === 'replace' && workflow.blocks.length"));
+});

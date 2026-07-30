@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 38;
+  const APP_VERSION = 39;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -86,7 +86,7 @@
       :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:#12141b;--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
       button,input,select,textarea{font:inherit;color:var(--text)}
       button{min-height:44px;border:1px solid transparent;border-radius:11px;background:var(--surface);font-weight:760;touch-action:manipulation;cursor:pointer}
-      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}
+      button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.42;cursor:not-allowed;filter:saturate(.45)}
       input,select,textarea{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:rgba(0,0,0,.25);font-size:16px;outline:none}
       textarea{min-height:72px;resize:vertical}
       button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #c0c5ff;outline-offset:2px}
@@ -113,34 +113,41 @@
       #toast{position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);display:none;max-width:calc(100vw - 24px);padding:10px 14px;border:1px solid var(--line);border-radius:999px;color:#fff;background:rgba(18,20,27,.97);font-size:12px;box-shadow:0 12px 34px rgba(0,0,0,.4)}#toast.show{display:block}
       .logList{display:grid;gap:5px}.logEntry{display:grid;grid-template-columns:72px 80px minmax(0,1fr);gap:7px;padding:8px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;line-height:1.45}.logEntry.error{color:#ffb7bc}.logEntry.success{color:#a6edc8}.logEntry.warn{color:#f2d29d}.logTime{color:var(--muted);font-variant-numeric:tabular-nums}.errorBox{display:none;margin-bottom:8px;padding:10px;border:1px solid rgba(240,100,109,.38);border-radius:12px;background:rgba(240,100,109,.10);color:#ffc1c5;font-size:11px;line-height:1.5}.errorBox.show{display:block}
       .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
+      #dock.is-running{border-color:rgba(56,207,135,.52)}
+      .title small{display:flex;align-items:center;gap:5px;min-width:0}.title small::before{content:'';flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:var(--muted)}.title small[data-tone=running]::before{background:var(--green);box-shadow:0 0 0 3px rgba(56,207,135,.14)}.title small[data-tone=success]::before{background:var(--green)}.title small[data-tone=warn]::before{background:var(--amber)}.title small[data-tone=error]::before{background:var(--red)}
+      .mainTab{color:var(--muted);border-color:transparent}.mainTab[aria-selected=true]{color:var(--text)}
+      .saveState{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.saveState::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--muted)}.saveState[data-state=saving]::before{background:var(--amber)}.saveState[data-state=saved]::before{background:var(--green)}.saveState[data-state=error]{color:#ffc1c5}.saveState[data-state=error]::before{background:var(--red)}
+      .errorMessage{font-weight:720;overflow-wrap:anywhere}.errorActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:9px}.errorActions button{min-height:38px;padding:6px;font-size:11px}.errorActions .primary{background:var(--accent)}
+      .compactOnly #compactRun.is-stop{background:var(--red);color:#fff}
+      @media(prefers-reduced-motion:reduce){button:not(#dockGrip):not(#compactGrip):active{transform:none}*{scroll-behavior:auto!important}}
       @media(max-width:620px){#browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:36px 36px 36px minmax(70px,1fr) 50px 36px;gap:3px;padding:3px;border-radius:10px}#browserBar button,#browserBar input{height:36px;min-height:36px}#browserBar input{padding:4px 6px;font-size:14px}#dock{left:6px;width:min(390px,calc(100dvw - 18px));height:min(560px,66dvh);max-height:calc(100dvh - 54px);border-radius:12px}#dock.compact{width:104px;height:48px;border-radius:24px}#dockHeader{grid-template-columns:36px minmax(0,1fr) 36px 36px;gap:3px;padding:4px}.title strong{font-size:12px}.title small{font-size:10px}#mainTabs{gap:3px;padding:4px}.page{padding:6px}.card{margin-bottom:6px;padding:7px;border-radius:10px}.cardTitle{margin-bottom:6px}.grid2,.grid3{gap:5px}.toolbar{gap:4px}.toolbar>*{flex-basis:78px}.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.paletteButton{min-height:44px;padding:5px}.blockCard{margin:4px 0;border-radius:10px}.blockHead{grid-template-columns:32px minmax(0,1fr);gap:3px;padding:4px}.blockHead button,.legacyTools button{min-height:36px;height:36px}.blockBody{padding:6px}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:35px;gap:3px}.childArea{margin:0 5px 6px 12px;padding:4px}.logEntry{grid-template-columns:50px 58px minmax(0,1fr);gap:4px;padding:6px;font-size:10px}}
       @media(max-width:430px){#browserBar{grid-template-columns:34px 34px minmax(66px,1fr) 48px 34px}#forwardFrame{display:none}.toolbar>*{flex-basis:72px}}
       @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}button{min-height:40px}input,select,textarea{min-height:40px}.blockHead button,.legacyTools button{min-height:36px;height:36px}}
     </style>
     <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="markerLayer"></div><div id="recordLayer"></div>
-    <div id="browserBar"><button id="backFrame" aria-label="戻る">←</button><button id="forwardFrame" aria-label="進む">→</button><button id="reloadFrame" aria-label="再読込">↻</button><input id="urlInput" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す">⌃</button></div>
+    <div id="browserBar" role="search" aria-label="iframe URL操作"><button id="backFrame" aria-label="戻る" title="戻る">←</button><button id="forwardFrame" aria-label="進む" title="進む">→</button><button id="reloadFrame" aria-label="再読込" title="再読込">↻</button><input id="urlInput" aria-label="表示するURL" placeholder="https://..." inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false"><button id="loadUrl">表示</button><button id="hideBrowser" aria-label="URLバーを隠す" title="URLバーを隠す">⌃</button></div>
     <button id="browserHandle" aria-label="URLバーを表示">⌄</button>
     <div id="dock">
-      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く"></button><button id="compactRun" aria-label="実行">▶</button></div>
-      <div class="fullOnly" id="dockHeader"><button id="dockGrip" aria-label="メニューを移動"></button><div class="title"><strong>Scratch風オートフロー</strong><small id="statusText">準備完了</small></div><button id="toggleCompact" aria-label="小さくする">—</button><button id="closeApp" aria-label="終了">×</button></div>
-      <div class="fullOnly" id="mainTabs"><button class="mainTab active" data-page="workflow">ワークフロー</button><button class="mainTab" data-page="legacy">旧マクロ</button><button class="mainTab" data-page="logs">ログ</button></div>
+      <div class="compactOnly"><button id="compactGrip" aria-label="メニューを開く" aria-expanded="false" title="メニューを開く・移動"></button><button id="compactRun" aria-label="実行" title="実行">▶</button></div>
+      <div class="fullOnly" id="dockHeader"><button id="dockGrip" aria-label="メニューを移動"></button><div class="title"><strong>Scratch風オートフロー</strong><small id="statusText" role="status" aria-live="polite" data-tone="success">準備完了</small></div><button id="toggleCompact" aria-label="小さくする">—</button><button id="closeApp" aria-label="終了">×</button></div>
+      <div class="fullOnly" id="mainTabs" role="tablist" aria-label="操作モード"><button id="tab-workflow" class="mainTab active" role="tab" aria-selected="true" aria-controls="page-workflow" data-page="workflow">ワークフロー</button><button id="tab-legacy" class="mainTab" role="tab" aria-selected="false" aria-controls="page-legacy" tabindex="-1" data-page="legacy">旧マクロ</button><button id="tab-logs" class="mainTab" role="tab" aria-selected="false" aria-controls="page-logs" tabindex="-1" data-page="logs">ログ</button></div>
       <div class="fullOnly" id="pages">
-        <section id="page-workflow" class="page active">
-          <div id="workflowError" class="errorBox"></div>
-          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label><label class="field">実行回数<input id="workflowLoopCount" type="number" min="1" max="999999" inputmode="numeric"></label><label class="field">ループ<select id="workflowLoopMode"><option value="count">指定回数</option><option value="infinite">無限ループ</option></select></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
+        <section id="page-workflow" class="page active" role="tabpanel" aria-labelledby="tab-workflow">
+          <div id="workflowError" class="errorBox" role="alert" aria-live="assertive" tabindex="-1"><div id="workflowErrorMessage" class="errorMessage"></div><div class="errorActions"><button id="workflowErrorRetry" class="primary">再実行</button><button id="workflowErrorLogs">ログを見る</button><button id="workflowErrorDismiss">閉じる</button></div></div>
+          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint saveState" role="status" aria-live="polite" data-state="saved">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label><label class="field">実行回数<input id="workflowLoopCount" type="number" min="1" max="999999" inputmode="numeric"></label><label class="field">ループ<select id="workflowLoopMode"><option value="count">指定回数</option><option value="infinite">無限ループ</option></select></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
           <div class="card"><div class="cardTitle"><span>完成テンプレート</span><span class="hint">読込後は自由に編集可能</span></div><div class="grid2"><label class="field span2">テンプレート<select id="templateSelect"></select></label></div><div class="toolbar" style="margin-top:8px"><button id="replaceTemplate" class="primary">現在内容を置換</button><button id="appendTemplate">末尾へ追加</button></div></div>
           <details class="card" open><summary class="cardTitle" style="cursor:pointer;margin:0">ブロックを追加</summary><div class="hint" id="insertHint" style="margin:8px 0">末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。</div><div id="palette" class="paletteGrid"></div></details>
           <div class="card"><div class="cardTitle"><span>ブロック</span><span id="workflowStats" class="hint"></span></div><div id="workflowEditor"></div></div>
-          <div id="runBar"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>
+          <div id="runBar" aria-label="ワークフロー実行操作"><button id="runWorkflow">▶ 実行</button><button id="stopWorkflow" disabled>■ 停止</button></div>
         </section>
-        <section id="page-legacy" class="page">
+        <section id="page-legacy" class="page" role="tabpanel" aria-labelledby="tab-legacy" hidden>
           <div class="card"><div class="cardTitle"><span>旧固定マクロ</span><span class="hint">v1〜v12保存データ互換</span></div><div class="toolbar"><button id="legacyAddClick">クリック</button><button id="legacyAddNavigate">URL移動</button><button id="legacyAddWait">条件待ち</button><button id="legacyRecord" class="warn">タッチ記録</button></div></div>
           <div class="card"><div class="grid3"><label class="field">回数<input id="legacyCount" type="number" min="1" max="999999"></label><label class="field">時間ずれms<input id="legacyJitter" type="number" min="0" max="5000"></label><label class="field">位置ずれpx<input id="legacyPositionJitter" type="number" min="0" max="30" step="0.5"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacyRun" class="success">▶ 実行</button><button id="legacyStop" class="danger" disabled>■ 停止</button></div></div>
           <div class="card"><div class="cardTitle"><span>保存スロット</span><span class="hint">既存プリセット互換</span></div><div class="grid3"><label class="field">スロット<select id="legacyPresetSlot"></select></label><label class="field span2">名前<input id="legacyPresetName" maxlength="40"></label></div><div class="toolbar" style="margin-top:8px"><button id="legacySavePreset">保存</button><button id="legacyLoadPreset">読込</button><button id="legacyDeletePreset" class="danger">削除</button></div></div>
           <div id="legacyActionList"></div>
         </section>
-        <section id="page-logs" class="page"><div class="card"><div class="cardTitle"><span>実行ログ</span><button id="clearLogs">消去</button></div><div id="logList" class="logList"></div></div></section>
+        <section id="page-logs" class="page" role="tabpanel" aria-labelledby="tab-logs" hidden><div class="card"><div class="cardTitle"><span>実行ログ</span><button id="clearLogs">消去</button></div><div id="logList" class="logList"></div></div></section>
       </div>
     </div>
     <div id="toast" role="status" aria-live="polite"></div>
@@ -157,7 +164,7 @@
   const importFile = byId('importFile');
 
   const ui = {
-    status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'),
+    status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'), errorMessage: byId('workflowErrorMessage'),
     browserBar: byId('browserBar'), browserHandle: byId('browserHandle'), workflowSelect: byId('workflowSelect'), workflowName: byId('workflowName'),
     templateSelect: byId('templateSelect'), palette: byId('palette'), insertHint: byId('insertHint'), workflowStats: byId('workflowStats'),
     workflowLoopCount: byId('workflowLoopCount'), workflowLoopMode: byId('workflowLoopMode'),
@@ -284,6 +291,17 @@
     const next = String(message ?? '');
     if (lightweightMode && (state.running || state.legacyRunning) && !/(?:エラー|停止|完了)/.test(next)) return;
     if (ui.status.textContent !== next) ui.status.textContent = next;
+    const tone = /(?:エラー|失敗)/.test(next)
+      ? 'error'
+      : /停止/.test(next)
+        ? 'warn'
+        : /(?:完了|準備完了|保存済み)/.test(next)
+          ? 'success'
+          : (state.running || state.legacyRunning)
+            ? 'running'
+            : 'idle';
+    ui.status.dataset.tone = tone;
+    ui.status.title = next;
   }
 
   function toast(message) {
@@ -358,14 +376,20 @@
     const workflow = currentWorkflow();
     const screen = safeDetectScreenState();
     const message = error?.message || String(error);
-    ui.error.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
+    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
     ui.error.classList.add('show');
     appendLog(message, 'error', block ? blockLabel(block.type) : '実行');
+    setPage('workflow');
+    requestAnimationFrame(() => {
+      const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+      ui.error.scrollIntoView({ block: 'start', behavior });
+      ui.error.focus({ preventScroll: true });
+    });
   }
 
   function clearWorkflowError() {
     ui.error.classList.remove('show');
-    ui.error.textContent = '';
+    ui.errorMessage.textContent = '';
   }
 
   const CONDITION_OPTIONS = Object.freeze([
@@ -682,17 +706,23 @@
     };
   }
 
+  function setAutosaveStatus(status) {
+    const labels = { saving: '保存中', saved: '保存済み', error: '保存失敗' };
+    ui.autosave.textContent = labels[status] || labels.saved;
+    ui.autosave.dataset.state = status;
+  }
+
   function saveWorkflowStore({ immediate = false } = {}) {
-    ui.autosave.textContent = '保存中';
+    setAutosaveStatus('saving');
     clearTimeout(state.autosaveTimer);
     const perform = () => {
       try {
         const snapshot = workflowStoreSnapshot();
         localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
         localStorage.setItem(WORKFLOW_AUTOSAVE_KEY, JSON.stringify({ updatedAt: snapshot.updatedAt, store: snapshot }));
-        ui.autosave.textContent = '保存済み';
+        setAutosaveStatus('saved');
       } catch (error) {
-        ui.autosave.textContent = '保存失敗';
+        setAutosaveStatus('error');
         appendLog(`ワークフロー保存失敗: ${error.message}`, 'error');
       }
     };
@@ -3613,8 +3643,7 @@
     };
     state.running = context;
     const restoreExpandedDock = enterRuntimeCompactMode();
-    ui.runWorkflow.disabled = true;
-    ui.stopWorkflow.disabled = false;
+    syncRunControls();
     if (!lightweightMode) {
       renderPalette();
       renderWorkflowEditor();
@@ -3668,8 +3697,7 @@
       if (state.running === context) state.running = null;
       leaveRuntimeCompactMode(restoreExpandedDock);
       state.blockProgress.clear();
-      ui.runWorkflow.disabled = false;
-      ui.stopWorkflow.disabled = true;
+      syncRunControls();
       renderPalette();
       renderWorkflowEditor();
     }
@@ -4102,7 +4130,7 @@
     ui.legacyPositionJitter.value = clamp(finite(ui.legacyPositionJitter.value || state.legacy.positionJitterPx, 2), 0, 30);
     renderLegacyListOnly();
     renderLegacyMarkers();
-    const busy = Boolean(state.legacyRunning || state.recording);
+    const busy = Boolean(state.running || state.legacyRunning || state.recording);
     ui.legacyRun.disabled = busy || !state.legacy.actions.length;
     ui.legacyStop.disabled = !state.legacyRunning;
   }
@@ -4275,8 +4303,7 @@
     const token = { controller, signal: controller.signal };
     state.legacyRunning = token;
     const restoreExpandedDock = enterRuntimeCompactMode();
-    ui.legacyRun.disabled = true;
-    ui.legacyStop.disabled = false;
+    syncRunControls();
     if (!lightweightMode) renderLegacy();
     saveLegacyState();
     appendLog('旧マクロを開始');
@@ -4306,8 +4333,7 @@
     } finally {
       if (state.legacyRunning === token) state.legacyRunning = null;
       leaveRuntimeCompactMode(restoreExpandedDock);
-      ui.legacyRun.disabled = false;
-      ui.legacyStop.disabled = true;
+      syncRunControls();
       renderLegacy();
     }
   }
@@ -4542,6 +4568,7 @@
     const workflow = currentWorkflow();
     if (!workflow || state.running) return;
     const template = findTemplate(ui.templateSelect.value);
+    if (mode === 'replace' && workflow.blocks.length && !confirm(`現在の${workflow.blocks.length}ブロックを「${template[1]}」で置換しますか？`)) return;
     const blocks = template[2]().map(normalizeBlock);
     if (mode === 'replace') workflow.blocks = blocks;
     else workflow.blocks.push(...blocks);
@@ -4599,8 +4626,17 @@
 
   function setPage(page) {
     state.page = ['workflow', 'legacy', 'logs'].includes(page) ? page : 'workflow';
-    shadow.querySelectorAll('.mainTab').forEach(button => button.classList.toggle('active', button.dataset.page === state.page));
-    shadow.querySelectorAll('.page').forEach(section => section.classList.toggle('active', section.id === `page-${state.page}`));
+    shadow.querySelectorAll('.mainTab').forEach(button => {
+      const active = button.dataset.page === state.page;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-selected', String(active));
+      button.tabIndex = active ? 0 : -1;
+    });
+    shadow.querySelectorAll('.page').forEach(section => {
+      const active = section.id === `page-${state.page}`;
+      section.classList.toggle('active', active);
+      section.hidden = !active;
+    });
     if (state.page === 'logs') renderLogs();
     renderLegacyMarkers();
   }
@@ -4611,10 +4647,43 @@
     saveLegacyState();
   }
 
+  const RUN_LOCKED_CONTROL_IDS = Object.freeze([
+    'workflowSelect', 'workflowName', 'newWorkflow', 'renameWorkflow', 'duplicateWorkflow', 'deleteWorkflow',
+    'importWorkflow', 'templateSelect', 'replaceTemplate', 'appendTemplate', 'legacyAddClick', 'legacyAddNavigate',
+    'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
+    'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset'
+  ]);
+
+  function syncRunControls() {
+    const workflowRunning = Boolean(state.running);
+    const legacyRunning = Boolean(state.legacyRunning);
+    const isRunning = workflowRunning || legacyRunning;
+    ui.runWorkflow.disabled = isRunning;
+    ui.stopWorkflow.disabled = !workflowRunning;
+    ui.legacyRun.disabled = isRunning || state.recording || !state.legacy?.actions?.length;
+    ui.legacyStop.disabled = !legacyRunning;
+    ui.workflowLoopMode.disabled = isRunning;
+    ui.workflowLoopCount.disabled = isRunning || Boolean(currentWorkflow()?.loopInfinite);
+    for (const id of RUN_LOCKED_CONTROL_IDS) {
+      const control = byId(id);
+      if (control) control.disabled = isRunning;
+    }
+    const compactRun = byId('compactRun');
+    compactRun.textContent = isRunning ? '■' : '▶';
+    compactRun.classList.toggle('is-stop', isRunning);
+    compactRun.setAttribute('aria-label', isRunning ? '実行を停止' : '実行');
+    compactRun.title = isRunning ? '実行を停止' : '実行';
+    dock.classList.toggle('is-running', isRunning);
+    dock.setAttribute('aria-busy', String(isRunning));
+    if (isRunning) ui.status.dataset.tone = 'running';
+  }
+
   function enterRuntimeCompactMode() {
     if (!lightweightMode || dock.classList.contains('compact')) return false;
     dock.classList.add('compact');
     byId('toggleCompact').textContent = '□';
+    byId('toggleCompact').setAttribute('aria-expanded', 'false');
+    byId('compactGrip').setAttribute('aria-expanded', 'false');
     requestAnimationFrame(positionDock);
     return true;
   }
@@ -4623,12 +4692,16 @@
     if (!restoreExpandedDock) return;
     dock.classList.remove('compact');
     byId('toggleCompact').textContent = '—';
+    byId('toggleCompact').setAttribute('aria-expanded', 'true');
+    byId('compactGrip').setAttribute('aria-expanded', 'true');
     requestAnimationFrame(positionDock);
   }
 
   function setCompact(compact) {
     dock.classList.toggle('compact', compact);
     byId('toggleCompact').textContent = compact ? '□' : '—';
+    byId('toggleCompact').setAttribute('aria-expanded', String(!compact));
+    byId('compactGrip').setAttribute('aria-expanded', String(!compact));
     requestAnimationFrame(positionDock);
     saveLegacyState();
   }
@@ -4748,10 +4821,27 @@
   byId('reloadFrame').addEventListener('click', () => { try { iframe.contentWindow.location.reload(); } catch { iframe.src = iframe.src; } });
   byId('hideBrowser').addEventListener('click', () => setBrowserHidden(true));
   ui.browserHandle.addEventListener('click', () => setBrowserHidden(false));
-  byId('closeApp').addEventListener('click', destroy);
+  byId('closeApp').addEventListener('click', () => { if ((state.running || state.legacyRunning) && !confirm('実行中です。停止して終了しますか？')) return; destroy(); });
   byId('toggleCompact').addEventListener('click', () => setCompact(!dock.classList.contains('compact')));
   byId('compactRun').addEventListener('click', () => state.page === 'legacy' ? (state.legacyRunning ? stopLegacy() : startLegacy()) : (state.running ? stopWorkflow() : startWorkflow()));
-  shadow.querySelectorAll('.mainTab').forEach(button => button.addEventListener('click', () => setPage(button.dataset.page)));
+  const mainTabs = Array.from(shadow.querySelectorAll('.mainTab'));
+  mainTabs.forEach((button, index) => {
+    button.addEventListener('click', () => setPage(button.dataset.page));
+    button.addEventListener('keydown', event => {
+      let nextIndex = null;
+      if (event.key === 'ArrowRight') nextIndex = (index + 1) % mainTabs.length;
+      else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + mainTabs.length) % mainTabs.length;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = mainTabs.length - 1;
+      if (nextIndex == null) return;
+      event.preventDefault();
+      setPage(mainTabs[nextIndex].dataset.page);
+      mainTabs[nextIndex].focus();
+    });
+  });
+  byId('workflowErrorRetry').addEventListener('click', () => { clearWorkflowError(); startWorkflow(); });
+  byId('workflowErrorLogs').addEventListener('click', () => setPage('logs'));
+  byId('workflowErrorDismiss').addEventListener('click', clearWorkflowError);
 
   ui.workflowSelect.addEventListener('change', () => selectWorkflow(ui.workflowSelect.value));
   ui.workflowName.addEventListener('change', renameCurrentWorkflow);
@@ -4864,6 +4954,7 @@
   refreshLegacyPresets();
   renderLegacy();
   renderLogs();
+  syncRunControls();
   setPage('workflow');
   setBrowserHidden(state.legacy.browserHidden || narrowScreen);
   setCompact(state.legacy.compact || narrowScreen);
