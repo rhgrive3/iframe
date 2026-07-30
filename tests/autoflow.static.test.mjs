@@ -246,8 +246,19 @@ test('assist flow uses reduced reaction latency only after a raid is selected', 
   assert.ok(flow.includes('fastTap: true'));
 });
 
+test('MyPage and Safari relief blocks run immediately without battle-end waits', () => {
+  assert.ok(!source.includes('waitForBattleEndBeforeCleanup'));
+  assert.ok(!source.includes('battleTimeoutSec'));
+  const myPage = source.slice(source.indexOf('async function navigateToGranblueMyPage'), source.indexOf('async function hardNavigateAfterRelief'));
+  assert.ok(myPage.includes("clearPendingAutoAttack('MyPageへ移動するため攻撃監視を解除しました')"));
+  assert.ok(!myPage.includes('detectBattleEndState'));
+  const relief = source.slice(source.indexOf('async function releaseGranblueResources'), source.indexOf('async function reloadForBattleEndProbe'));
+  assert.ok(relief.includes('await navigateToGranblueMyPage(config, context)'));
+  assert.ok(!relief.includes('waitForBattleEnd'));
+});
+
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 43'));
+  assert.ok(source.includes('const APP_VERSION = 44'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));

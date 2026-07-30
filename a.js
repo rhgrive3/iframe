@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 43;
+  const APP_VERSION = 44;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1178,8 +1178,8 @@
     gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、撃破時は指定ルートから先頭へ復帰' },
     gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃開始または敵撃破通知を低負荷で監視' },
     gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
-    gbfMyPage: { category: 'gbf', label: 'MyPageボタンを押す', description: '戦闘終了を待ち、ゲーム標準の完全再読込でMyPageへ戻る' },
-    gbfReleaseResources: { category: 'gbf', label: 'Safariメモリを解放して戻る', description: '戦闘終了後にMyPageを経由し、Canvas・音声・旧Viewを解放して指定画面へ戻る' },
+    gbfMyPage: { category: 'gbf', label: 'MyPageボタンを押す', description: '即座にゲーム標準の完全再読込でMyPageへ戻る' },
+    gbfReleaseResources: { category: 'gbf', label: 'Safariメモリを解放して戻る', description: '即座にMyPageを経由し、Canvas・音声・旧Viewを解放して指定画面へ戻る' },
     repeat: { category: 'control', label: '指定回数繰り返す', description: '子ブロックを指定回数実行', container: true },
     repeatUntil: { category: 'control', label: '条件成立まで繰り返す', description: '前判定型。成立済みなら0回', container: true },
     if: { category: 'control', label: '条件分岐', description: '成立時と不成立時の子ブロックを分岐', container: true, elseBranch: true },
@@ -1239,9 +1239,9 @@
       case 'gbfRefreshAssist':
         return { baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15 };
       case 'gbfMyPage':
-        return { timeoutSec: 45, battleTimeoutSec: 1800, settleSec: 1.5 };
+        return { timeoutSec: 45, settleSec: 1.5 };
       case 'gbfReleaseResources':
-        return { destination: 'assist', timeoutSec: 45, battleTimeoutSec: 1800, settleSec: 2 };
+        return { destination: 'assist', timeoutSec: 45, settleSec: 2 };
       case 'repeat':
         return { count: 5 };
       case 'repeatUntil':
@@ -1371,7 +1371,6 @@
       case 'gbfMyPage':
         block.config = {
           timeoutSec: clamp(finite(config.timeoutSec, 45), 1, 600),
-          battleTimeoutSec: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200),
           settleSec: clamp(finite(config.settleSec, 1.5), 0, 30)
         };
         break;
@@ -1379,7 +1378,6 @@
         block.config = {
           destination: ['assist', 'mypage', 'current'].includes(config.destination) ? config.destination : 'assist',
           timeoutSec: clamp(finite(config.timeoutSec, 45), 1, 600),
-          battleTimeoutSec: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200),
           settleSec: clamp(finite(config.settleSec, 2), 0, 30)
         };
         break;
@@ -2173,7 +2171,6 @@
         break;
       case 'gbfMyPage':
         addNumber('MyPage読込タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
-        addNumber('戦闘終了待ち上限（秒）', 'battleTimeoutSec', 1, 7200, 1);
         addNumber('読込後の休止（秒）', 'settleSec', 0, 30, 0.1);
         break;
       case 'gbfReleaseResources': {
@@ -2184,7 +2181,6 @@
         ], input => updateBlockConfig(block, next => { next.destination = input.value; }));
         grid.append(field('軽量化後の移動先', destination));
         addNumber('画面読込タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
-        addNumber('戦闘終了待ち上限（秒）', 'battleTimeoutSec', 1, 7200, 1);
         addNumber('MyPageでの休止（秒）', 'settleSec', 0, 30, 0.1);
         break;
       }
@@ -4506,33 +4502,7 @@
     return null;
   }
 
-  async function waitForBattleEndBeforeCleanup(config, context) {
-    const current = safeDetectScreenState();
-    if (current.type !== 'BATTLE') return { alreadySafe: true, state: current.type };
-    context.setProgress?.('戦闘終了を待機中');
-    return monitorFrame(() => {
-      const doc = frameDocument();
-      const endState = detectBattleEndState(doc);
-      if (endState) return { endState };
-      const detected = detectScreenState(doc);
-      if (['RESULT', 'ASSIST_LIST', 'UNCLAIMED_LIST', 'MYPAGE'].includes(detected.type)) {
-        return { state: detected.type };
-      }
-      return false;
-    }, {
-      signal: context.signal,
-      timeoutMs: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200) * 1000,
-      stableMs: 0,
-      description: '軽量化前の戦闘終了待ち',
-      observeRoots: battleObservationRoots,
-      observeOnLightweight: true,
-      observeCharacterData: false,
-      intervalMs: 500
-    });
-  }
-
-  async function navigateToGranblueMyPage(config, context, { skipBattleWait = false } = {}) {
-    if (!skipBattleWait) await waitForBattleEndBeforeCleanup(config, context);
+  async function navigateToGranblueMyPage(config, context) {
     throwIfAborted(context.signal);
     clearPendingAutoAttack('MyPageへ移動するため攻撃監視を解除しました');
     const timeoutMs = clamp(finite(config.timeoutSec, 45), 1, 600) * 1000;
@@ -4604,9 +4574,8 @@
   }
 
   async function releaseGranblueResources(config, context) {
-    await waitForBattleEndBeforeCleanup(config, context);
     const currentUrl = currentFrameUrl();
-    await navigateToGranblueMyPage(config, context, { skipBattleWait: true });
+    await navigateToGranblueMyPage(config, context);
     if (config.destination === 'mypage') return { state: 'MYPAGE' };
     const targetUrl = config.destination === 'current'
       ? currentUrl
@@ -4663,9 +4632,8 @@
     if (shouldRelieve) {
       await navigateToGranblueMyPage({
         timeoutSec: Math.max(45, finite(config.timeoutSec, 15)),
-        battleTimeoutSec: 1,
         settleSec: clamp(finite(config.memoryReliefSettleSec, 1.5), 0, 30)
-      }, context, { skipBattleWait: true });
+      }, context);
       await hardNavigateAfterRelief(targetUrl, expectedScreen, {
         timeoutSec: Math.max(45, finite(config.timeoutSec, 15))
       }, context);
