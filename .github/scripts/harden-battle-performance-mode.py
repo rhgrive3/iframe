@@ -126,7 +126,7 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   assert.ok(patchNow.includes('try { patchLoadQueue(); } catch {}'));
   assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
-  assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
+  assert.ok(patchNow.includes('else {\\n        restoreSoundRuntime();'));
   assert.ok(child.includes('try { prototype[name] = wrapped; } catch {}'));
   assert.ok(child.includes('pollTimer = window.setInterval'));
   assert.ok(child.includes('if (enabled) patchNow();'));
