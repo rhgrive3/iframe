@@ -5,7 +5,8 @@ import test from 'node:test';
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
 test('top-level installation is guarded and replaces stale instances', () => {
-  assert.match(source, /if \(window\.top !== window\) return;/);
+  assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
+  assert.ok(source.includes('if (window.top !== window) {'));
   assert.match(source, /const previous = window\[GLOBAL_KEY\]/);
   assert.match(source, /previous\?\.destroy/);
 });
@@ -258,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 45'));
+  assert.ok(source.includes('const APP_VERSION = 46'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -284,4 +285,32 @@ test('battle ended is available as a workflow condition without HP inference', (
   );
   assert.ok(!conditionCase.includes('enemy-hp'));
   assert.ok(!conditionCase.includes('txt-gauge-value'));
+});
+
+
+test('battle performance mode is persistent and independent from workflow execution', () => {
+  assert.ok(source.includes("const BATTLE_PERFORMANCE_STORAGE_KEY = '__fullscreen_iframe_autoclicker_battle_performance_v1__'"));
+  assert.ok(source.includes('function installBattlePerformanceChildRuntime()'));
+  assert.ok(source.includes('if (window.top !== window) {'));
+  assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
+  assert.ok(source.includes('id="tab-settings"'));
+  assert.ok(source.includes('id="battlePerformanceToggle"'));
+  assert.ok(source.includes("state.page = ['workflow', 'legacy', 'logs', 'settings']"));
+  assert.ok(source.includes('setBattlePerformanceEnabled(ui.battlePerformanceToggle.checked)'));
+  assert.ok(source.includes('syncBattlePerformanceFrame();'));
+});
+
+test('battle performance child runtime preserves logic while suppressing heavy media', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  assert.ok(child.includes("['loadManifest', 'loadFile']"));
+  assert.ok(child.includes('BATTLE_PERFORMANCE_TRANSPARENT_IMAGE'));
+  assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawArrays')"));
+  assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawElements')"));
+  assert.ok(child.includes("patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage')"));
+  assert.ok(child.includes("requireAmd(['model/sound', 'lib/sound']"));
+  assert.ok(child.includes('setting.sound_flag = 0'));
+  assert.ok(child.includes('animation-duration:.001s!important'));
+  assert.ok(child.includes("canvas.id === 'canvas'"));
+  assert.ok(!child.includes('Ticker.removeAllEventListeners'));
+  assert.ok(!child.includes('Stage.update ='));
 });
