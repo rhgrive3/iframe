@@ -1308,12 +1308,13 @@
       && hiddenOrAbsent(doc, '#ready');
   }
 
-  function monitorFrame(check, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '状態待ち', allowInterval = true } = {}) {
+  function monitorFrame(check, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '状態待ち', allowInterval = true, observeRoots = null } = {}) {
     throwIfAborted(signal);
     return new Promise((resolve, reject) => {
       let settled = false;
       let observer = null;
       let observedDoc = null;
+      let observedRoots = [];
       let timeout = null;
       let interval = null;
       let stableSince = null;
@@ -1323,6 +1324,7 @@
         observer?.disconnect();
         observer = null;
         observedDoc = null;
+        observedRoots = [];
         clearTimeout(timeout);
         clearInterval(interval);
         iframe.removeEventListener('load', onFrameLoad);
@@ -1343,11 +1345,22 @@
       const bindObserver = () => {
         let doc;
         try { doc = frameDocument(); } catch { return; }
-        if (doc === observedDoc) return;
+        let requestedRoots = observeRoots;
+        if (typeof observeRoots === 'function') {
+          try { requestedRoots = observeRoots(doc); } catch { requestedRoots = []; }
+        }
+        if (requestedRoots == null) requestedRoots = [doc.documentElement || doc];
+        const roots = [...new Set((Array.isArray(requestedRoots) ? requestedRoots : [requestedRoots]).filter(root =>
+          root && root.ownerDocument === doc && root.isConnected !== false
+        ))];
+        const unchanged = doc === observedDoc
+          && roots.length === observedRoots.length
+          && roots.every((root, index) => root === observedRoots[index]);
+        if (unchanged) return;
         observer?.disconnect();
         observedDoc = doc;
-        const rootNode = doc.documentElement || doc;
-        if (lightweightMode) return;
+        observedRoots = roots;
+        if (lightweightMode || !roots.length) return;
         let scheduled = false;
         observer = new MutationObserver(() => {
           lastMutation = performance.now();
@@ -1356,9 +1369,11 @@
           scheduled = true;
           requestAnimationFrame(() => { scheduled = false; evaluate(); });
         });
-        try {
-          observer.observe(rootNode, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
-        } catch {}
+        for (const rootNode of roots) {
+          try {
+            observer.observe(rootNode, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style'] });
+          } catch {}
+        }
       };
       const evaluate = () => {
         if (settled) return;
