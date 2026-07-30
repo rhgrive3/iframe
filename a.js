@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 44;
+  const APP_VERSION = 45;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1157,6 +1157,7 @@
     ['gbfFullAutoOff', 'フルオートがOFF'],
     ['gbfAttacking', 'フルオート攻撃中'],
     ['gbfAttackWaiting', '攻撃待機中'],
+    ['gbfBattleEnded', '戦闘が終了した'],
     ['gbfBattle', 'バトル画面である'],
     ['gbfAssist', '救援一覧である'],
     ['gbfUnclaimedEmpty', '未確認バトルが0件'],
@@ -5109,6 +5110,8 @@
         const attack = attackSnapshot(doc);
         return attack.startVisible && !isAttackInProgress(attack);
       }
+      case 'gbfBattleEnded':
+        return Boolean(detectBattleEndState(doc));
       case 'gbfBattle':
         return screen === 'BATTLE';
       case 'gbfAssist':

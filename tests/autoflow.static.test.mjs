@@ -258,7 +258,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 44'));
+  assert.ok(source.includes('const APP_VERSION = 45'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -272,4 +272,16 @@ test('professional UX exposes truthful runtime and accessible recovery state', (
   assert.ok(source.includes("if (mode === 'replace' && workflow.blocks.length"));
   const blockList = source.slice(source.indexOf('function renderBlockList'), source.indexOf('function renderWorkflowEditor'));
   assert.equal((blockList.match(/lastElementChild\.disabled = Boolean\(state\.running\)/g) || []).length, 2);
+});
+
+test('battle ended is available as a workflow condition without HP inference', () => {
+  assert.ok(source.includes("['gbfBattleEnded', '戦闘が終了した']"));
+  assert.ok(source.includes("case 'gbfBattleEnded':"));
+  assert.ok(source.includes('return Boolean(detectBattleEndState(doc));'));
+  const conditionCase = source.slice(
+    source.indexOf("case 'gbfBattleEnded':"),
+    source.indexOf("case 'gbfBattle':")
+  );
+  assert.ok(!conditionCase.includes('enemy-hp'));
+  assert.ok(!conditionCase.includes('txt-gauge-value'));
 });
