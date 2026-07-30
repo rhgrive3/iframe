@@ -102,6 +102,27 @@ test('auto-attack establishes a ready baseline before watching for attack', () =
   assert.match(source, /const baseline = armed\.snapshot/);
 });
 
+test('full-auto toggle waits for an observed attack transition instead of toggle time alone', () => {
+  const ensureStart = source.indexOf('async function ensureFullAuto');
+  const ensureEnd = source.indexOf('function elementDisplayOn', ensureStart);
+  const ensureBlock = source.slice(ensureStart, ensureEnd);
+  assert.ok(ensureBlock.indexOf('armPendingAutoAttack') < ensureBlock.indexOf('await jqTapStrict'));
+  const waitStart = source.indexOf('async function waitForAutoAttack');
+  const waitEnd = source.indexOf('async function recoverKnownPopup', waitStart);
+  const waitBlock = source.slice(waitStart, waitEnd);
+  assert.match(waitBlock, /await consumePendingAutoAttack\(timeoutMs\)/);
+  assert.match(source, /description: 'フルオート押下後の攻撃開始待ち'/);
+  assert.doesNotMatch(source, /lastFullAutoEnabledAt/);
+});
+
+test('workflow-level finite and infinite loop settings are normalized, rendered and executed', () => {
+  assert.match(source, /id="workflowLoopCount"/);
+  assert.match(source, /id="workflowLoopMode"/);
+  assert.match(source, /loopCount: clamp\(int\(source\.loopCount, 1\), 1, MAX_WORKFLOW_LOOP_COUNT\)/);
+  assert.match(source, /loopInfinite: Boolean\(source\.loopInfinite\)/);
+  assert.match(source, /while \(!controller\.signal\.aborted && \(loopInfinite \|\| cycle < loopCount\)\)/);
+});
+
 test('visibility checks short-circuit definite hidden and display-on states', () => {
   const visibilityStart = source.indexOf('function computedVisible');
   const visibilityEnd = source.indexOf('function hiddenOrAbsent', visibilityStart);

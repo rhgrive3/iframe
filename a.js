@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 24;
+  const APP_VERSION = 25;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -17,6 +17,7 @@
   const WORKFLOW_STORAGE_KEY = '__fullscreen_iframe_autoclicker_workflows_v1__';
   const WORKFLOW_AUTOSAVE_KEY = '__fullscreen_iframe_autoclicker_workflow_autosave_v1__';
   const MAX_REPEAT_COUNT = 10_000;
+  const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
@@ -116,7 +117,7 @@
       <div class="fullOnly" id="pages">
         <section id="page-workflow" class="page active">
           <div id="workflowError" class="errorBox"></div>
-          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
+          <div class="card"><div class="cardTitle"><span>ワークフロー</span><span id="autosaveState" class="hint">保存済み</span></div><div class="grid2"><label class="field span2">読込<select id="workflowSelect"></select></label><label class="field span2">名前<input id="workflowName" maxlength="60"></label><label class="field">実行回数<input id="workflowLoopCount" type="number" min="1" max="999999" inputmode="numeric"></label><label class="field">ループ<select id="workflowLoopMode"><option value="count">指定回数</option><option value="infinite">無限ループ</option></select></label></div><div class="toolbar" style="margin-top:8px"><button id="newWorkflow">新規</button><button id="renameWorkflow">名前変更</button><button id="duplicateWorkflow">複製</button><button id="deleteWorkflow" class="danger">削除</button><button id="exportWorkflow">JSON出力</button><button id="importWorkflow">JSON読込</button></div></div>
           <div class="card"><div class="cardTitle"><span>完成テンプレート</span><span class="hint">読込後は自由に編集可能</span></div><div class="grid2"><label class="field span2">テンプレート<select id="templateSelect"></select></label></div><div class="toolbar" style="margin-top:8px"><button id="replaceTemplate" class="primary">現在内容を置換</button><button id="appendTemplate">末尾へ追加</button></div></div>
           <details class="card" open><summary class="cardTitle" style="cursor:pointer;margin:0">ブロックを追加</summary><div class="hint" id="insertHint" style="margin:8px 0">末尾へ追加します。各ブロックの「＋下」「＋子」で挿入先を変更できます。</div><div id="palette" class="paletteGrid"></div></details>
           <div class="card"><div class="cardTitle"><span>ブロック</span><span id="workflowStats" class="hint"></span></div><div id="workflowEditor"></div></div>
@@ -148,6 +149,7 @@
     status: byId('statusText'), toast: byId('toast'), autosave: byId('autosaveState'), error: byId('workflowError'),
     browserBar: byId('browserBar'), browserHandle: byId('browserHandle'), workflowSelect: byId('workflowSelect'), workflowName: byId('workflowName'),
     templateSelect: byId('templateSelect'), palette: byId('palette'), insertHint: byId('insertHint'), workflowStats: byId('workflowStats'),
+    workflowLoopCount: byId('workflowLoopCount'), workflowLoopMode: byId('workflowLoopMode'),
     runWorkflow: byId('runWorkflow'), stopWorkflow: byId('stopWorkflow'), legacyList: byId('legacyActionList'), legacyCount: byId('legacyCount'),
     legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList')
@@ -174,7 +176,7 @@
     recordedPoints: [],
     recordStartedAt: 0,
     activeRecordPointers: new Map(),
-    lastFullAutoEnabledAt: 0,
+    pendingAutoAttack: null,
     dockX: null,
     dockY: null
   };
@@ -567,6 +569,8 @@
       id: String(source.id || nowId('workflow')),
       name: String(source.name || `ワークフロー ${index + 1}`).trim().slice(0, 60) || `ワークフロー ${index + 1}`,
       blocks: (Array.isArray(source.blocks) ? source.blocks : []).map(normalizeBlock),
+      loopCount: clamp(int(source.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT),
+      loopInfinite: Boolean(source.loopInfinite),
       createdAt: finite(source.createdAt, Date.now()),
       updatedAt: finite(source.updatedAt, Date.now())
     };
@@ -1094,7 +1098,12 @@
     const workflow = currentWorkflow();
     if (!workflow) return;
     ui.workflowName.value = workflow.name;
-    ui.workflowStats.textContent = `${countBlocks(workflow.blocks)}ブロック`;
+    ui.workflowLoopCount.value = String(workflow.loopCount);
+    ui.workflowLoopMode.value = workflow.loopInfinite ? 'infinite' : 'count';
+    ui.workflowLoopMode.disabled = Boolean(state.running);
+    ui.workflowLoopCount.disabled = Boolean(state.running || workflow.loopInfinite);
+    const loopLabel = workflow.loopInfinite ? '無限ループ' : `${workflow.loopCount}回実行`;
+    ui.workflowStats.textContent = `${countBlocks(workflow.blocks)}ブロック · ${loopLabel}`;
     if (!workflow.blocks.length) {
       workflowEditor.append(element('div', { className: 'empty', text: 'ブロックがありません。上のパレットまたは完成テンプレートから追加してください。' }));
       return;
@@ -2423,8 +2432,13 @@
       description: 'フルオート操作可能状態待ち'
     });
     if (found.on) return { changed: false };
-    await jqTapStrict(found.button, { signal, label: 'フルオート' });
-    state.lastFullAutoEnabledAt = performance.now();
+    const pending = armPendingAutoAttack(config.timeoutSec * 1000, signal);
+    try {
+      await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    } catch (error) {
+      if (state.pendingAutoAttack === pending) clearPendingAutoAttack('フルオート押下に失敗しました');
+      throw error;
+    }
     return { changed: true };
   }
 
@@ -2469,20 +2483,67 @@
     return Boolean(snapshot.cancelVisible || snapshot.dummyVisible || snapshot.actorAttacking);
   }
 
+  function attackTransitionFromBaseline(baseline, current) {
+    const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
+    const startBecameHidden = Boolean(baseline.startVisible && !current.startVisible);
+    const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
+    const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged;
+    return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
+  }
+
+  function clearPendingAutoAttack(reason = 'フルオート攻撃監視を解除しました') {
+    const pending = state.pendingAutoAttack;
+    state.pendingAutoAttack = null;
+    if (!pending || pending.controller.signal.aborted) return;
+    pending.controller.abort(new DOMException(reason, 'AbortError'));
+  }
+
+  function armPendingAutoAttack(timeoutMs, parentSignal) {
+    clearPendingAutoAttack();
+    const controller = new AbortController();
+    const onParentAbort = () => controller.abort(abortException(parentSignal));
+    parentSignal?.addEventListener('abort', onParentAbort, { once: true });
+    const baseline = attackSnapshot();
+    const promise = monitorFrame(() => {
+      const current = attackSnapshot();
+      const transition = attackTransitionFromBaseline(baseline, current);
+      if (!transition) return false;
+      const auto = fullAutoState();
+      return auto.on || isAttackInProgress(current) ? transition : false;
+    }, {
+      signal: controller.signal,
+      timeoutMs,
+      stableMs: 0,
+      description: 'フルオート押下後の攻撃開始待ち'
+    }).then(
+      result => ({ ok: true, result }),
+      error => ({ ok: false, error })
+    ).finally(() => parentSignal?.removeEventListener('abort', onParentAbort));
+    const pending = { controller, promise, baseline, createdAt: performance.now(), timeoutMs };
+    state.pendingAutoAttack = pending;
+    return pending;
+  }
+
+  async function consumePendingAutoAttack(timeoutMs) {
+    const pending = state.pendingAutoAttack;
+    if (!pending) return null;
+    state.pendingAutoAttack = null;
+    if (performance.now() - pending.createdAt > Math.max(timeoutMs, pending.timeoutMs)) {
+      if (!pending.controller.signal.aborted) pending.controller.abort(new DOMException('フルオート攻撃監視が期限切れです', 'AbortError'));
+      return null;
+    }
+    const outcome = await pending.promise;
+    if (!outcome.ok) throw outcome.error;
+    return { ...outcome.result, triggeredByFullAutoToggle: true };
+  }
+
   async function waitForAutoAttack(config, context) {
     const { signal } = context;
     const timeoutMs = config.timeoutSec * 1000;
     await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
 
-    const consumeRecentFullAutoEnable = () => {
-      const enabledAt = finite(state.lastFullAutoEnabledAt, 0);
-      if (enabledAt <= 0 || performance.now() - enabledAt > timeoutMs) return null;
-      state.lastFullAutoEnabledAt = 0;
-      return { triggeredByFullAutoToggle: true, enabledAt };
-    };
-
-    const recentEnable = consumeRecentFullAutoEnable();
-    if (recentEnable) return recentEnable;
+    const pendingAttack = await consumePendingAutoAttack(timeoutMs);
+    if (pendingAttack) return pendingAttack;
 
     const initial = attackSnapshot();
     if (isAttackInProgress(initial)) return { alreadyAttacking: true, snapshot: initial };
@@ -2490,7 +2551,7 @@
     const auto = fullAutoState();
     if (!auto.on) {
       await ensureFullAuto(config, context);
-      const enabledByThisBlock = consumeRecentFullAutoEnable();
+      const enabledByThisBlock = await consumePendingAutoAttack(timeoutMs);
       if (enabledByThisBlock) return enabledByThisBlock;
     }
 
@@ -2499,23 +2560,13 @@
       if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
       const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
       return attackReady ? { snapshot, alreadyAttacking: false } : false;
-    }, {
-      signal,
-      timeoutMs,
-      stableMs: 0,
-      description: 'フルオート攻撃受付待ち'
-    });
+    }, { signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃受付待ち' });
     if (armed.alreadyAttacking) return armed;
 
     const baseline = armed.snapshot;
-    return monitorFrame(() => {
-      const current = attackSnapshot();
-      const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
-      const startBecameHidden = baseline.startVisible && !current.startVisible;
-      const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
-      const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged;
-      return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
-    }, { signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃開始待ち' });
+    return monitorFrame(() => attackTransitionFromBaseline(baseline, attackSnapshot()), {
+      signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃開始待ち'
+    });
   }
 
   async function recoverKnownPopup(stateInfo, refreshConfig, context) {
@@ -2875,7 +2926,9 @@
       signal: controller.signal,
       workflow,
       currentBlockId: null,
-      startedAt: performance.now()
+      startedAt: performance.now(),
+      cycle: 0,
+      totalCycles: null
     };
     state.running = context;
     ui.runWorkflow.disabled = true;
@@ -2884,8 +2937,20 @@
     renderWorkflowEditor();
     appendLog(`ワークフロー「${workflow.name}」を開始`);
     try {
-      await runBlockList(workflow.blocks, context);
-      appendLog(`ワークフロー「${workflow.name}」が完了`, 'success');
+      const loopCount = clamp(int(workflow.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
+      const loopInfinite = Boolean(workflow.loopInfinite);
+      let cycle = 0;
+      while (!controller.signal.aborted && (loopInfinite || cycle < loopCount)) {
+        clearPendingAutoAttack('次のワークフロー周回を開始します');
+        cycle += 1;
+        context.cycle = cycle;
+        context.totalCycles = loopInfinite ? null : loopCount;
+        const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
+        appendLog(`${cycleLabel}を開始`, '', workflow.name);
+        setStatus(`${workflow.name} · ${cycleLabel}`);
+        await runBlockList(workflow.blocks, context);
+      }
+      appendLog(`ワークフロー「${workflow.name}」が${cycle}周完了`, 'success');
       setStatus('ワークフロー完了');
     } catch (error) {
       if (error?.name === 'AbortError') {
@@ -2899,6 +2964,7 @@
         setStatus('エラーで停止');
       }
     } finally {
+      clearPendingAutoAttack('ワークフローを終了しました');
       if (state.running === context) state.running = null;
       state.blockProgress.clear();
       ui.runWorkflow.disabled = false;
@@ -3962,6 +4028,20 @@
 
   ui.workflowSelect.addEventListener('change', () => selectWorkflow(ui.workflowSelect.value));
   ui.workflowName.addEventListener('change', renameCurrentWorkflow);
+  ui.workflowLoopCount.addEventListener('change', () => {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    workflow.loopCount = clamp(int(ui.workflowLoopCount.value, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
+    touchWorkflow();
+    renderWorkflowEditor();
+  });
+  ui.workflowLoopMode.addEventListener('change', () => {
+    const workflow = currentWorkflow();
+    if (!workflow || state.running) return;
+    workflow.loopInfinite = ui.workflowLoopMode.value === 'infinite';
+    touchWorkflow();
+    renderWorkflowEditor();
+  });
   byId('newWorkflow').addEventListener('click', createNewWorkflow);
   byId('renameWorkflow').addEventListener('click', renameCurrentWorkflow);
   byId('duplicateWorkflow').addEventListener('click', duplicateCurrentWorkflow);
