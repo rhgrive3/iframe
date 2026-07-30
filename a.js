@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 35;
+  const APP_VERSION = 36;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -83,7 +83,7 @@
   shadow.innerHTML = `
     <style>
       :host,*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-      :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:rgba(18,20,27,.965);--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
+      :host{display:block;position:fixed;inset:0;overflow:hidden;overscroll-behavior:none;--panel:#12141b;--surface:rgba(255,255,255,.065);--surface2:rgba(255,255,255,.105);--line:rgba(255,255,255,.14);--text:#f7f8ff;--muted:rgba(255,255,255,.68);--accent:#6f7cff;--green:#38cf87;--red:#f0646d;--amber:#e8ad55;--purple:#a083ff}
       button,input,select,textarea{font:inherit;color:var(--text)}
       button{min-height:44px;border:1px solid transparent;border-radius:11px;background:var(--surface);font-weight:760;touch-action:manipulation;cursor:pointer}
       button:not(#dockGrip):not(#compactGrip):active{transform:scale(.98)}button:disabled{opacity:.38;cursor:default}
@@ -91,10 +91,10 @@
       textarea{min-height:72px;resize:vertical}
       button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #c0c5ff;outline-offset:2px}
       #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}:host(.ui-dragging) #frame{pointer-events:none}
-      #browserBar{position:fixed;z-index:150;top:max(7px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(1080px,calc(100vw - 12px));display:grid;grid-template-columns:44px 44px 44px minmax(90px,1fr) 64px 44px;gap:5px;padding:5px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:0 12px 34px rgba(0,0,0,.36);backdrop-filter:blur(24px)}
+      #browserBar{position:fixed;z-index:150;top:max(7px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);width:min(1080px,calc(100vw - 12px));display:grid;grid-template-columns:44px 44px 44px minmax(90px,1fr) 64px 44px;gap:5px;padding:5px;border:1px solid var(--line);border-radius:15px;background:var(--panel);box-shadow:none}
       #browserBar.hidden{display:none}#browserBar button{height:44px;padding:0}#loadUrl{background:var(--accent)}
       #browserHandle{position:fixed;z-index:149;top:max(5px,env(safe-area-inset-top));left:50%;display:none;transform:translateX(-50%);width:58px;border-radius:0 0 14px 14px;background:var(--panel)}#browserHandle.visible{display:block}
-      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));width:min(780px,calc(100dvw - 16px));height:min(820px,calc(100vh - 78px));height:min(820px,calc(100dvh - 78px));max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:0 24px 70px rgba(0,0,0,.52);overflow:hidden;backdrop-filter:blur(28px)}
+      #dock{position:fixed;z-index:180;left:8px;bottom:max(8px,env(safe-area-inset-bottom));width:min(780px,calc(100vw - 16px));width:min(780px,calc(100dvw - 16px));height:min(820px,calc(100vh - 78px));height:min(820px,calc(100dvh - 78px));max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;border:1px solid var(--line);border-radius:18px;color:var(--text);background:var(--panel);box-shadow:none;overflow:hidden}
       #dock.compact{width:120px;height:56px;border-radius:28px}.compactOnly{display:none;width:100%;height:100%}#dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}#dock.compact .fullOnly{display:none!important}
       #dockHeader{display:grid;grid-template-columns:44px minmax(0,1fr) 44px 44px;align-items:center;gap:5px;padding:6px;border-bottom:1px solid var(--line)}
       #dockGrip,#compactGrip{position:relative;background:transparent;touch-action:none;cursor:grab;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}#dockGrip::after,#compactGrip::after{content:'⠿';font-size:21px;color:var(--muted)}#dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}
@@ -104,7 +104,7 @@
       .toolbar{display:flex;flex-wrap:wrap;gap:7px}.toolbar>*{flex:1 1 110px;min-width:0}.toolbar .primary{background:var(--accent)}.toolbar .success{background:var(--green);color:#07170f}.toolbar .danger{background:rgba(240,100,109,.18);color:#ffbec2}.toolbar .warn{background:rgba(232,173,85,.15);color:#f7d49b}
       .card{margin-bottom:9px;padding:11px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.035)}.cardTitle{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px;font-size:13px;font-weight:820}.hint{color:var(--muted);font-size:11px;line-height:1.5}.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.field{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px;font-weight:690}.span2{grid-column:1/-1}
       #workflowEditor{padding-bottom:100px}.empty{padding:28px 12px;border:1px dashed rgba(192,197,255,.35);border-radius:13px;color:var(--muted);text-align:center}.dropZone{height:15px;margin:1px 5px;border:1px dashed transparent;border-radius:7px}.dropZone.dragOver{border-color:#aeb5ff;background:rgba(111,124,255,.22)}
-      .blockCard{position:relative;margin:6px 0;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;background:rgba(9,10,15,.55);overflow:hidden}.blockCard.category-gbf{border-left-color:var(--green)}.blockCard.category-control{border-left-color:var(--purple)}.blockCard.category-wait{border-left-color:var(--amber)}.blockCard.category-frame{border-left-color:#62b7ff}.blockCard.running{box-shadow:0 0 0 2px rgba(56,207,135,.55),0 10px 28px rgba(0,0,0,.3)}.blockCard.dragging{opacity:.48}
+      .blockCard{position:relative;margin:6px 0;border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:14px;background:rgba(9,10,15,.55);overflow:hidden}.blockCard.category-gbf{border-left-color:var(--green)}.blockCard.category-control{border-left-color:var(--purple)}.blockCard.category-wait{border-left-color:var(--amber)}.blockCard.category-frame{border-left-color:#62b7ff}.blockCard.running{outline:2px solid rgba(56,207,135,.55);outline-offset:-2px;box-shadow:none}.blockCard.dragging{opacity:.48}
       .blockHead{display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:5px;padding:6px;border-bottom:1px solid rgba(255,255,255,.08)}.blockHead button{min-height:38px;height:38px;padding:0 8px}.dragHandle{cursor:grab;touch-action:none}.blockName{min-width:0}.blockName strong{display:block;font-size:12px}.blockName small{display:block;color:var(--muted);font-size:10px;margin-top:2px}.blockTools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px}.blockTools button{min-width:38px;font-size:11px}.blockBody{padding:9px}.blockCard.collapsed .blockBody,.blockCard.collapsed .childArea{display:none}.childArea{margin:0 8px 9px 17px;padding:6px;border:1px dashed rgba(255,255,255,.14);border-radius:12px;background:rgba(255,255,255,.018)}.childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;color:var(--muted);font-size:10px;font-weight:760}.progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border-radius:999px;background:rgba(56,207,135,.15);color:#a6edc8;font-size:10px}
       .paletteGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.paletteButton{min-height:56px;padding:8px;text-align:left}.paletteButton strong{display:block;font-size:11px}.paletteButton small{display:block;margin-top:3px;color:var(--muted);font-size:9.5px}.paletteButton.gbf{background:rgba(56,207,135,.10)}.paletteButton.control{background:rgba(160,131,255,.11)}.paletteButton.wait{background:rgba(232,173,85,.10)}.paletteButton.frame{background:rgba(98,183,255,.10)}
       #runBar{position:sticky;bottom:-10px;z-index:5;display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px -1px -10px;padding:10px 1px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(transparent,rgba(18,20,27,.98) 22%)}#runWorkflow{background:var(--green);color:#07170f}#stopWorkflow{background:var(--red)}
@@ -115,7 +115,7 @@
       .compactOnly button{border-radius:26px}.compactOnly #compactRun{background:var(--green);color:#07170f}
       @media(max-width:620px){#dock{height:min(860px,calc(100vh - 70px))}.grid2,.grid3{grid-template-columns:1fr}.span2{grid-column:auto}.paletteGrid{grid-template-columns:1fr}.blockHead{grid-template-columns:36px minmax(0,1fr)}.blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:41px}.logEntry{grid-template-columns:58px 64px minmax(0,1fr)}}
       @media(max-width:430px){#browserBar{grid-template-columns:42px 42px minmax(70px,1fr) 56px 42px}#forwardFrame{display:none}.toolbar>*{flex-basis:90px}}
-      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:0 8px 24px rgba(0,0,0,.32)}button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
+      @media(hover:none) and (pointer:coarse){#browserBar,#dock{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}button{min-height:48px}.blockHead button,.legacyTools button{min-height:44px;height:44px}}
     </style>
     <iframe id="frame" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
     <div id="markerLayer"></div><div id="recordLayer"></div>
@@ -281,6 +281,7 @@
 
   function setStatus(message) {
     const next = String(message ?? '');
+    if (lightweightMode && (state.running || state.legacyRunning) && !/(?:エラー|停止|完了)/.test(next)) return;
     if (ui.status.textContent !== next) ui.status.textContent = next;
   }
 
@@ -321,6 +322,7 @@
   });
 
   function appendLog(message, level = '', blockName = '') {
+    if (level !== 'error') return;
     const log = {
       time: LOG_TIME_FORMATTER.format(new Date()),
       level,
@@ -341,7 +343,7 @@
     if (!state.logs.length) {
       const empty = document.createElement('div');
       empty.className = 'hint';
-      empty.textContent = '実行するとここに記録されます。';
+      empty.textContent = 'エラーが発生するとここに記録されます。';
       ui.logList.append(empty);
       return;
     }
@@ -1562,7 +1564,7 @@
       iframe.addEventListener('load', onFrameLoad);
       signal?.addEventListener('abort', onAbort, { once: true });
       if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
-      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : (lightweightMode ? 500 : 300));
+      if (allowInterval) interval = setInterval(evaluate, timeoutMs === 0 ? 1000 : (lightweightMode ? 750 : 300));
       bindObserver();
       evaluate();
     });
@@ -2444,13 +2446,15 @@
     let sawLoading = false;
     let loadingEnded = false;
     const observer = new MutationObserver(() => { sawMutation = true; });
-    observer.observe(observationRoot, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-      characterData: true
-    });
+    if (!lightweightMode) {
+      observer.observe(observationRoot, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+        characterData: true
+      });
+    }
     try {
       return await runObservedAction(
         waitSignal => monitorFrame(() => {
@@ -2460,7 +2464,7 @@
           if (loadingVisible) sawLoading = true;
           if (sawLoading && !loadingVisible) loadingEnded = true;
           const reconstructed = Boolean(listNow && listNow !== beforeList);
-          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+          const changedSignature = Boolean(!sawMutation && listNow && assistListSignature(listNow) !== beforeSignature);
           const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
           const slotReady = expectedSlot == null || activeAssistSlot(docNow) === expectedSlot;
           if (!slotReady || !completed || !listNow || loadingVisible) return false;
@@ -3251,6 +3255,7 @@
 
   function setRunningBlock(context, block, progress = '') {
     context.currentBlockId = block?.id || null;
+    if (lightweightMode) return;
     state.blockProgress.clear();
     clearRunningBlockUi();
     if (!block) return;
@@ -3267,6 +3272,7 @@
 
   function updateBlockProgress(context, block, progress) {
     context.currentBlockId = block.id;
+    if (lightweightMode) return;
     const text = String(progress ?? '');
     state.blockProgress.set(block.id, text);
     let card = state.runningCard;
@@ -3441,10 +3447,13 @@
       restartCount: 0
     };
     state.running = context;
+    const restoreExpandedDock = enterRuntimeCompactMode();
     ui.runWorkflow.disabled = true;
     ui.stopWorkflow.disabled = false;
-    renderPalette();
-    renderWorkflowEditor();
+    if (!lightweightMode) {
+      renderPalette();
+      renderWorkflowEditor();
+    }
     appendLog(`ワークフロー「${workflow.name}」を開始`);
     try {
       const loopCount = clamp(int(workflow.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
@@ -3492,6 +3501,7 @@
     } finally {
       clearPendingAutoAttack('ワークフローを終了しました');
       if (state.running === context) state.running = null;
+      leaveRuntimeCompactMode(restoreExpandedDock);
       state.blockProgress.clear();
       ui.runWorkflow.disabled = false;
       ui.stopWorkflow.disabled = true;
@@ -4099,9 +4109,10 @@
     const controller = new AbortController();
     const token = { controller, signal: controller.signal };
     state.legacyRunning = token;
+    const restoreExpandedDock = enterRuntimeCompactMode();
     ui.legacyRun.disabled = true;
     ui.legacyStop.disabled = false;
-    renderLegacy();
+    if (!lightweightMode) renderLegacy();
     saveLegacyState();
     appendLog('旧マクロを開始');
     try {
@@ -4129,6 +4140,7 @@
       }
     } finally {
       if (state.legacyRunning === token) state.legacyRunning = null;
+      leaveRuntimeCompactMode(restoreExpandedDock);
       ui.legacyRun.disabled = false;
       ui.legacyStop.disabled = true;
       renderLegacy();
@@ -4432,6 +4444,21 @@
     ui.browserBar.classList.toggle('hidden', hidden);
     ui.browserHandle.classList.toggle('visible', hidden);
     saveLegacyState();
+  }
+
+  function enterRuntimeCompactMode() {
+    if (!lightweightMode || dock.classList.contains('compact')) return false;
+    dock.classList.add('compact');
+    byId('toggleCompact').textContent = '□';
+    requestAnimationFrame(positionDock);
+    return true;
+  }
+
+  function leaveRuntimeCompactMode(restoreExpandedDock) {
+    if (!restoreExpandedDock) return;
+    dock.classList.remove('compact');
+    byId('toggleCompact').textContent = '—';
+    requestAnimationFrame(positionDock);
   }
 
   function setCompact(compact) {

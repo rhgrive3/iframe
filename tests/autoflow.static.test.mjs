@@ -162,3 +162,22 @@ test('game-route navigation recreates the iframe browsing context', () => {
   assert.ok(route.includes('await waitForFrameReady'));
   assert.ok(!route.includes('frameWindow().location.href'));
 });
+
+test('lightweight execution keeps only error logs and removes continuous overlay compositing', () => {
+  const logging = source.slice(source.indexOf('function appendLog'), source.indexOf('function renderLogs'));
+  assert.ok(logging.includes("if (level !== 'error') return;"));
+  assert.ok(source.includes("empty.textContent = 'エラーが発生するとここに記録されます。'"));
+  assert.ok(source.includes('--panel:#12141b'));
+  assert.ok(!source.includes('backdrop-filter:blur'));
+  assert.ok(source.includes('box-shadow:none'));
+  const monitor = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
+  assert.ok(monitor.includes('(lightweightMode ? 750 : 300)'));
+  const transition = source.slice(source.indexOf('async function runAssistListTransition'), source.indexOf('async function refreshAssistList'));
+  assert.ok(transition.includes('if (!lightweightMode)'));
+  assert.ok(transition.includes('!sawMutation && listNow'));
+  const runtimeUi = source.slice(source.indexOf('function setRunningBlock'), source.indexOf('async function runBlockList'));
+  assert.equal((runtimeUi.match(/if \(lightweightMode\) return;/g) || []).length, 2);
+  assert.ok(source.includes('function enterRuntimeCompactMode'));
+  assert.ok(source.includes('leaveRuntimeCompactMode(restoreExpandedDock)'));
+  assert.ok(source.includes("if (!lightweightMode) {\n      renderPalette();\n      renderWorkflowEditor();\n    }"));
+});
