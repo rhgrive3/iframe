@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 31;
+  const APP_VERSION = 32;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -24,6 +24,7 @@
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
   const MAX_LOGS = 100;
+  const MAX_RENDERED_LOGS = 40;
   const BATTLE_END_MESSAGE = '敵が倒されたため、このバトルは終了しました。';
 
   const ERROR_MESSAGES = Object.freeze({
@@ -39,7 +40,6 @@
     assistRows: '#prt-search-list > .btn-multi-raid.lis-raid.search',
     assistSlot: '#prt-search-switch .btn-search-switch',
     unclaimedAttention: '.btn-unconfirmed-result.flow-unclaimed.attention',
-    unclaimedEntry: '.prt-btn-flow .btn-unconfirmed.flow-unclaimed[data-href^="quest/assist/unclaimed/"]',
     supporterScreen: '#cnt-quest.cnt-quest.supporter_raid',
     supporterRows: '.btn-supporter.lis-supporter',
     supporterAuto: '.btn-autoselect-supporter',
@@ -298,6 +298,21 @@
     return row;
   }
 
+  let logScrollFrame = 0;
+
+  function scheduleLogScroll() {
+    if (logScrollFrame || state.destroyed || state.page !== 'logs') return;
+    logScrollFrame = requestAnimationFrame(() => {
+      logScrollFrame = 0;
+      if (!state.destroyed && state.page === 'logs') ui.logList.scrollTop = ui.logList.scrollHeight;
+    });
+  }
+
+  addCleanup(() => {
+    if (logScrollFrame) cancelAnimationFrame(logScrollFrame);
+    logScrollFrame = 0;
+  });
+
   function appendLog(message, level = '', blockName = '') {
     const log = {
       time: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
@@ -310,8 +325,8 @@
     if (state.page !== 'logs') return;
     ui.logList.querySelector('.hint')?.remove();
     ui.logList.append(createLogRow(log));
-    while (ui.logList.children.length > MAX_LOGS) ui.logList.firstElementChild?.remove();
-    ui.logList.scrollTop = ui.logList.scrollHeight;
+    while (ui.logList.children.length > MAX_RENDERED_LOGS) ui.logList.firstElementChild?.remove();
+    scheduleLogScroll();
   }
 
   function renderLogs() {
@@ -324,9 +339,9 @@
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const log of state.logs) fragment.append(createLogRow(log));
+    for (const log of state.logs.slice(-MAX_RENDERED_LOGS)) fragment.append(createLogRow(log));
     ui.logList.append(fragment);
-    ui.logList.scrollTop = ui.logList.scrollHeight;
+    scheduleLogScroll();
   }
 
   function showWorkflowError(error, block = null) {
@@ -1257,6 +1272,27 @@
     });
   }
 
+  async function runObservedAction(waitFactory, action, { signal, cancelMessage = '監視を解除しました' } = {}) {
+    throwIfAborted(signal);
+    const controller = new AbortController();
+    const relayAbort = () => {
+      if (!controller.signal.aborted) controller.abort(abortException(signal));
+    };
+    signal?.addEventListener('abort', relayAbort, { once: true });
+    const waitPromise = Promise.resolve().then(() => waitFactory(controller.signal));
+    waitPromise.catch(() => {});
+    try {
+      await action();
+      return await waitPromise;
+    } catch (error) {
+      if (!controller.signal.aborted) controller.abort(new DOMException(cancelMessage, 'AbortError'));
+      await waitPromise.catch(() => {});
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', relayAbort);
+    }
+  }
+
   function frameWindow() {
     const win = iframe.contentWindow;
     if (!win) throw new FlowError('iframeがまだ利用できません', 'FRAME_UNAVAILABLE');
@@ -1501,15 +1537,17 @@
 
   async function performFrameOperation(operation, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', requireChange = true } = {}) {
     const before = captureFrameState();
-    throwIfAborted(signal);
-    const readiness = waitForFrameReady({ signal, timeoutMs, expectedScreen, before, requireChange });
-    try {
-      operation();
-    } catch (error) {
-      readiness.catch(() => {});
-      throw new FlowError(`iframe操作に失敗しました: ${error.message}`, 'NAVIGATION_FAILED');
-    }
-    return readiness;
+    return runObservedAction(
+      waitSignal => waitForFrameReady({ signal: waitSignal, timeoutMs, expectedScreen, before, requireChange }),
+      () => {
+        try {
+          operation();
+        } catch (error) {
+          throw new FlowError(`iframe操作に失敗しました: ${error.message}`, 'NAVIGATION_FAILED');
+        }
+      },
+      { signal, cancelMessage: 'iframe操作監視を解除しました' }
+    );
   }
 
   function gameRouteUrl(route) {
@@ -2359,25 +2397,27 @@
         attributeFilter: ['class', 'style'],
         characterData: true
       });
-      const waitPromise = monitorFrame(() => {
-        const docNow = frameDocument();
-        const listNow = docNow.querySelector(SELECTORS.assistList);
-        const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
-        if (loadingVisible) sawLoading = true;
-        if (sawLoading && !loadingVisible) loadingEnded = true;
-        const reconstructed = Boolean(listNow && listNow !== beforeList);
-        const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
-        const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
-        if (!completed || !listNow || loadingVisible) return false;
-        return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
-      }, {
-        signal,
-        timeoutMs: config.timeoutSec * 1000,
-        stableMs: DEFAULT_STABLE_MS,
-        description: '救援一覧更新完了待ち'
-      });
-      await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
-      const completion = await waitPromise;
+      const completion = await runObservedAction(
+        waitSignal => monitorFrame(() => {
+          const docNow = frameDocument();
+          const listNow = docNow.querySelector(SELECTORS.assistList);
+          const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
+          if (loadingVisible) sawLoading = true;
+          if (sawLoading && !loadingVisible) loadingEnded = true;
+          const reconstructed = Boolean(listNow && listNow !== beforeList);
+          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
+          if (!completed || !listNow || loadingVisible) return false;
+          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+        }, {
+          signal: waitSignal,
+          timeoutMs: config.timeoutSec * 1000,
+          stableMs: DEFAULT_STABLE_MS,
+          description: '救援一覧更新完了待ち'
+        }),
+        () => jqTapStrict(refresh, { signal, label: '救援一覧更新' }),
+        { signal, cancelMessage: '救援一覧更新監視を解除しました' }
+      );
       return { tapped: true, waitedForCompletion: true, completion };
     } finally {
       observer?.disconnect();
@@ -2423,25 +2463,27 @@
         attributeFilter: ['class', 'style'],
         characterData: true
       });
-      const waitPromise = monitorFrame(() => {
-        const docNow = frameDocument();
-        const listNow = docNow.querySelector(SELECTORS.assistList);
-        const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
-        if (loadingVisible) sawLoading = true;
-        if (sawLoading && !loadingVisible) loadingEnded = true;
-        const reconstructed = Boolean(listNow && listNow !== beforeList);
-        const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
-        const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
-        if (activeAssistSlot(docNow) !== normalized || !completed || !listNow || loadingVisible) return false;
-        return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
-      }, {
-        signal,
-        timeoutMs: config.timeoutSec * 1000,
-        stableMs: DEFAULT_STABLE_MS,
-        description: `救援番号${normalized}切替完了待ち`
-      });
-      await jqTapStrict(button, { signal, label: `救援番号${normalized}` });
-      const completion = await waitPromise;
+      const completion = await runObservedAction(
+        waitSignal => monitorFrame(() => {
+          const docNow = frameDocument();
+          const listNow = docNow.querySelector(SELECTORS.assistList);
+          const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
+          if (loadingVisible) sawLoading = true;
+          if (sawLoading && !loadingVisible) loadingEnded = true;
+          const reconstructed = Boolean(listNow && listNow !== beforeList);
+          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
+          if (activeAssistSlot(docNow) !== normalized || !completed || !listNow || loadingVisible) return false;
+          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+        }, {
+          signal: waitSignal,
+          timeoutMs: config.timeoutSec * 1000,
+          stableMs: DEFAULT_STABLE_MS,
+          description: `救援番号${normalized}切替完了待ち`
+        }),
+        () => jqTapStrict(button, { signal, label: `救援番号${normalized}` }),
+        { signal, cancelMessage: `救援番号${normalized}切替監視を解除しました` }
+      );
       return { tapped: true, slot: normalized, completion };
     } finally {
       observer?.disconnect();
@@ -2922,15 +2964,15 @@
     if (stateInfo.type === 'MAX_ASSIST_ERROR') {
       const doc = frameDocument();
       const attention = doc.querySelector(SELECTORS.unclaimedAttention);
-      const entry = doc.querySelector(SELECTORS.unclaimedEntry) || attention;
-      if (attention && computedVisible(attention) && entry) {
-        const waitPromise = waitForGbfState(['UNCLAIMED_LIST'], {
+      if (attention && computedVisible(attention)) {
+        await performFrameOperation(() => {
+          frameWindow().location.href = gameRouteUrl('#quest/assist/unclaimed/0/0');
+        }, {
           signal: context.signal,
           timeoutMs: refreshConfig.timeoutSec * 1000,
-          description: '通知付き未確認バトル画面待ち'
+          expectedScreen: 'unclaimed',
+          requireChange: true
         });
-        await jqTapStrict(entry, { signal: context.signal, label: '通知付き未確認バトル' });
-        await waitPromise;
         const result = await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
         return { retry: true, reason: `最大3件エラー後に未確認バトルを${result.processed}件処理しました` };
       }
