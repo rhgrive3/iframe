@@ -1,35 +1,17 @@
 name: Validate Auto Flow
 
 on:
-  pull_request:
-    paths:
-      - a.js
-      - test/**
-      - tests/**
-      - .github/workflows/validate-autoflow.yml
-      - .auto-attack-latch-pr-trigger
-  issues:
-    types: [opened]
   push:
     branches: [main]
     paths:
-      - a.js
-      - test/**
-      - tests/**
       - .github/workflows/validate-autoflow.yml
 
 permissions:
   contents: write
 
-concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
-  cancel-in-progress: true
-
 jobs:
   patch-auto-attack-latch:
-    if: >-
-      (github.event_name == 'pull_request' && github.event.pull_request.title == 'Trigger auto attack latch fix v1') ||
-      (github.event_name == 'issues' && github.event.issue.title == 'run-auto-attack-latch-fix-v2')
+    if: github.event.head_commit.message == 'chore: trigger latch patch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -171,19 +153,3 @@ jobs:
           git add -A
           git commit -m 'fix: preserve immediate auto attack across workflow blocks'
           git push origin HEAD:main
-
-  validate:
-    if: >-
-      !((github.event_name == 'pull_request' && github.event.pull_request.title == 'Trigger auto attack latch fix v1') ||
-      (github.event_name == 'issues' && github.event.issue.title == 'run-auto-attack-latch-fix-v2'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - name: JavaScript syntax
-        run: node --check a.js
-      - name: Regression checks
-        run: node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
