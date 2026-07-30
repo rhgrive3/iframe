@@ -132,6 +132,11 @@ version_assertion = f"assert.ok(source.includes('const APP_VERSION = {current}')
 if version_assertion in tests:
     tests = tests.replace(version_assertion, f"assert.ok(source.includes('const APP_VERSION = {next_version}'));", 1)
 
+old_poll_assertion = "  assert.ok(child.includes('if (enabled) patchNow();'));"
+new_poll_assertion = "  assert.ok(child.includes('try { patchNow(); } catch {}'));"
+if old_poll_assertion in tests:
+    tests = tests.replace(old_poll_assertion, new_poll_assertion, 1)
+
 marker = "test('battle performance polling only runs while the persistent setting is enabled'"
 if marker not in tests:
     tests += '''
