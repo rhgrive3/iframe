@@ -16,14 +16,22 @@
   );
   const WORKFLOW_STORAGE_KEY = '__fullscreen_iframe_autoclicker_workflows_v1__';
   const WORKFLOW_AUTOSAVE_KEY = '__fullscreen_iframe_autoclicker_workflow_autosave_v1__';
+  const WORKFLOW_CHECKPOINT_KEY = '__fullscreen_iframe_autoclicker_workflow_checkpoint_v1__';
   const MAX_REPEAT_COUNT = 10_000;
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
   const MAX_WORKFLOW_RESTARTS = 10_000;
+  const WORKFLOW_YIELD_INTERVAL = 64;
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
   const MAX_LOGS = 20;
+  const MAX_WORKFLOW_HISTORY = 40;
+  const MAX_WORKFLOW_HISTORY_BYTES = 12_000_000;
+  const MAX_IMPORT_BYTES = 2_000_000;
+  const MAX_IMPORTED_WORKFLOWS = 100;
+  const MAX_IMPORTED_BLOCKS = 5_000;
+  const MAX_IMPORTED_DEPTH = 30;
   const LOG_TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
     hour: '2-digit',
     minute: '2-digit',
@@ -161,8 +169,8 @@
 
       #dock{
         position:fixed;z-index:180;left:10px;bottom:max(10px,env(safe-area-inset-bottom));
-        width:min(820px,calc(100vw - 20px));width:min(820px,calc(100dvw - 20px));
-        height:min(860px,calc(100vh - 86px));height:min(860px,calc(100dvh - 86px));
+        width:var(--dock-width,min(820px,calc(100vw - 20px)));width:var(--dock-width,min(820px,calc(100dvw - 20px)));
+        height:var(--dock-height,min(860px,calc(100vh - 86px)));height:var(--dock-height,min(860px,calc(100dvh - 86px)));
         max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;
         border:1px solid var(--line-strong);border-radius:var(--radius-lg);color:var(--text);
         background:var(--panel);box-shadow:var(--shadow-lg);overflow:hidden;isolation:isolate
@@ -176,7 +184,7 @@
       .compactOnly{display:none;width:100%;height:100%}
       #dock.compact .compactOnly{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
       #dock.compact .fullOnly{display:none!important}
-      .compactOnly button{min-height:100%;border:0;border-radius:28px;background:transparent}
+      .compactOnly button{display:grid;min-height:100%;place-items:center;padding:0;border:0;border-radius:28px;background:transparent;line-height:1}
       .compactOnly #compactRun{border-left:1px solid var(--line);border-radius:0 28px 28px 0;background:var(--green-soft);color:#aef1cf;font-size:15px}
       .compactOnly #compactRun.is-stop{background:var(--red-soft);color:#ffc0c6}
 
@@ -193,8 +201,26 @@
         content:'';position:absolute;inset:13px;border-radius:2px;
         background:radial-gradient(circle,#aeb7ff 1.5px,transparent 1.7px);background-size:6px 6px
       }
-      #compactGrip::after{content:'⠿';font-size:19px;color:var(--muted)}
+      #compactGrip::after{
+        content:'';display:block;width:18px;height:18px;border-radius:4px;
+        background:radial-gradient(circle,#aeb7ff 1.5px,transparent 1.8px);background-position:center;background-size:6px 6px
+      }
       #dockGrip.is-dragging,#compactGrip.is-dragging{cursor:grabbing}
+      #dockHeader{cursor:move;touch-action:none;user-select:none;-webkit-user-select:none}
+      #dockHeader.is-dragging{cursor:grabbing}
+      #dockHeader button{cursor:pointer}
+      .resizeHandle{
+        position:absolute;z-index:20;bottom:0;width:34px;min-height:34px;height:34px;padding:0;border:0;background:transparent;
+        touch-action:none;opacity:.55
+      }
+      .resizeHandle:hover,.resizeHandle:focus-visible{background:rgba(124,140,255,.08);opacity:1}
+      .resizeHandle::before{
+        content:'';position:absolute;right:7px;bottom:7px;width:12px;height:12px;
+        border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);border-radius:0 0 2px
+      }
+      #resizeDockLeft{left:0;cursor:nesw-resize;transform:scaleX(-1)}
+      #resizeDockRight{right:0;cursor:nwse-resize}
+      .resizeHandle.is-dragging{opacity:1}
       #toggleCompact,#closeApp{width:40px;height:40px;min-height:40px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:17px}
       #toggleCompact:hover:not(:disabled){color:var(--text);background:var(--surface)}
       #closeApp:hover:not(:disabled){color:#ffc0c6;background:var(--red-soft)}
@@ -229,7 +255,7 @@
       #page-workflow.active{display:flex;flex-direction:column}
       #page-workflow>*{flex-shrink:0}
       #page-workflow>.pageIntro{order:0}
-      #workflowError{order:1}
+      #workflowError,#externalConflict{order:1}
       .workflowSettings{order:2}
       .editorCard{order:3}
       .paletteCard{order:4}
@@ -278,6 +304,9 @@
       .toolbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
       .toolbar>*{flex:1 1 108px;min-width:0}
       .toolbar.compactActions>*{flex:0 1 auto}
+      .historyActions{align-items:center}
+      .historyActions::after{content:'';width:1px;height:24px;margin:0 3px;background:var(--line)}
+      .historyActions button{min-width:92px}
       .toolbar button{min-height:40px;padding:0 12px;font-size:10.5px}
       .workflowActions{padding-top:1px}
       .workflowActions button{flex-basis:94px}
@@ -290,6 +319,8 @@
       .saveState[data-state=saved]::before{background:var(--green)}
       .saveState[data-state=error]{color:#ffc1c6}
       .saveState[data-state=error]::before{background:var(--red)}
+      .saveState[data-state=conflict]{color:#f2d29d}
+      .saveState[data-state=conflict]::before{background:var(--amber)}
 
       .paletteCard{padding:0;overflow:hidden}
       .paletteCard>summary{position:relative;z-index:1;margin:0;padding:14px 15px;list-style:none;cursor:pointer}
@@ -354,6 +385,8 @@
       .blockCard:hover{border-color:var(--line-strong)}
       .blockCard.running{border-color:rgba(70,212,149,.56);outline:2px solid rgba(70,212,149,.24);outline-offset:1px;box-shadow:none}
       .blockCard.running::after{content:'';position:absolute;z-index:4;top:0;right:0;left:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);animation:runSweep 1.8s linear infinite}
+      .blockCard.validation-error{border-color:rgba(255,107,120,.55);box-shadow:0 0 0 2px rgba(255,107,120,.08)}
+      .blockCard.validation-warning{border-color:rgba(240,182,92,.45)}
       .blockCard.dragging{opacity:.45;transform:scale(.99)}
       .blockHead{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:58px;padding:8px 9px 8px 10px;border-bottom:1px solid rgba(255,255,255,.065)}
       .blockHead button{min-height:34px;height:34px}
@@ -369,6 +402,7 @@
       .blockName strong{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-soft);font-size:11.5px;line-height:1.3}
       .blockName small{grid-column:2/-1;display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:9px;line-height:1.3}
       .blockName>.progressBadge{grid-column:3;grid-row:1/3}
+      .blockBadges{grid-column:3;grid-row:1/3;display:flex;align-items:center;gap:4px}
       .blockTools{display:flex;flex-wrap:nowrap;justify-content:flex-end;gap:3px}
       .blockTools button{position:relative;min-width:34px;width:34px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:12px}
       .blockTools button:hover:not(:disabled){border-color:var(--line);background:var(--surface);color:var(--text)}
@@ -382,6 +416,8 @@
       .childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;padding:1px 2px 4px;color:var(--muted);font-size:9px;font-weight:740}
       .childLabel button{min-height:30px;height:30px;padding:0 9px;border-color:transparent;background:transparent;color:#bfc6ff;font-size:9px}
       .progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border:1px solid rgba(70,212,149,.18);border-radius:999px;background:var(--green-soft);color:#a6edc8;font-size:8.5px;white-space:nowrap}
+      .validationBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border:1px solid rgba(240,182,92,.24);border-radius:999px;background:var(--amber-soft);color:#f2d29d;font-size:8.5px;white-space:nowrap}
+      .validationBadge.error{border-color:rgba(255,107,120,.24);background:var(--red-soft);color:#ffc0c6}
 
       #runBar{
         position:sticky;z-index:6;bottom:0;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;
@@ -392,6 +428,20 @@
       #runWorkflow{border-color:rgba(70,212,149,.34);background:linear-gradient(180deg,#54dda1 0%,#35bf82 100%);color:#071d13}
       #runWorkflow:hover:not(:disabled){background:linear-gradient(180deg,#62e4aa 0%,#3dc98a 100%)}
       #stopWorkflow{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffc0c6}
+      #validationBar{
+        grid-column:1/-1;display:grid;grid-template-columns:9px minmax(0,1fr) auto auto;align-items:center;gap:9px;
+        min-height:44px;padding:7px 8px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.14)
+      }
+      #validationBar::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--muted)}
+      #validationBar[data-tone=success]::before{background:var(--green)}
+      #validationBar[data-tone=warning]::before{background:var(--amber)}
+      #validationBar[data-tone=error]::before{background:var(--red)}
+      .validationText{min-width:0}
+      .validationText strong,.validationText small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .validationText strong{color:var(--text-soft);font-size:10px}
+      .validationText small{margin-top:2px;color:var(--muted);font-size:9px}
+      #validationBar button{min-height:34px;height:34px;padding:0 10px;font-size:9.5px}
+      #validationFocus[hidden]{display:none}
 
       #legacyActionList{display:grid;gap:9px;padding-bottom:16px}
       .legacyRow{padding:12px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025)}
@@ -434,6 +484,9 @@
       .logTime{color:var(--muted);font-variant-numeric:tabular-nums}
       .errorBox{display:none;margin-bottom:12px;padding:12px;border:1px solid rgba(255,107,120,.36);border-radius:13px;background:var(--red-soft);color:#ffc8cd;font-size:10.5px;line-height:1.55}
       .errorBox.show{display:block}
+      .errorBox.conflictBox{border-color:rgba(240,182,92,.38);background:var(--amber-soft);color:#f2d29d}
+      .conflictBox strong{display:block;color:#ffe0ab;font-size:11px}
+      .conflictBox p{margin:4px 0 0;color:#d7bd91}
       .errorMessage{font-weight:680;overflow-wrap:anywhere}
       .errorActions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
       .errorActions button{min-height:38px;padding:6px;font-size:10px}
@@ -501,6 +554,10 @@
         .childArea{margin:0 6px 7px 15px;padding:5px}
         #runBar{margin:0 -9px;padding:10px 9px calc(9px + env(safe-area-inset-bottom))}
         #runBar button{min-height:43px}
+        #validationBar{grid-template-columns:8px minmax(0,1fr) auto;padding:7px}
+        #validationFocus{display:none!important}
+        #validateWorkflow{min-width:78px}
+        .historyActions button{min-width:0;flex:1}
         .logEntry{grid-template-columns:50px 68px minmax(0,1fr);gap:5px;padding:7px 4px;font-size:9px}
       }
       @media(max-width:430px){
@@ -522,9 +579,28 @@
         #recordToolbar button{min-height:44px;height:44px}
         .paletteButton:hover:not(:disabled){transform:none}
       }
+      @media(max-width:620px){
+        #browserBar button,#browserBar input{height:38px;min-height:38px}
+        #dockHeader{grid-template-columns:34px minmax(0,1fr) 34px 34px;min-height:48px;padding:4px 6px}
+        #dockGrip,#toggleCompact,#closeApp{width:34px;height:34px;min-height:34px}
+        #dockGrip::before{inset:10px}
+        .mainTab{height:36px;min-height:36px}
+        input,select,textarea{min-height:36px;padding:6px 8px;font-size:16px}
+        .grid2,.grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
+        .span2{grid-column:1/-1}
+        .field{gap:4px}
+        .toolbar button{min-height:34px;height:34px;padding:0 7px}
+        .blockHead button,.legacyTools button{min-height:32px;height:32px}
+        .blockTools button{min-width:32px;width:32px}
+        .paletteFilter{min-height:34px;height:34px}
+        .paletteButton{min-height:46px}
+        #runBar button{min-height:40px;height:40px}
+        #validationBar button{min-height:32px;height:32px}
+      }
       @media(forced-colors:active){
         #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
         .blockCard::before,.paletteButton::after{width:5px}
+        .resizeHandle{border:1px solid CanvasText}
       }
     </style>
     <iframe id="frame" title="自動操作の対象ページ" allow="fullscreen; autoplay; clipboard-read; clipboard-write" referrerpolicy="no-referrer-when-downgrade"></iframe>
@@ -581,6 +657,15 @@
               <button id="workflowErrorDismiss" class="ghost">閉じる</button>
             </div>
           </div>
+          <div id="externalConflict" class="errorBox conflictBox" role="alert" tabindex="-1">
+            <strong>別のタブでワークフローが更新されました</strong>
+            <p>自動上書きを停止しています。利用する内容を選んでください。</p>
+            <div class="errorActions">
+              <button id="loadExternalWorkflows" class="primary">別タブ版を読み込む</button>
+              <button id="keepLocalWorkflows">このタブを優先</button>
+              <button id="backupConflictWorkflows" class="ghost">現在版をJSON出力</button>
+            </div>
+          </div>
           <details id="workflowSettingsPanel" class="card workflowSettings" open>
             <summary class="cardHeader">
               <div class="cardTitleGroup">
@@ -601,7 +686,9 @@
               <button id="duplicateWorkflow" class="secondaryAction">複製</button>
               <button id="deleteWorkflow" class="danger">削除</button>
               <button id="exportWorkflow" class="ghost">JSON出力</button>
+              <button id="exportAllWorkflows" class="ghost">全フロー出力</button>
               <button id="importWorkflow" class="ghost">JSON読込</button>
+              <button id="restoreCheckpoint" class="ghost" disabled>復旧ポイント</button>
             </div>
           </details>
           <article class="card templateCard">
@@ -652,13 +739,20 @@
               </div>
               <span id="workflowStats" class="hint statsPill"></span>
             </div>
-            <div class="toolbar compactActions" role="group" aria-label="ブロック表示操作">
+            <div class="toolbar compactActions historyActions" role="group" aria-label="編集履歴とブロック表示操作">
+              <button id="undoWorkflow" class="ghost" title="元に戻す（Ctrl/⌘ + Z）" disabled>↶ 元に戻す</button>
+              <button id="redoWorkflow" class="ghost" title="やり直す（Ctrl/⌘ + Shift + Z）" disabled>↷ やり直す</button>
               <button id="expandAllBlocks" class="ghost">すべて展開</button>
               <button id="collapseAllBlocks" class="ghost">すべて折りたたむ</button>
             </div>
             <div id="workflowEditor"></div>
           </article>
           <div id="runBar" role="group" aria-label="ワークフロー実行操作">
+            <div id="validationBar" data-tone="idle">
+              <div class="validationText"><strong id="validationTitle">実行前チェック</strong><small id="validationMessage">変更内容は実行時に自動確認されます</small></div>
+              <button id="validationFocus" class="ghost" hidden>問題を確認</button>
+              <button id="validateWorkflow" class="ghost">チェック</button>
+            </div>
             <button id="runWorkflow">▶ フローを実行</button>
             <button id="stopWorkflow" disabled>■ 停止</button>
           </div>
@@ -706,12 +800,14 @@
           <article class="card">
             <div class="cardHeader">
               <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">≡</span><div class="cardHeading" role="heading" aria-level="3"><strong>エラー履歴</strong><small>直近20件を保持</small></div></div>
-              <button id="clearLogs" class="ghost">すべて消去</button>
+              <div class="toolbar compactActions"><button id="copyLogs" class="ghost">ログをコピー</button><button id="clearLogs" class="ghost">すべて消去</button></div>
             </div>
             <div id="logList" class="logList"></div>
           </article>
         </section>
       </div>
+      <button id="resizeDockLeft" class="resizeHandle fullOnly" aria-label="左下からパネルの大きさを変更" title="ドラッグしてサイズ変更・ダブルクリックで初期化"></button>
+      <button id="resizeDockRight" class="resizeHandle fullOnly" aria-label="右下からパネルの大きさを変更" title="ドラッグしてサイズ変更・ダブルクリックで初期化"></button>
     </div>
     <div id="toast"></div>
     <div id="announcer" class="srOnly" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -736,7 +832,10 @@
     runWorkflow: byId('runWorkflow'), stopWorkflow: byId('stopWorkflow'), legacyList: byId('legacyActionList'), legacyCount: byId('legacyCount'),
     legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
-    recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer')
+    recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
+    undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
+    validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
+    validateWorkflow: byId('validateWorkflow')
   };
 
   const state = {
@@ -746,6 +845,15 @@
     toastTimer: null,
     announceFrame: null,
     autosaveTimer: null,
+    workflowUndo: [],
+    workflowRedo: [],
+    historyRestoring: false,
+    validationIssues: [],
+    recoveredFromCheckpoint: false,
+    externalWorkflowConflict: false,
+    externalWorkflowStore: null,
+    workflowStorageUpdatedAt: 0,
+    workflowStorageFingerprint: '',
     workflows: null,
     selectedWorkflowId: null,
     insertion: null,
@@ -768,7 +876,9 @@
     runningCard: null,
     runningBadge: null,
     dockX: null,
-    dockY: null
+    dockY: null,
+    dockWidth: null,
+    dockHeight: null
   };
 
   const cleanup = new Set();
@@ -778,6 +888,7 @@
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
   const int = (value, fallback = 0) => Math.round(finite(value, fallback));
   const nowId = prefix => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
+  const instanceId = nowId('instance');
   const sleepMicrotask = () => new Promise(resolve => queueMicrotask(resolve));
 
   const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
@@ -937,6 +1048,8 @@
     };
     state.logs.push(log);
     if (state.logs.length > MAX_LOGS) state.logs.splice(0, state.logs.length - MAX_LOGS);
+    byId('copyLogs').disabled = false;
+    byId('clearLogs').disabled = false;
     if (state.page !== 'logs') return;
     ui.logList.querySelector('.logEmpty')?.remove();
     ui.logList.append(createLogRow(log));
@@ -946,6 +1059,8 @@
 
   function renderLogs() {
     ui.logList.textContent = '';
+    byId('copyLogs').disabled = !state.logs.length;
+    byId('clearLogs').disabled = !state.logs.length;
     if (!state.logs.length) {
       const empty = document.createElement('div');
       empty.className = 'empty logEmpty';
@@ -959,13 +1074,39 @@
     scheduleLogScroll();
   }
 
+  async function copyErrorLogs() {
+    if (!state.logs.length) return toast('コピーできるエラーログはありません');
+    const text = [
+      `AutoFlow Studio v${APP_VERSION}`,
+      `出力日時: ${new Date().toLocaleString('ja-JP')}`,
+      ...state.logs.map(log => `[${log.time}] [${log.blockName || '全体'}] ${log.message}`)
+    ].join('\n');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const active = shadow.activeElement;
+      const textarea = element('textarea', { attrs: { 'aria-hidden': 'true' } });
+      textarea.value = text;
+      Object.assign(textarea.style, { position: 'fixed', left: '-9999px', opacity: '0' });
+      shadow.append(textarea);
+      textarea.select();
+      const copied = document.execCommand?.('copy');
+      textarea.remove();
+      active?.focus?.({ preventScroll: true });
+      if (!copied) return toast('ログをコピーできませんでした');
+    }
+    toast(`${state.logs.length}件のエラーログをコピーしました`);
+  }
+
   function showWorkflowError(error, block = null) {
     const workflow = currentWorkflow();
     const screen = safeDetectScreenState();
     const message = error?.message || String(error);
-    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / 理由: ${message}`;
+    const code = String(error?.code || 'UNEXPECTED_ERROR');
+    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / コード: ${code} / 理由: ${message}`;
     ui.error.classList.add('show');
-    appendLog(message, 'error', block ? blockLabel(block.type) : '実行');
+    appendLog(`[${code}] ${workflow?.name || '不明'} / ${screen.type}: ${message}`, 'error', block ? blockLabel(block.type) : '実行');
     setPage('workflow');
     requestAnimationFrame(() => {
       const behavior = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
@@ -1270,21 +1411,37 @@
     });
   }
 
+  function repairWorkflowStoreIds(workflows) {
+    const workflowIds = new Set();
+    const blockIds = new Set();
+    for (const workflow of workflows) {
+      if (workflowIds.has(workflow.id)) workflow.id = nowId('workflow');
+      workflowIds.add(workflow.id);
+      walkBlocks(workflow.blocks, block => {
+        if (blockIds.has(block.id)) block.id = nowId('block');
+        blockIds.add(block.id);
+        return null;
+      });
+    }
+    return workflows;
+  }
+
   function migrateWorkflowStore(raw) {
     if (!raw) {
       const workflow = defaultWorkflow();
       return { version: 1, currentId: workflow.id, workflows: [workflow] };
     }
     if (Array.isArray(raw)) {
-      const workflows = raw.map(normalizeWorkflow);
+      const workflows = repairWorkflowStoreIds(raw.map(normalizeWorkflow));
       const fallback = workflows[0] || defaultWorkflow();
       return { version: 1, currentId: fallback.id, workflows: workflows.length ? workflows : [fallback] };
     }
     if (Array.isArray(raw.blocks)) {
       const workflow = normalizeWorkflow(raw);
+      repairWorkflowStoreIds([workflow]);
       return { version: 1, currentId: workflow.id, workflows: [workflow] };
     }
-    const workflows = (Array.isArray(raw.workflows) ? raw.workflows : []).map(normalizeWorkflow);
+    const workflows = repairWorkflowStoreIds((Array.isArray(raw.workflows) ? raw.workflows : []).map(normalizeWorkflow));
     if (!workflows.length) workflows.push(defaultWorkflow());
     const currentId = workflows.some(workflow => workflow.id === raw.currentId) ? raw.currentId : workflows[0].id;
     return { version: 1, currentId, workflows };
@@ -1301,9 +1458,16 @@
   function loadWorkflowStore() {
     const primary = readJson(WORKFLOW_STORAGE_KEY);
     const autosave = readJson(WORKFLOW_AUTOSAVE_KEY);
-    const source = autosave?.updatedAt > (primary?.updatedAt || 0) ? autosave.store : primary;
+    const checkpoint = readJson(WORKFLOW_CHECKPOINT_KEY);
+    let source = autosave?.updatedAt > (primary?.updatedAt || 0) ? autosave.store : primary;
+    if (!source && checkpoint?.store?.workflows?.length) {
+      source = checkpoint.store;
+      state.recoveredFromCheckpoint = true;
+    }
     state.workflows = migrateWorkflowStore(source);
     state.selectedWorkflowId = state.workflows.currentId;
+    state.workflowStorageUpdatedAt = finite(source?.updatedAt, 0);
+    state.workflowStorageFingerprint = source ? JSON.stringify(source) : '';
   }
 
   function workflowStoreSnapshot() {
@@ -1311,32 +1475,253 @@
       version: 1,
       currentId: state.selectedWorkflowId,
       workflows: state.workflows.workflows.map(workflow => normalizeWorkflow(workflow)),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      writerId: instanceId
     };
   }
 
+  function workflowStateSnapshot() {
+    return deepClone({
+      version: 1,
+      currentId: state.selectedWorkflowId,
+      workflows: state.workflows.workflows
+    });
+  }
+
   function setAutosaveStatus(status) {
-    const labels = { saving: '保存中', saved: '保存済み', error: '保存失敗' };
+    const labels = { saving: '保存中', saved: '保存済み', error: '保存失敗', conflict: '別タブ更新あり' };
     ui.autosave.textContent = labels[status] || labels.saved;
     ui.autosave.dataset.state = status;
   }
 
-  function saveWorkflowStore({ immediate = false } = {}) {
+  function persistWorkflowStore({ force = false } = {}) {
+    clearTimeout(state.autosaveTimer);
+    state.autosaveTimer = null;
+    if (state.externalWorkflowConflict && !force) {
+      setAutosaveStatus('conflict');
+      return false;
+    }
+    try {
+      const snapshot = workflowStoreSnapshot();
+      const serialized = JSON.stringify(snapshot);
+      localStorage.setItem(WORKFLOW_STORAGE_KEY, serialized);
+      localStorage.setItem(WORKFLOW_AUTOSAVE_KEY, JSON.stringify({ updatedAt: snapshot.updatedAt, store: snapshot }));
+      state.workflowStorageUpdatedAt = snapshot.updatedAt;
+      state.workflowStorageFingerprint = serialized;
+      setAutosaveStatus('saved');
+      return true;
+    } catch (error) {
+      setAutosaveStatus('error');
+      appendLog(`ワークフロー保存失敗: ${error.message}`, 'error');
+      return false;
+    }
+  }
+
+  function saveWorkflowStore({ immediate = false, force = false } = {}) {
     setAutosaveStatus('saving');
     clearTimeout(state.autosaveTimer);
-    const perform = () => {
-      try {
-        const snapshot = workflowStoreSnapshot();
-        localStorage.setItem(WORKFLOW_STORAGE_KEY, JSON.stringify(snapshot));
-        localStorage.setItem(WORKFLOW_AUTOSAVE_KEY, JSON.stringify({ updatedAt: snapshot.updatedAt, store: snapshot }));
-        setAutosaveStatus('saved');
-      } catch (error) {
-        setAutosaveStatus('error');
-        appendLog(`ワークフロー保存失敗: ${error.message}`, 'error');
-      }
-    };
-    if (immediate) perform();
-    else state.autosaveTimer = setTimeout(perform, 180);
+    if (immediate) return persistWorkflowStore({ force });
+    state.autosaveTimer = setTimeout(() => persistWorkflowStore({ force }), 180);
+    return true;
+  }
+
+  function flushWorkflowStore() {
+    if (state.autosaveTimer) persistWorkflowStore();
+  }
+
+  function syncWorkflowHistoryControls() {
+    const locked = Boolean(state.running || state.legacyRunning);
+    ui.undoWorkflow.disabled = locked || !state.workflowUndo.length;
+    ui.redoWorkflow.disabled = locked || !state.workflowRedo.length;
+    const undoLabel = state.workflowUndo.at(-1)?.label;
+    const redoLabel = state.workflowRedo.at(-1)?.label;
+    ui.undoWorkflow.title = undoLabel ? `${undoLabel}を元に戻す（Ctrl/⌘ + Z）` : '元に戻せる編集はありません';
+    ui.redoWorkflow.title = redoLabel ? `${redoLabel}をやり直す（Ctrl/⌘ + Shift + Z）` : 'やり直せる編集はありません';
+  }
+
+  function trimWorkflowHistory(stack) {
+    while (stack.length > MAX_WORKFLOW_HISTORY) stack.shift();
+    let bytes = stack.reduce((total, entry) => total + (entry.bytes || JSON.stringify(entry.snapshot).length), 0);
+    while (stack.length > 1 && bytes > MAX_WORKFLOW_HISTORY_BYTES) {
+      const removed = stack.shift();
+      bytes -= removed.bytes || JSON.stringify(removed.snapshot).length;
+    }
+  }
+
+  function commitWorkflowMutation(label, mutate) {
+    if (state.historyRestoring || !state.workflows) return mutate();
+    const before = workflowStateSnapshot();
+    const fingerprint = JSON.stringify(before);
+    let result;
+    try {
+      result = mutate();
+    } catch (error) {
+      state.workflows = migrateWorkflowStore(before);
+      state.selectedWorkflowId = state.workflows.currentId;
+      throw error;
+    }
+    if (JSON.stringify(workflowStateSnapshot()) !== fingerprint) {
+      state.workflowUndo.push({ label, snapshot: before, bytes: fingerprint.length });
+      trimWorkflowHistory(state.workflowUndo);
+      state.workflowRedo.length = 0;
+      invalidateWorkflowValidation();
+      syncWorkflowHistoryControls();
+      if (state.externalWorkflowConflict) saveWorkflowCheckpoint('別タブ競合中のこのタブ');
+    }
+    return result;
+  }
+
+  function applyWorkflowHistorySnapshot(snapshot) {
+    let saved = false;
+    state.historyRestoring = true;
+    try {
+      state.workflows = migrateWorkflowStore(deepClone(snapshot));
+      state.selectedWorkflowId = state.workflows.currentId;
+      state.collapsed.clear();
+      resetInsertion();
+      clearWorkflowError({ restoreFocus: false });
+      invalidateWorkflowValidation();
+      saved = saveWorkflowStore({ immediate: true });
+      renderWorkflowSelect();
+      syncRunControls();
+    } finally {
+      state.historyRestoring = false;
+    }
+    return saved;
+  }
+
+  function undoWorkflowChange() {
+    if (state.running || state.legacyRunning) return;
+    const entry = state.workflowUndo.pop();
+    if (!entry) return toast('元に戻せる編集はありません');
+    const current = workflowStateSnapshot();
+    state.workflowRedo.push({ label: entry.label, snapshot: current, bytes: JSON.stringify(current).length });
+    trimWorkflowHistory(state.workflowRedo);
+    const saved = applyWorkflowHistorySnapshot(entry.snapshot);
+    syncWorkflowHistoryControls();
+    toast(saved ? `${entry.label}を元に戻しました` : '元に戻しましたが保存に失敗しました');
+  }
+
+  function redoWorkflowChange() {
+    if (state.running || state.legacyRunning) return;
+    const entry = state.workflowRedo.pop();
+    if (!entry) return toast('やり直せる編集はありません');
+    const current = workflowStateSnapshot();
+    state.workflowUndo.push({ label: entry.label, snapshot: current, bytes: JSON.stringify(current).length });
+    trimWorkflowHistory(state.workflowUndo);
+    const saved = applyWorkflowHistorySnapshot(entry.snapshot);
+    syncWorkflowHistoryControls();
+    toast(saved ? `${entry.label}をやり直しました` : 'やり直しましたが保存に失敗しました');
+  }
+
+  function readWorkflowCheckpoint() {
+    const checkpoint = readJson(WORKFLOW_CHECKPOINT_KEY);
+    return checkpoint?.store?.workflows?.length ? checkpoint : null;
+  }
+
+  function syncWorkflowCheckpointControl() {
+    const button = byId('restoreCheckpoint');
+    const checkpoint = readWorkflowCheckpoint();
+    button.disabled = Boolean(state.running || state.legacyRunning || !checkpoint);
+    button.title = checkpoint
+      ? `${new Date(checkpoint.savedAt).toLocaleString('ja-JP')} · ${checkpoint.label || '保存状態'}`
+      : '復旧ポイントはまだありません';
+  }
+
+  function saveWorkflowCheckpoint(label) {
+    try {
+      localStorage.setItem(WORKFLOW_CHECKPOINT_KEY, JSON.stringify({
+        version: 1,
+        savedAt: Date.now(),
+        label,
+        store: workflowStateSnapshot()
+      }));
+      syncWorkflowCheckpointControl();
+      return true;
+    } catch (error) {
+      appendLog(`復旧ポイント保存失敗: ${error.message}`, 'error');
+      return false;
+    }
+  }
+
+  function restoreWorkflowCheckpoint() {
+    if (state.running || state.legacyRunning) return;
+    const checkpoint = readWorkflowCheckpoint();
+    if (!checkpoint) return toast('復旧ポイントはありません');
+    const savedAt = new Date(checkpoint.savedAt).toLocaleString('ja-JP');
+    if (!confirm(`${savedAt}の「${checkpoint.label || '保存状態'}」へ復元しますか？\n現在の状態も復旧ポイントとして退避します。`)) return;
+    const restoreTarget = deepClone(checkpoint.store);
+    saveWorkflowCheckpoint('復元前の状態');
+    commitWorkflowMutation('復旧ポイントの復元', () => {
+      state.workflows = migrateWorkflowStore(restoreTarget);
+      state.selectedWorkflowId = state.workflows.currentId;
+    });
+    state.collapsed.clear();
+    resetInsertion();
+    const saved = saveWorkflowStore({ immediate: true });
+    renderWorkflowSelect();
+    syncWorkflowCheckpointControl();
+    toast(saved ? '復旧ポイントを復元しました' : '復元しましたが保存に失敗しました');
+  }
+
+  function setExternalConflictVisible(visible) {
+    byId('externalConflict').classList.toggle('show', visible);
+  }
+
+  function handleExternalWorkflowUpdate(event) {
+    if (state.destroyed || event.key !== WORKFLOW_STORAGE_KEY || !event.newValue) return;
+    let incoming;
+    try { incoming = JSON.parse(event.newValue); }
+    catch { return; }
+    if (!Array.isArray(incoming?.workflows) || incoming.writerId === instanceId) return;
+    if (event.newValue === state.workflowStorageFingerprint) return;
+    clearTimeout(state.autosaveTimer);
+    state.autosaveTimer = null;
+    saveWorkflowCheckpoint('別タブ競合時のこのタブ');
+    state.externalWorkflowConflict = true;
+    state.externalWorkflowStore = incoming;
+    setAutosaveStatus('conflict');
+    setExternalConflictVisible(true);
+    announce('別のタブでワークフローが更新されました。自動保存を停止しています');
+  }
+
+  function loadExternalWorkflowVersion() {
+    if (state.running || state.legacyRunning) return;
+    const incoming = state.externalWorkflowStore;
+    if (!incoming) return;
+    if (!confirm('このタブの未保存変更を復旧ポイントへ退避し、別タブ版を読み込みますか？')) return;
+    saveWorkflowCheckpoint('別タブ版の読込前');
+    state.historyRestoring = true;
+    try {
+      state.workflows = migrateWorkflowStore(incoming);
+      state.selectedWorkflowId = state.workflows.currentId;
+      state.workflowUndo.length = 0;
+      state.workflowRedo.length = 0;
+      state.collapsed.clear();
+      resetInsertion();
+      invalidateWorkflowValidation();
+      state.workflowStorageUpdatedAt = finite(incoming.updatedAt, Date.now());
+      state.workflowStorageFingerprint = JSON.stringify(incoming);
+      state.externalWorkflowConflict = false;
+      state.externalWorkflowStore = null;
+      setExternalConflictVisible(false);
+      setAutosaveStatus('saved');
+      renderWorkflowSelect();
+      syncRunControls();
+    } finally {
+      state.historyRestoring = false;
+    }
+    toast('別タブのワークフローを読み込みました');
+  }
+
+  function keepLocalWorkflowVersion() {
+    if (state.running || state.legacyRunning) return;
+    if (!confirm('このタブの内容で、別タブの更新を上書きしますか？')) return;
+    state.externalWorkflowConflict = false;
+    state.externalWorkflowStore = null;
+    setExternalConflictVisible(false);
+    const saved = saveWorkflowStore({ immediate: true, force: true });
+    toast(saved ? 'このタブの内容を保存しました' : 'このタブの内容を保存できませんでした');
   }
 
   function currentWorkflow() {
@@ -1433,9 +1818,11 @@
   function removeBlockById(id) {
     const location = findBlockLocation(id);
     if (!location) return null;
-    resetInsertion();
-    const [removed] = location.list.splice(location.index, 1);
-    return removed;
+    return commitWorkflowMutation('ブロックの削除', () => {
+      resetInsertion();
+      const [removed] = location.list.splice(location.index, 1);
+      return removed;
+    });
   }
 
   function moveBlockToList(id, targetList, targetIndex) {
@@ -1446,11 +1833,13 @@
       block.children === targetList || block.elseChildren === targetList ? block : null
     );
     if (targetOwner && isDescendant(moving, targetOwner.id)) return false;
-    resetInsertion();
-    location.list.splice(location.index, 1);
-    let index = clamp(int(targetIndex, targetList.length), 0, targetList.length);
-    if (location.list === targetList && location.index < index) index -= 1;
-    targetList.splice(index, 0, moving);
+    commitWorkflowMutation('ブロックの移動', () => {
+      resetInsertion();
+      location.list.splice(location.index, 1);
+      let index = clamp(int(targetIndex, targetList.length), 0, targetList.length);
+      if (location.list === targetList && location.index < index) index -= 1;
+      targetList.splice(index, 0, moving);
+    });
     touchWorkflow();
     renderWorkflowEditor();
     return true;
@@ -1461,8 +1850,10 @@
     if (!location) return;
     const next = location.index + direction;
     if (next < 0 || next >= location.list.length) return;
-    resetInsertion();
-    [location.list[location.index], location.list[next]] = [location.list[next], location.list[location.index]];
+    commitWorkflowMutation('ブロックの並べ替え', () => {
+      resetInsertion();
+      [location.list[location.index], location.list[next]] = [location.list[next], location.list[location.index]];
+    });
     touchWorkflow();
     renderWorkflowEditor();
   }
@@ -1475,9 +1866,11 @@
       toast('直前のブロックは入れ子を持てません');
       return;
     }
-    resetInsertion();
-    location.list.splice(location.index, 1);
-    previous.children.push(location.block);
+    commitWorkflowMutation('ブロックのインデント', () => {
+      resetInsertion();
+      location.list.splice(location.index, 1);
+      previous.children.push(location.block);
+    });
     touchWorkflow();
     renderWorkflowEditor();
   }
@@ -1487,9 +1880,11 @@
     if (!location?.parent) return;
     const parentLocation = findBlockLocation(location.parent.id);
     if (!parentLocation) return;
-    resetInsertion();
-    location.list.splice(location.index, 1);
-    parentLocation.list.splice(parentLocation.index + 1, 0, location.block);
+    commitWorkflowMutation('ブロックのアウトデント', () => {
+      resetInsertion();
+      location.list.splice(location.index, 1);
+      parentLocation.list.splice(parentLocation.index + 1, 0, location.block);
+    });
     touchWorkflow();
     renderWorkflowEditor();
   }
@@ -1522,8 +1917,10 @@
       )
     );
     const target = insertionIsCurrent ? state.insertion : { list: workflow.blocks, index: workflow.blocks.length };
-    target.list.splice(clamp(target.index, 0, target.list.length), 0, createBlock(type));
-    resetInsertion();
+    commitWorkflowMutation('ブロックの追加', () => {
+      target.list.splice(clamp(target.index, 0, target.list.length), 0, createBlock(type));
+      resetInsertion();
+    });
     touchWorkflow();
     renderWorkflowEditor();
     toast(`「${blockLabel(type)}」を追加しました`);
@@ -1583,9 +1980,11 @@
   }
 
   function updateBlockConfig(block, updater) {
-    updater(block.config);
-    const normalized = normalizeBlock(block);
-    block.config = normalized.config;
+    commitWorkflowMutation(`${blockLabel(block.type)}の設定変更`, () => {
+      updater(block.config);
+      const normalized = normalizeBlock(block);
+      block.config = normalized.config;
+    });
     touchWorkflow();
   }
 
@@ -1811,6 +2210,12 @@
       card.dataset.depth = String(depth);
       card.setAttribute('role', 'group');
       card.setAttribute('aria-label', `${index + 1}. ${definition.label}`);
+      const validationIssues = state.validationIssues.filter(issue => issue.blockId === block.id);
+      const validationError = validationIssues.some(issue => issue.severity === 'error');
+      if (validationIssues.length) {
+        card.classList.add(validationError ? 'validation-error' : 'validation-warning');
+        card.setAttribute('aria-description', validationIssues.map(issue => issue.message).join('。'));
+      }
       if (state.running?.currentBlockId === block.id) card.setAttribute('aria-current', 'step');
       card.draggable = !state.running && supportsNativeBlockDrag;
       card.classList.toggle('running', state.running?.currentBlockId === block.id);
@@ -1850,8 +2255,17 @@
         element('strong', { text: definition.label }),
         element('small', { text: definition.description })
       ]);
+      const badges = element('div', { className: 'blockBadges' });
+      if (validationIssues.length) {
+        badges.append(element('span', {
+          className: `validationBadge${validationError ? ' error' : ''}`,
+          text: validationError ? '要修正' : '注意',
+          title: validationIssues[0].message
+        }));
+      }
       const progress = state.blockProgress.get(block.id);
-      if (progress) name.append(element('span', { className: 'progressBadge', text: progress }));
+      if (progress) badges.append(element('span', { className: 'progressBadge', text: progress }));
+      if (badges.childElementCount) name.append(badges);
       const tools = element('div', { className: 'blockTools' });
       const tool = (text, title, handler, { action, disabled = false, className = '', restoreFocus = true } = {}) => {
         const button = element('button', {
@@ -1873,8 +2287,10 @@
       tool('⧉', 'ブロックを複製', () => {
         const location = findBlockLocation(block.id);
         const copy = cloneBlock(block);
-        resetInsertion();
-        location.list.splice(location.index + 1, 0, copy);
+        commitWorkflowMutation('ブロックの複製', () => {
+          resetInsertion();
+          location.list.splice(location.index + 1, 0, copy);
+        });
         touchWorkflow();
         renderWorkflowEditor();
         return copy.id;
@@ -2002,6 +2418,196 @@
     }
     if (!visibleCount) ui.palette.append(element('div', { className: 'paletteEmpty', text: '条件に一致するブロックがありません。' }));
     ui.paletteStatus.textContent = `${visibleCount}件のブロックを表示`;
+  }
+
+  const SELECTOR_CONDITION_TYPES = new Set(['selectorVisible', 'selectorHidden', 'selectorExists', 'selectorMissing']);
+
+  function selectorSyntaxError(selector) {
+    try {
+      document.createDocumentFragment().querySelector(selector);
+      return '';
+    } catch {
+      return 'セレクタの書式が正しくありません';
+    }
+  }
+
+  function validateWorkflowDefinition(workflow) {
+    const issues = [];
+    if (!workflow?.blocks?.length) {
+      issues.push({ severity: 'error', blockId: null, message: '実行するブロックがありません' });
+      return issues;
+    }
+    const ids = new Set();
+    let totalBlocks = 0;
+    let deepWarningAdded = false;
+    const add = (severity, block, message) => issues.push({ severity, blockId: block?.id || null, message });
+    const validateCondition = (block, condition) => {
+      const normalized = normalizeConditionConfig(condition);
+      if (SELECTOR_CONDITION_TYPES.has(normalized.type)) {
+        if (!normalized.selector) add('error', block, '条件に使用するセレクタが空です');
+        else {
+          const syntaxError = selectorSyntaxError(normalized.selector);
+          if (syntaxError) add('error', block, syntaxError);
+        }
+      }
+      if (normalized.type === 'urlContains' && !normalized.value.trim()) {
+        add('error', block, 'URL条件に使用する比較値が空です');
+      }
+    };
+    const visit = (blocks, depth = 0) => {
+      let stopped = false;
+      blocks.forEach(block => {
+        totalBlocks += 1;
+        if (stopped) add('warning', block, '同じ階層の停止ブロックより後にあるため、このブロックには到達しません');
+        if (!BLOCK_DEFINITIONS[block.type]) add('error', block, `未対応のブロック種別です: ${block.type}`);
+        if (!block.id || ids.has(block.id)) add('error', block, 'ブロックIDが重複または空です');
+        else ids.add(block.id);
+        if (depth > 10 && !deepWarningAdded) {
+          add('warning', block, '入れ子が深いため、編集や実行の確認が難しくなっています');
+          deepWarningAdded = true;
+        }
+        if (block.type === 'randomWait' && finite(block.config.minSeconds) > finite(block.config.maxSeconds)) {
+          add('error', block, 'ランダム待機の最小秒数が最大秒数を超えています');
+        }
+        if (block.type === 'repeat') {
+          if (!block.children?.length) add('warning', block, '繰り返す子ブロックがありません');
+          if (int(block.config.count) === 0) add('warning', block, '繰り返し回数が0のため何も実行されません');
+        }
+        if (block.type === 'repeatUntil') {
+          validateCondition(block, block.config.condition);
+          if (!block.children?.length) add('error', block, '条件成立まで繰り返す子ブロックがありません');
+        }
+        if (block.type === 'if') {
+          validateCondition(block, block.config.condition);
+          if (!block.children?.length && !block.elseChildren?.length) add('warning', block, '条件分岐の両方が空です');
+        }
+        if (block.type === 'watch') {
+          validateCondition(block, block.config.condition);
+          if (finite(block.config.timeoutSec) === 0) add('warning', block, 'タイムアウトが無制限です');
+        }
+        if (block.type === 'stop') stopped = true;
+        if (Array.isArray(block.children)) visit(block.children, depth + 1);
+        if (Array.isArray(block.elseChildren)) visit(block.elseChildren, depth + 1);
+      });
+    };
+    visit(workflow.blocks);
+    const blockListGuaranteesYield = blocks => blocks.some(block => {
+      if (block.type === 'stop') return true;
+      if (['fixedWait', 'randomWait', 'watch', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady'].includes(block.type)) return true;
+      if (BLOCK_DEFINITIONS[block.type]?.category === 'gbf') return true;
+      if (block.type === 'repeat' && int(block.config.count) > 0) return blockListGuaranteesYield(block.children || []);
+      if (block.type === 'if') {
+        return blockListGuaranteesYield(block.children || []) && blockListGuaranteesYield(block.elseChildren || []);
+      }
+      return false;
+    });
+    if ((workflow.loopInfinite || workflow.loopCount > 1_000) && !blockListGuaranteesYield(workflow.blocks)) {
+      issues.unshift({
+        severity: 'error',
+        blockId: workflow.blocks[0]?.id || null,
+        message: '長時間ループ内に待機または画面操作がなく、停止操作を受け付けなくなる可能性があります'
+      });
+    }
+    if (workflow.loopInfinite) {
+      issues.unshift({ severity: 'warning', blockId: null, message: 'ワークフローは手動停止するまで無限に繰り返します' });
+    }
+    if (totalBlocks > 1_000) {
+      issues.unshift({ severity: 'warning', blockId: null, message: `${totalBlocks}ブロックあります。実行前に処理時間を確認してください` });
+    }
+    return issues;
+  }
+
+  function invalidateWorkflowValidation() {
+    state.validationIssues = [];
+    ui.validationBar.dataset.tone = 'idle';
+    ui.validationTitle.textContent = '実行前チェック';
+    ui.validationMessage.textContent = '変更内容は実行時に自動確認されます';
+    ui.validationFocus.hidden = true;
+    shadow.querySelectorAll('.blockCard.validation-error,.blockCard.validation-warning').forEach(card => {
+      card.classList.remove('validation-error', 'validation-warning');
+      card.removeAttribute('aria-description');
+    });
+    shadow.querySelectorAll('.validationBadge').forEach(badge => badge.remove());
+  }
+
+  function firstActionableValidationIssue() {
+    return state.validationIssues.find(issue => issue.severity === 'error' && issue.blockId)
+      || state.validationIssues.find(issue => issue.blockId)
+      || state.validationIssues[0]
+      || null;
+  }
+
+  function focusWorkflowValidationIssue(issue = firstActionableValidationIssue()) {
+    if (!issue) return;
+    if (!issue.blockId) {
+      ui.validateWorkflow?.focus?.({ preventScroll: true });
+      return announce(issue.message);
+    }
+    let location = findBlockLocation(issue.blockId);
+    while (location?.parent) {
+      state.collapsed.delete(location.parent.id);
+      location = findBlockLocation(location.parent.id);
+    }
+    state.collapsed.delete(issue.blockId);
+    renderWorkflowEditor();
+    requestAnimationFrame(() => {
+      const card = blockCardById(issue.blockId);
+      card?.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+      });
+      focusBlockControl(issue.blockId, 'toggle', issue.message);
+    });
+  }
+
+  function runWorkflowValidation({ announceResult = true, focusFirstError = false } = {}) {
+    const workflow = currentWorkflow();
+    const issues = validateWorkflowDefinition(workflow);
+    state.validationIssues = issues;
+    const errors = issues.filter(issue => issue.severity === 'error');
+    const warnings = issues.filter(issue => issue.severity === 'warning');
+    ui.validationFocus.hidden = !issues.length;
+    if (errors.length) {
+      ui.validationBar.dataset.tone = 'error';
+      ui.validationTitle.textContent = `${errors.length}件のエラー`;
+      ui.validationMessage.textContent = errors[0].message;
+    } else if (warnings.length) {
+      ui.validationBar.dataset.tone = 'warning';
+      ui.validationTitle.textContent = `${warnings.length}件の注意`;
+      ui.validationMessage.textContent = warnings[0].message;
+    } else {
+      ui.validationBar.dataset.tone = 'success';
+      ui.validationTitle.textContent = '実行準備OK';
+      ui.validationMessage.textContent = `${countBlocks(workflow.blocks)}ブロックを確認しました`;
+    }
+    renderWorkflowEditor();
+    const summary = errors.length
+      ? `${errors.length}件のエラーがあります`
+      : warnings.length
+        ? `${warnings.length}件の注意があります。実行は可能です`
+        : '実行前チェックに問題はありません';
+    if (announceResult) toast(summary);
+    if (focusFirstError && errors.length) focusWorkflowValidationIssue(errors[0]);
+    return { issues, errors, warnings, valid: !errors.length };
+  }
+
+  function commitActiveEditorInput() {
+    const active = shadow.activeElement;
+    if (active?.matches?.('input,select,textarea')) active.blur();
+  }
+
+  function prepareWorkflowRun() {
+    commitActiveEditorInput();
+    const result = runWorkflowValidation({ announceResult: false, focusFirstError: true });
+    if (!result.valid) {
+      toast(`${result.errors.length}件の設定エラーを修正してください`);
+      return null;
+    }
+    if (!saveWorkflowStore({ immediate: true })) {
+      toast('保存できないため実行を開始できません。JSONバックアップを取得してください');
+      return null;
+    }
+    return normalizeWorkflow(deepClone(currentWorkflow()));
   }
 
   function renderTemplateSelect() {
@@ -4203,6 +4809,16 @@
     state.runningBadge = null;
   }
 
+  function blockBadgeHost(card) {
+    if (!card) return null;
+    let host = card.querySelector('.blockBadges');
+    if (!host) {
+      host = element('div', { className: 'blockBadges' });
+      card.querySelector('.blockName')?.append(host);
+    }
+    return host;
+  }
+
   function setRunningBlock(context, block, progress = '') {
     context.currentBlockId = block?.id || null;
     if (lightweightMode) return;
@@ -4216,7 +4832,7 @@
     card?.setAttribute('aria-current', 'step');
     if (card && progress) {
       const badge = element('span', { className: 'progressBadge', text: progress });
-      card.querySelector('.blockName')?.append(badge);
+      blockBadgeHost(card)?.append(badge);
       state.runningBadge = badge;
     }
   }
@@ -4238,7 +4854,7 @@
     let badge = state.runningBadge;
     if (!badge || !badge.isConnected) {
       badge = card.querySelector('.progressBadge') || element('span', { className: 'progressBadge' });
-      if (!badge.isConnected) card.querySelector('.blockName')?.append(badge);
+      if (!badge.isConnected) blockBadgeHost(card)?.append(badge);
       state.runningBadge = badge;
     }
     if (badge.textContent !== text) badge.textContent = text;
@@ -4306,6 +4922,7 @@
             throwIfAborted(context.signal);
             updateBlockProgress(context, block, `${index + 1} / ${count}回目`);
             await runBlockList(block.children, context);
+            if ((index + 1) % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
           }
           break;
         }
@@ -4321,6 +4938,7 @@
             iteration += 1;
             updateBlockProgress(context, block, `${iteration}回目`);
             await runBlockList(block.children, context);
+            if (iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
             if (evaluateWorkflowCondition(block.config.condition)) break;
           }
           break;
@@ -4387,9 +5005,9 @@
 
   async function startWorkflow() {
     if (state.running || state.legacyRunning) return;
-    const workflow = currentWorkflow();
-    if (!workflow?.blocks.length) return toast('実行するブロックがありません');
-    const restoreRunFocus = shadow.activeElement === ui.runWorkflow || shadow.activeElement === byId('compactRun');
+    const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement);
+    const workflow = prepareWorkflowRun();
+    if (!workflow) return;
     clearWorkflowError();
     const controller = new AbortController();
     const context = {
@@ -4520,7 +5138,9 @@
       browserHidden: false,
       compact: false,
       dockX: null,
-      dockY: null
+      dockY: null,
+      dockWidth: null,
+      dockHeight: null
     };
   }
 
@@ -4529,8 +5149,22 @@
     const version = clamp(int(source.version, legacyKey.includes('v11') ? 11 : legacyKey.includes('v10') ? 10 : 1), 1, 12);
     const sourceSize = finite(source.markerHitSize, version <= 1 ? 64 : version <= 3 ? 46 : 44);
     const sourceActions = Array.isArray(source.actions) ? source.actions : Array.isArray(source.points) ? source.points : [];
+    const usedActionIds = new Set();
+    let generatedActionId = 1;
+    const uniqueActionId = candidate => {
+      const preferred = int(candidate, 0);
+      if (preferred > 0 && preferred <= 2_000_000_000 && Number.isSafeInteger(preferred) && !usedActionIds.has(preferred)) {
+        usedActionIds.add(preferred);
+        generatedActionId = Math.max(generatedActionId, preferred + 1);
+        return preferred;
+      }
+      while (usedActionIds.has(generatedActionId)) generatedActionId += 1;
+      const id = generatedActionId++;
+      usedActionIds.add(id);
+      return id;
+    };
     const actions = sourceActions.map((item, index) => {
-      const id = int(item.id, index + 1);
+      const id = uniqueActionId(item.id ?? index + 1);
       const type = item.type === 'navigate' ? 'navigate' : item.type === 'wait' ? 'wait' : 'click';
       const common = {
         id,
@@ -4595,7 +5229,9 @@
       browserHidden: Boolean(source.browserHidden),
       compact: Boolean(source.compact),
       dockX: source.dockX != null && Number.isFinite(Number(source.dockX)) ? Number(source.dockX) : null,
-      dockY: source.dockY != null && Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null
+      dockY: source.dockY != null && Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null,
+      dockWidth: source.dockWidth != null && Number.isFinite(Number(source.dockWidth)) ? Number(source.dockWidth) : null,
+      dockHeight: source.dockHeight != null && Number.isFinite(Number(source.dockHeight)) ? Number(source.dockHeight) : null
     };
   }
 
@@ -4619,6 +5255,8 @@
     ui.legacyPositionJitter.value = state.legacy.positionJitterPx;
     if (Number.isFinite(state.legacy.dockX)) state.dockX = state.legacy.dockX;
     if (Number.isFinite(state.legacy.dockY)) state.dockY = state.legacy.dockY;
+    if (Number.isFinite(state.legacy.dockWidth)) state.dockWidth = state.legacy.dockWidth;
+    if (Number.isFinite(state.legacy.dockHeight)) state.dockHeight = state.legacy.dockHeight;
   }
 
   function legacySnapshot() {
@@ -4641,7 +5279,9 @@
       browserHidden: ui.browserBar.classList.contains('hidden'),
       compact: dock.classList.contains('compact'),
       dockX: state.dockX,
-      dockY: state.dockY
+      dockY: state.dockY,
+      dockWidth: state.dockWidth,
+      dockHeight: state.dockHeight
     };
   }
 
@@ -4987,9 +5627,9 @@
     return doc.elementFromPoint(x, y);
   }
 
-  function legacyPositionWithJitter(action) {
-    if (!state.legacy.positionRandomEnabled) return { x: action.cx, y: action.cy };
-    const radius = clamp(finite(ui.legacyPositionJitter.value, 2), 0, 30);
+  function legacyPositionWithJitter(action, runSettings = state.legacy) {
+    if (!runSettings.positionRandomEnabled) return { x: action.cx, y: action.cy };
+    const radius = clamp(finite(runSettings.positionJitterPx, 2), 0, 30);
     if (!radius) return { x: action.cx, y: action.cy };
     const angle = Math.random() * Math.PI * 2;
     const length = Math.sqrt(Math.random()) * radius;
@@ -5086,7 +5726,7 @@
     }, { signal, timeoutMs: action.targetTimeoutMs, stableMs: 30, description: `${legacyActionName(action)}の対象待ち` });
   }
 
-  async function executeLegacyClick(action, signal) {
+  async function executeLegacyClick(action, signal, runSettings = state.legacy) {
     let target;
     try {
       target = await waitForLegacyTarget(action, signal);
@@ -5095,7 +5735,7 @@
       if (action.targetFailureMode !== 'point') throw error;
     }
     if (!target && action.targetFailureMode === 'point') {
-      const point = legacyPositionWithJitter(action);
+      const point = legacyPositionWithJitter(action, runSettings);
       const frameRect = iframe.getBoundingClientRect();
       target = frameDocument().elementFromPoint(point.x - frameRect.left, point.y - frameRect.top);
     }
@@ -5108,9 +5748,11 @@
     return { ok: true };
   }
 
-  async function executeLegacyAction(action, signal, index) {
+  async function executeLegacyAction(action, signal, index, runSettings = state.legacy) {
     if (action.enabled === false) return 'skip';
-    const jitter = state.legacy.timeRandomEnabled && index > 0 ? randomUniform(-finite(ui.legacyJitter.value, 100), finite(ui.legacyJitter.value, 100)) : 0;
+    const jitter = runSettings.timeRandomEnabled && index > 0
+      ? randomUniform(-finite(runSettings.timeJitterMs, 100), finite(runSettings.timeJitterMs, 100))
+      : 0;
     await abortableDelay(Math.max(0, action.delayMs + jitter), signal);
     const conditionResult = await waitForLegacyCondition(action, signal);
     if (conditionResult === 'skip') return 'skip';
@@ -5118,7 +5760,7 @@
     if (action.type === 'navigate') {
       const destination = String(action.url || '').trim();
       if (!destination) throw new FlowError('旧マクロのURLが空です', 'INVALID_URL');
-      const normalized = /^https?:/i.test(destination) ? new URL(destination).href : new URL(destination, currentFrameUrl() || location.href).href;
+      const normalized = navigableHttpUrl(destination);
       if (action.waitForLoad) {
         await performFrameOperation(() => {
           urlInput.value = normalized;
@@ -5129,31 +5771,72 @@
       }
       return 'ok';
     }
-    const result = await executeLegacyClick(action, signal);
+    const result = await executeLegacyClick(action, signal, runSettings);
     return result.skipped ? 'skip' : 'ok';
+  }
+
+  function validateLegacyConfiguration(runState) {
+    if (!runState.actions.some(action => action.enabled !== false)) {
+      return { action: null, message: '有効なマクロ動作がありません' };
+    }
+    for (const action of runState.actions) {
+      if (action.enabled === false) continue;
+      if (action.type === 'navigate') {
+        if (!String(action.url || '').trim()) return { action, message: 'URL移動のURLが空です' };
+        try { navigableHttpUrl(action.url); }
+        catch (error) { return { action, message: error.message }; }
+      }
+      if (action.type === 'click' && action.targetMode === 'selector') {
+        if (!action.selector) return { action, message: 'クリック対象のセレクタが空です' };
+        const syntaxError = selectorSyntaxError(action.selector);
+        if (syntaxError) return { action, message: syntaxError };
+      }
+      const condition = normalizeLegacyCondition(action.condition, action.type);
+      if (condition.enabled && condition.target === 'selector') {
+        if (!condition.selector) return { action, message: '条件監視のセレクタが空です' };
+        const syntaxError = selectorSyntaxError(condition.selector);
+        if (syntaxError) return { action, message: syntaxError };
+      }
+    }
+    return null;
   }
 
   async function startLegacy() {
     if (state.legacyRunning || state.running || state.recording || !state.legacy.actions.length) return;
-    const restoreRunFocus = shadow.activeElement === ui.legacyRun || shadow.activeElement === byId('compactRun');
+    const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-legacy').contains(shadow.activeElement);
+    commitActiveEditorInput();
+    saveLegacyState();
+    const runState = normalizeLegacyState(legacySnapshot());
+    const validationIssue = validateLegacyConfiguration(runState);
+    if (validationIssue) {
+      if (validationIssue.action) {
+        state.selectedLegacyId = validationIssue.action.id;
+        state.legacy.selectedId = validationIssue.action.id;
+        renderLegacy();
+        focusLegacyControl(validationIssue.action.id, 'select', validationIssue.message);
+      } else {
+        ui.legacyRun.focus({ preventScroll: true });
+        announce(validationIssue.message);
+      }
+      return toast(validationIssue.message);
+    }
     const controller = new AbortController();
-    const token = { controller, signal: controller.signal };
+    const token = { controller, signal: controller.signal, runState };
     state.legacyRunning = token;
     const restoreExpandedDock = enterRuntimeCompactMode();
     syncRunControls();
     if (!lightweightMode) renderLegacy();
     if (restoreRunFocus) requestAnimationFrame(() => (lightweightMode ? byId('compactRun') : ui.legacyStop).focus({ preventScroll: true }));
-    saveLegacyState();
     appendLog('旧マクロを開始');
     try {
-      const count = clamp(int(ui.legacyCount.value, 1), 1, 999_999);
+      const count = runState.count;
       let cycle = 0;
-      while (!controller.signal.aborted && (state.legacy.loop || cycle < count)) {
-        for (let index = 0; index < state.legacy.actions.length; index++) {
+      while (!controller.signal.aborted && (runState.loop || cycle < count)) {
+        for (let index = 0; index < runState.actions.length; index++) {
           throwIfAborted(controller.signal);
-          const action = state.legacy.actions[index];
+          const action = runState.actions[index];
           setStatus(`${cycle + 1}周目 · ${legacyActionName(action, index)}`);
-          const result = await executeLegacyAction(action, controller.signal, index);
+          const result = await executeLegacyAction(action, controller.signal, index, runState);
           appendLog(`${legacyActionName(action, index)}: ${result === 'skip' ? 'スキップ' : '完了'}`, result === 'skip' ? 'warn' : 'success', '旧マクロ');
         }
         cycle += 1;
@@ -5227,19 +5910,31 @@
     const slot = ui.legacyPresetSlot.value || '1';
     const data = readLegacyPreset(slot);
     if (!data) return toast('このスロットは空です');
-    state.legacy = normalizeLegacyState(data);
+    const normalized = normalizeLegacyState(data);
+    let safeUrl = '';
+    let unsafeUrl = false;
+    if (normalized.url) {
+      try { safeUrl = navigableHttpUrl(normalized.url); }
+      catch {
+        normalized.url = '';
+        unsafeUrl = true;
+      }
+    }
+    state.legacy = normalized;
     state.selectedLegacyId = state.legacy.selectedId;
     state.nextLegacyId = state.legacy.nextId;
     ui.legacyCount.value = state.legacy.count;
     ui.legacyJitter.value = state.legacy.timeJitterMs;
     ui.legacyPositionJitter.value = state.legacy.positionJitterPx;
-    if (state.legacy.url) {
-      urlInput.value = state.legacy.url;
-      iframe.src = state.legacy.url;
+    if (safeUrl) {
+      urlInput.value = safeUrl;
+      iframe.src = safeUrl;
     }
     renderLegacy();
     saveLegacyState();
-    toast(`「${data.presetMeta?.name || `保存 ${slot}`}」を読み込みました`);
+    toast(unsafeUrl
+      ? 'プリセットを読み込みました。安全でないURLは削除しました'
+      : `「${data.presetMeta?.name || `保存 ${slot}`}」を読み込みました`);
   }
 
   function deleteLegacyPreset() {
@@ -5356,6 +6051,7 @@
     state.selectedWorkflowId = id;
     state.workflows.currentId = id;
     resetInsertion();
+    invalidateWorkflowValidation();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
   }
@@ -5363,13 +6059,15 @@
   function createNewWorkflow() {
     if (state.running) return;
     const workflow = normalizeWorkflow({ name: `ワークフロー ${state.workflows.workflows.length + 1}`, blocks: [] });
-    state.workflows.workflows.push(workflow);
-    state.selectedWorkflowId = workflow.id;
-    state.workflows.currentId = workflow.id;
-    resetInsertion();
-    saveWorkflowStore({ immediate: true });
+    commitWorkflowMutation('ワークフローの新規作成', () => {
+      state.workflows.workflows.push(workflow);
+      state.selectedWorkflowId = workflow.id;
+      state.workflows.currentId = workflow.id;
+      resetInsertion();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
-    toast('新しいワークフローを作成しました');
+    toast(saved ? '新しいワークフローを作成しました' : '作成しましたが保存に失敗しました。バックアップを取得してください');
   }
 
   function renameCurrentWorkflow() {
@@ -5382,11 +6080,14 @@
       return toast('ワークフロー名を入力してください');
     }
     ui.workflowName.removeAttribute('aria-invalid');
-    workflow.name = name;
-    workflow.updatedAt = Date.now();
-    saveWorkflowStore({ immediate: true });
+    if (workflow.name === name) return toast('名前は変更されていません');
+    commitWorkflowMutation('ワークフロー名の変更', () => {
+      workflow.name = name;
+      workflow.updatedAt = Date.now();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
-    toast('名前を変更しました');
+    toast(saved ? '名前を変更しました' : '名前を変更しましたが保存に失敗しました');
   }
 
   function duplicateCurrentWorkflow() {
@@ -5398,13 +6099,15 @@
     workflow.blocks.forEach(regenerateBlockIds);
     workflow.createdAt = Date.now();
     workflow.updatedAt = Date.now();
-    state.workflows.workflows.push(workflow);
-    state.selectedWorkflowId = workflow.id;
-    state.workflows.currentId = workflow.id;
-    resetInsertion();
-    saveWorkflowStore({ immediate: true });
+    commitWorkflowMutation('ワークフローの複製', () => {
+      state.workflows.workflows.push(workflow);
+      state.selectedWorkflowId = workflow.id;
+      state.workflows.currentId = workflow.id;
+      resetInsertion();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
-    toast('ワークフローを複製しました');
+    toast(saved ? 'ワークフローを複製しました' : '複製しましたが保存に失敗しました');
   }
 
   function deleteCurrentWorkflow() {
@@ -5412,15 +6115,18 @@
     if (!workflow || state.running) return;
     if (state.workflows.workflows.length === 1) return toast('最後のワークフローは削除できません');
     if (!confirm(`「${workflow.name}」を削除しますか？`)) return;
+    saveWorkflowCheckpoint(`「${workflow.name}」の削除前`);
     const index = state.workflows.workflows.indexOf(workflow);
-    state.workflows.workflows.splice(index, 1);
-    const next = state.workflows.workflows[index] || state.workflows.workflows[index - 1];
-    state.selectedWorkflowId = next.id;
-    state.workflows.currentId = next.id;
-    resetInsertion();
-    saveWorkflowStore({ immediate: true });
+    commitWorkflowMutation('ワークフローの削除', () => {
+      state.workflows.workflows.splice(index, 1);
+      const next = state.workflows.workflows[index] || state.workflows.workflows[index - 1];
+      state.selectedWorkflowId = next.id;
+      state.workflows.currentId = next.id;
+      resetInsertion();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
-    toast('ワークフローを削除しました');
+    toast(saved ? 'ワークフローを削除しました。元に戻すこともできます' : '削除しましたが保存に失敗しました');
   }
 
   function applyTemplate(mode) {
@@ -5428,14 +6134,19 @@
     if (!workflow || state.running) return;
     const template = findTemplate(ui.templateSelect.value);
     if (mode === 'replace' && workflow.blocks.length && !confirm(`現在の${workflow.blocks.length}ブロックを「${template[1]}」で置換しますか？`)) return;
+    if (mode === 'replace') saveWorkflowCheckpoint(`テンプレート「${template[1]}」適用前`);
     const blocks = template[2]().map(normalizeBlock);
-    if (mode === 'replace') workflow.blocks = blocks;
-    else workflow.blocks.push(...blocks);
-    workflow.updatedAt = Date.now();
-    resetInsertion();
-    saveWorkflowStore({ immediate: true });
+    commitWorkflowMutation(mode === 'replace' ? 'テンプレートで置換' : 'テンプレートを追加', () => {
+      if (mode === 'replace') workflow.blocks = blocks;
+      else workflow.blocks.push(...blocks);
+      workflow.updatedAt = Date.now();
+      resetInsertion();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowEditor();
-    toast(`「${template[1]}」を${mode === 'replace' ? '読み込み' : '追加'}しました`);
+    toast(saved
+      ? `「${template[1]}」を${mode === 'replace' ? '読み込み' : '追加'}しました`
+      : 'テンプレートを適用しましたが保存に失敗しました');
   }
 
   function downloadJson(data, filename) {
@@ -5456,6 +6167,18 @@
     toast('JSONを書き出しました');
   }
 
+  function exportAllWorkflows() {
+    const snapshot = workflowStateSnapshot();
+    downloadJson({
+      format: 'autoflow-workflows',
+      schemaVersion: 1,
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      ...snapshot
+    }, `autoflow-workflows-${new Date().toISOString().slice(0, 10)}.json`);
+    toast(`${snapshot.workflows.length}件のワークフローを書き出しました`);
+  }
+
   let importPurpose = null;
   function chooseImportFile(purpose) {
     importPurpose = purpose;
@@ -5463,25 +6186,71 @@
     else importFile.click();
   }
 
-  function importWorkflowData(data, fileName = 'JSON') {
+  function inspectWorkflowImport(data) {
+    let serialized;
+    try { serialized = JSON.stringify(data); }
+    catch { throw new Error('JSONデータを解析できません'); }
+    if (serialized.length > MAX_IMPORT_BYTES) throw new Error(`JSONデータは${Math.round(MAX_IMPORT_BYTES / 1_000_000)}MBまでです`);
     const candidate = data?.workflow || data;
-    let workflows;
-    if (Array.isArray(candidate?.workflows)) workflows = candidate.workflows.map(normalizeWorkflow);
-    else if (Array.isArray(candidate)) workflows = candidate.map(normalizeWorkflow);
-    else if (candidate && Array.isArray(candidate.blocks)) workflows = [normalizeWorkflow(candidate)];
+    let rawWorkflows;
+    if (Array.isArray(candidate?.workflows)) rawWorkflows = candidate.workflows;
+    else if (Array.isArray(candidate)) rawWorkflows = candidate;
+    else if (candidate && Array.isArray(candidate.blocks)) rawWorkflows = [candidate];
     else throw new Error('ワークフローAST形式ではありません');
-    if (!workflows.length) throw new Error('ワークフローが空です');
+    if (!rawWorkflows.length) throw new Error('ワークフローが空です');
+    if (rawWorkflows.length > MAX_IMPORTED_WORKFLOWS) {
+      throw new Error(`一度に読み込めるワークフローは${MAX_IMPORTED_WORKFLOWS}件までです`);
+    }
+    let blockCount = 0;
+    const visitBlocks = (blocks, depth = 0) => {
+      if (!Array.isArray(blocks)) throw new Error('ブロック一覧の形式が正しくありません');
+      if (depth > MAX_IMPORTED_DEPTH) throw new Error(`入れ子は${MAX_IMPORTED_DEPTH}階層までです`);
+      for (const block of blocks) {
+        if (!block || typeof block !== 'object' || Array.isArray(block)) throw new Error('不正なブロックが含まれています');
+        const definition = BLOCK_DEFINITIONS[block.type];
+        if (!definition) throw new Error(`未対応のブロック種別です: ${String(block.type || '空')}`);
+        if (block.config != null && (typeof block.config !== 'object' || Array.isArray(block.config))) {
+          throw new Error('ブロック設定の形式が正しくありません');
+        }
+        blockCount += 1;
+        if (blockCount > MAX_IMPORTED_BLOCKS) throw new Error(`一度に読み込めるブロックは${MAX_IMPORTED_BLOCKS}件までです`);
+        if (block.children != null && !Array.isArray(block.children)) throw new Error('子ブロックの形式が正しくありません');
+        if (block.elseChildren != null && !Array.isArray(block.elseChildren)) throw new Error('elseブロックの形式が正しくありません');
+        if (!definition.container && block.children?.length) throw new Error(`${definition.label}は子ブロックを持てません`);
+        if (!definition.elseBranch && block.elseChildren?.length) throw new Error(`${definition.label}はelseブロックを持てません`);
+        if (Array.isArray(block.children)) visitBlocks(block.children, depth + 1);
+        if (Array.isArray(block.elseChildren)) visitBlocks(block.elseChildren, depth + 1);
+      }
+    };
+    rawWorkflows.forEach((workflow, index) => {
+      if (!workflow || typeof workflow !== 'object' || Array.isArray(workflow) || !Array.isArray(workflow.blocks)) {
+        throw new Error(`${index + 1}件目のワークフロー形式が正しくありません`);
+      }
+      visitBlocks(workflow.blocks);
+    });
+    return { rawWorkflows, blockCount };
+  }
+
+  function importWorkflowData(data, fileName = 'JSON') {
+    if (state.running || state.legacyRunning) throw new Error('実行中はワークフローを読み込めません');
+    const inspected = inspectWorkflowImport(data);
+    const workflows = inspected.rawWorkflows.map(normalizeWorkflow);
     for (const workflow of workflows) {
       workflow.id = nowId('workflow');
       workflow.blocks.forEach(regenerateBlockIds);
-      state.workflows.workflows.push(workflow);
     }
-    state.selectedWorkflowId = workflows.at(-1).id;
-    state.workflows.currentId = state.selectedWorkflowId;
-    resetInsertion();
-    saveWorkflowStore({ immediate: true });
+    if (!confirm(`${workflows.length}件のワークフロー（合計${inspected.blockCount}ブロック）を追加しますか？`)) return false;
+    saveWorkflowCheckpoint(`${fileName}の読込前`);
+    commitWorkflowMutation('ワークフローのインポート', () => {
+      state.workflows.workflows.push(...workflows);
+      state.selectedWorkflowId = workflows.at(-1).id;
+      state.workflows.currentId = state.selectedWorkflowId;
+      resetInsertion();
+    });
+    const saved = saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
-    toast(`${fileName}を読み込みました`);
+    toast(saved ? `${fileName}を読み込みました` : '読み込みましたが保存に失敗しました');
+    return true;
   }
 
   function setPage(page) {
@@ -5520,7 +6289,8 @@
     'importWorkflow', 'templateSelect', 'replaceTemplate', 'appendTemplate', 'legacyAddClick', 'legacyAddNavigate',
     'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
     'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset', 'paletteSearch',
-    'clearInsertion', 'expandAllBlocks', 'collapseAllBlocks'
+    'clearInsertion', 'expandAllBlocks', 'collapseAllBlocks', 'undoWorkflow', 'redoWorkflow',
+    'restoreCheckpoint', 'validateWorkflow', 'validationFocus', 'loadExternalWorkflows', 'keepLocalWorkflows'
   ]);
 
   function syncRunControls() {
@@ -5537,6 +6307,24 @@
       const control = byId(id);
       if (control) control.disabled = isRunning;
     }
+    shadow.querySelectorAll('#workflowEditor input,#workflowEditor select,#workflowEditor textarea,#workflowEditor button,.paletteButton').forEach(control => {
+      if (isRunning) {
+        if (control.dataset.runLockDisabled == null) control.dataset.runLockDisabled = String(control.disabled);
+        control.disabled = true;
+      } else if (control.dataset.runLockDisabled != null) {
+        control.disabled = control.dataset.runLockDisabled === 'true';
+        delete control.dataset.runLockDisabled;
+      }
+    });
+    shadow.querySelectorAll('.blockCard').forEach(card => {
+      if (isRunning) {
+        if (card.dataset.runLockDraggable == null) card.dataset.runLockDraggable = String(card.draggable);
+        card.draggable = false;
+      } else if (card.dataset.runLockDraggable != null) {
+        card.draggable = card.dataset.runLockDraggable === 'true';
+        delete card.dataset.runLockDraggable;
+      }
+    });
     shadow.querySelectorAll('.paletteFilter').forEach(control => { control.disabled = isRunning; });
     const compactRun = byId('compactRun');
     compactRun.textContent = isRunning ? '■' : '▶';
@@ -5546,6 +6334,8 @@
     dock.classList.toggle('is-running', isRunning);
     dock.setAttribute('aria-busy', String(isRunning));
     if (isRunning) ui.status.dataset.tone = 'running';
+    syncWorkflowHistoryControls();
+    syncWorkflowCheckpointControl();
   }
 
   function enterRuntimeCompactMode() {
@@ -5584,14 +6374,18 @@
   }
 
   function positionDock() {
-    const rect = dock.getBoundingClientRect();
-    const width = rect.width || 780;
-    const height = rect.height || 600;
     const viewport = window.visualViewport;
     const viewportLeft = finite(viewport?.offsetLeft, 0);
     const viewportTop = finite(viewport?.offsetTop, 0);
     const viewportWidth = finite(viewport?.width, window.innerWidth);
     const viewportHeight = finite(viewport?.height, window.innerHeight);
+    if (Number.isFinite(state.dockWidth)) dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
+    else dock.style.removeProperty('--dock-width');
+    if (Number.isFinite(state.dockHeight)) dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
+    else dock.style.removeProperty('--dock-height');
+    const rect = dock.getBoundingClientRect();
+    const width = rect.width || 780;
+    const height = rect.height || 600;
     const minX = viewportLeft + 4;
     const minY = viewportTop + 4;
     const maxX = Math.max(minX, viewportLeft + viewportWidth - width - 4);
@@ -5672,11 +6466,171 @@
     });
   }
 
+  function installDockHeaderDrag(header) {
+    const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
+    const move = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      state.dockX = drag.baseX + event.clientX - drag.startX;
+      state.dockY = drag.baseY + event.clientY - drag.startY;
+      positionDock();
+    };
+    const finish = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      drag.active = false;
+      releaseDragLock(event, header);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      saveLegacyState();
+    };
+    const start = event => {
+      if (event.button !== 0 || event.target.closest?.('button,input,select,textarea,a')) return;
+      const rect = dock.getBoundingClientRect();
+      acquireDragLock(event, header);
+      drag.active = true;
+      drag.id = event.pointerId;
+      drag.startX = event.clientX;
+      drag.startY = event.clientY;
+      drag.baseX = rect.left;
+      drag.baseY = rect.top;
+      window.addEventListener('pointermove', move, { capture: true, passive: false });
+      window.addEventListener('pointerup', finish, { capture: true, passive: false });
+      window.addEventListener('pointercancel', finish, { capture: true, passive: false });
+    };
+    header.addEventListener('pointerdown', start, { passive: false });
+    addCleanup(() => {
+      if (drag.active) releaseDragLock(null, header);
+      header.removeEventListener('pointerdown', start);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+    });
+  }
+
+  function installDockResize(handle, side) {
+    const drag = {
+      active: false, id: null, startX: 0, startY: 0,
+      baseLeft: 0, baseTop: 0, baseWidth: 0, baseHeight: 0, baseRight: 0
+    };
+    const resizeTo = (desiredWidth, desiredHeight) => {
+      const viewport = window.visualViewport;
+      const viewportLeft = finite(viewport?.offsetLeft, 0);
+      const viewportTop = finite(viewport?.offsetTop, 0);
+      const viewportWidth = finite(viewport?.width, window.innerWidth);
+      const viewportHeight = finite(viewport?.height, window.innerHeight);
+      const viewportRight = viewportLeft + viewportWidth;
+      const viewportBottom = viewportTop + viewportHeight;
+      const maxWidth = Math.max(160, side === 'left'
+        ? drag.baseRight - viewportLeft - 4
+        : viewportRight - drag.baseLeft - 4);
+      const maxHeight = Math.max(180, viewportBottom - drag.baseTop - 4);
+      const minWidth = Math.min(260, maxWidth);
+      const minHeight = Math.min(260, maxHeight);
+      state.dockWidth = clamp(desiredWidth, minWidth, maxWidth);
+      state.dockHeight = clamp(desiredHeight, minHeight, maxHeight);
+      state.dockX = side === 'left' ? drag.baseRight - state.dockWidth : drag.baseLeft;
+      state.dockY = drag.baseTop;
+      positionDock();
+    };
+    const move = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      resizeTo(drag.baseWidth + (side === 'left' ? -dx : dx), drag.baseHeight + dy);
+    };
+    const finish = event => {
+      if (!drag.active || event.pointerId !== drag.id) return;
+      consumeDragEvent(event, true);
+      drag.active = false;
+      releaseDragLock(event, handle);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      saveLegacyState();
+      announce(`パネルサイズを幅${Math.round(state.dockWidth)}、高さ${Math.round(state.dockHeight)}に変更しました`);
+    };
+    const start = event => {
+      if (event.button !== 0 || dock.classList.contains('compact')) return;
+      const rect = dock.getBoundingClientRect();
+      acquireDragLock(event, handle);
+      Object.assign(drag, {
+        active: true,
+        id: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        baseLeft: rect.left,
+        baseTop: rect.top,
+        baseWidth: rect.width,
+        baseHeight: rect.height,
+        baseRight: rect.right
+      });
+      window.addEventListener('pointermove', move, { capture: true, passive: false });
+      window.addEventListener('pointerup', finish, { capture: true, passive: false });
+      window.addEventListener('pointercancel', finish, { capture: true, passive: false });
+    };
+    const keyResize = event => {
+      const amount = event.shiftKey ? 24 : 8;
+      const delta = {
+        ArrowLeft: side === 'left' ? [amount, 0] : [-amount, 0],
+        ArrowRight: side === 'left' ? [-amount, 0] : [amount, 0],
+        ArrowUp: [0, -amount],
+        ArrowDown: [0, amount]
+      }[event.key];
+      if (!delta || dock.classList.contains('compact')) return;
+      event.preventDefault();
+      const rect = dock.getBoundingClientRect();
+      Object.assign(drag, {
+        baseLeft: rect.left,
+        baseTop: rect.top,
+        baseWidth: rect.width,
+        baseHeight: rect.height,
+        baseRight: rect.right
+      });
+      resizeTo(rect.width + delta[0], rect.height + delta[1]);
+      saveLegacyState();
+      announce(`パネルサイズを幅${Math.round(state.dockWidth)}、高さ${Math.round(state.dockHeight)}に変更しました`);
+    };
+    const reset = event => {
+      event.preventDefault();
+      state.dockWidth = null;
+      state.dockHeight = null;
+      positionDock();
+      saveLegacyState();
+      toast('パネルサイズを初期値に戻しました');
+    };
+    handle.addEventListener('pointerdown', start, { passive: false });
+    handle.addEventListener('keydown', keyResize);
+    handle.addEventListener('dblclick', reset);
+    addCleanup(() => {
+      if (drag.active) releaseDragLock(null, handle);
+      handle.removeEventListener('pointerdown', start);
+      handle.removeEventListener('keydown', keyResize);
+      handle.removeEventListener('dblclick', reset);
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+    });
+  }
+
   function normalizeInitialUrl() {
     const saved = String(state.legacy.url || '').trim();
     const source = !saved || saved === 'about:blank' ? location.href : saved;
-    try { return new URL(source, location.href).href; }
-    catch { return location.href; }
+    try {
+      const parsed = new URL(source, location.href);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+    } catch {}
+    return /^https?:$/i.test(location.protocol) ? location.href : 'about:blank';
+  }
+
+  function navigableHttpUrl(value, base = currentFrameUrl() || location.href) {
+    const parsed = new URL(String(value || '').trim(), base);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new FlowError('http / https 以外のURLは開けません', 'UNSAFE_URL_SCHEME');
+    }
+    return parsed.href;
   }
 
   async function loadUrlFromBar() {
@@ -5687,11 +6641,11 @@
       return toast('URLを入力してください');
     }
     let destination;
-    try { destination = /^https?:/i.test(raw) ? new URL(raw).href : new URL(raw, currentFrameUrl() || location.href).href; }
-    catch {
+    try { destination = navigableHttpUrl(raw); }
+    catch (error) {
       urlInput.setAttribute('aria-invalid', 'true');
       urlInput.focus();
-      return toast('URLの形式を確認してください');
+      return toast(error?.code === 'UNSAFE_URL_SCHEME' ? error.message : 'URLの形式を確認してください');
     }
     urlInput.removeAttribute('aria-invalid');
     urlInput.value = destination;
@@ -5711,6 +6665,10 @@
 
   function destroy() {
     if (state.destroyed) return;
+    commitActiveEditorInput();
+    if (state.externalWorkflowConflict) saveWorkflowCheckpoint('別タブ競合中の最終ローカル版');
+    flushWorkflowStore();
+    saveLegacyState();
     state.destroyed = true;
     stopEverything('終了');
     if (state.recording) finishLegacyRecording({ apply: false });
@@ -5806,14 +6764,19 @@
   ui.workflowLoopCount.addEventListener('change', () => {
     const workflow = currentWorkflow();
     if (!workflow || state.running) return;
-    workflow.loopCount = clamp(int(ui.workflowLoopCount.value, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
+    const next = clamp(int(ui.workflowLoopCount.value, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
+    ui.workflowLoopCount.value = String(next);
+    if (workflow.loopCount === next) return;
+    commitWorkflowMutation('実行回数の変更', () => { workflow.loopCount = next; });
     touchWorkflow();
     renderWorkflowEditor();
   });
   ui.workflowLoopMode.addEventListener('change', () => {
     const workflow = currentWorkflow();
     if (!workflow || state.running) return;
-    workflow.loopInfinite = ui.workflowLoopMode.value === 'infinite';
+    const next = ui.workflowLoopMode.value === 'infinite';
+    if (workflow.loopInfinite === next) return;
+    commitWorkflowMutation('ループ方式の変更', () => { workflow.loopInfinite = next; });
     touchWorkflow();
     renderWorkflowEditor();
   });
@@ -5824,7 +6787,16 @@
   byId('replaceTemplate').addEventListener('click', () => applyTemplate('replace'));
   byId('appendTemplate').addEventListener('click', () => applyTemplate('append'));
   byId('exportWorkflow').addEventListener('click', exportCurrentWorkflow);
+  byId('exportAllWorkflows').addEventListener('click', exportAllWorkflows);
   byId('importWorkflow').addEventListener('click', () => chooseImportFile('workflow'));
+  byId('restoreCheckpoint').addEventListener('click', restoreWorkflowCheckpoint);
+  byId('loadExternalWorkflows').addEventListener('click', loadExternalWorkflowVersion);
+  byId('keepLocalWorkflows').addEventListener('click', keepLocalWorkflowVersion);
+  byId('backupConflictWorkflows').addEventListener('click', exportAllWorkflows);
+  ui.undoWorkflow.addEventListener('click', undoWorkflowChange);
+  ui.redoWorkflow.addEventListener('click', redoWorkflowChange);
+  ui.validateWorkflow.addEventListener('click', () => runWorkflowValidation());
+  ui.validationFocus.addEventListener('click', () => focusWorkflowValidationIssue());
   ui.runWorkflow.addEventListener('click', startWorkflow);
   ui.stopWorkflow.addEventListener('click', () => stopWorkflow());
 
@@ -5850,6 +6822,7 @@
     const data = readLegacyPreset(ui.legacyPresetSlot.value);
     ui.legacyPresetName.value = String(data?.presetMeta?.name || '');
   });
+  byId('copyLogs').addEventListener('click', copyErrorLogs);
   byId('clearLogs').addEventListener('click', () => { state.logs = []; renderLogs(); });
 
   recordLayer.addEventListener('pointerdown', recordPointerDown, { passive: false });
@@ -5862,7 +6835,9 @@
     importFile.value = '';
     if (!file) return;
     try {
+      if (file.size > MAX_IMPORT_BYTES) throw new Error(`JSONファイルは${Math.round(MAX_IMPORT_BYTES / 1_000_000)}MBまでです`);
       const data = JSON.parse(await file.text());
+      if (state.running || state.legacyRunning) throw new Error('実行中は読み込めません');
       if (importPurpose === 'workflow') importWorkflowData(data, file.name);
     } catch (error) {
       toast(`JSON読込失敗: ${error.message}`);
@@ -5885,14 +6860,28 @@
   };
   window.addEventListener('resize', resizeHandler, { passive: true });
   window.visualViewport?.addEventListener('resize', resizeHandler, { passive: true });
+  window.addEventListener('storage', handleExternalWorkflowUpdate);
+  const pageHideHandler = () => {
+    commitActiveEditorInput();
+    if (state.externalWorkflowConflict) saveWorkflowCheckpoint('別タブ競合中の最終ローカル版');
+    flushWorkflowStore();
+    saveLegacyState();
+  };
+  window.addEventListener('pagehide', pageHideHandler);
   addCleanup(() => {
     window.removeEventListener('resize', resizeHandler);
     window.visualViewport?.removeEventListener('resize', resizeHandler);
+    window.removeEventListener('storage', handleExternalWorkflowUpdate);
+    window.removeEventListener('pagehide', pageHideHandler);
   });
   installDockDrag(byId('dockGrip'));
   installDockDrag(byId('compactGrip'));
+  installDockHeaderDrag(byId('dockHeader'));
+  installDockResize(byId('resizeDockLeft'), 'left');
+  installDockResize(byId('resizeDockRight'), 'right');
 
   shadow.addEventListener('keydown', event => {
+    if (event.isComposing || event.repeat) return;
     if (state.recording && event.key === 'Tab') {
       const controls = [byId('recordCancel'), byId('recordFinish')];
       const current = controls.indexOf(shadow.activeElement);
@@ -5903,11 +6892,28 @@
       next.focus();
       return;
     }
+    const modifier = event.metaKey || event.ctrlKey;
+    const key = event.key.toLowerCase();
+    const editable = event.target?.matches?.('input,textarea,select,[contenteditable=true]');
+    const wantsUndo = modifier && key === 'z' && !event.shiftKey;
+    const wantsRedo = modifier && (key === 'y' || (key === 'z' && event.shiftKey));
+    if (state.page === 'workflow' && !editable && !state.running && !state.legacyRunning) {
+      if (wantsUndo && state.workflowUndo.length) {
+        event.preventDefault();
+        undoWorkflowChange();
+        return;
+      }
+      if (wantsRedo && state.workflowRedo.length) {
+        event.preventDefault();
+        redoWorkflowChange();
+        return;
+      }
+    }
     if (event.key === 'Escape') {
       if (state.recording) finishLegacyRecording({ apply: false });
       else stopEverything('Escape');
     }
-    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    if (modifier && event.key === 'Enter') {
       event.preventDefault();
       if (state.page === 'legacy') state.legacyRunning ? stopLegacy() : startLegacy();
       else state.running ? stopWorkflow() : startWorkflow();
@@ -5929,6 +6935,10 @@
   renderLegacy();
   renderLogs();
   syncRunControls();
+  if (state.recoveredFromCheckpoint) {
+    setStatus('復旧ポイントから復元');
+    toast('保存データが読めなかったため、直前の復旧ポイントを読み込みました');
+  }
   byId('workflowSettingsPanel').open = !narrowScreen;
   setPage('workflow');
   setBrowserHidden(state.legacy.browserHidden || narrowScreen);
@@ -5957,12 +6967,16 @@
     parseSupporterRow,
     detectScreenState,
     evaluateWorkflowCondition,
+    validateWorkflowDefinition,
+    inspectWorkflowImport,
     normalizeLegacyState,
     legacySnapshot,
     startWorkflow,
     stopWorkflow,
     startLegacy,
     stopLegacy,
+    undoWorkflowChange,
+    redoWorkflowChange,
     waitForFrameReady,
     performFrameOperation,
     jqTapStrict,
