@@ -1200,7 +1200,12 @@
   }
 
   function computedVisible(element) {
-    if (!element || !element.isConnected) return false;
+    if (!element || !element.isConnected || element.hidden) return false;
+    const inlineStyle = element.style;
+    if (inlineStyle) {
+      if (inlineStyle.display === 'none' || inlineStyle.visibility === 'hidden' || inlineStyle.visibility === 'collapse') return false;
+      if (inlineStyle.opacity !== '' && Number(inlineStyle.opacity) === 0) return false;
+    }
     const view = element.ownerDocument?.defaultView || window;
     const style = view.getComputedStyle?.(element);
     if (style) {
@@ -1253,15 +1258,15 @@
     }
   }
 
-  function screenSignature(doc = frameDocument()) {
-    const stateInfo = detectScreenState(doc);
+  function screenSignature(doc = frameDocument(), stateInfo = null) {
+    const detected = stateInfo || detectScreenState(doc);
     const assistRows = [...doc.querySelectorAll(SELECTORS.assistRows)].slice(0, 12).map(row => [
       row.dataset.raidId || '',
       row.querySelector('.prt-raid-gauge-inner')?.style.width || '',
       normalizePopupText(row.querySelector('.prt-flees-in')?.textContent || '')
     ].join(':')).join('|');
     const unclaimedRows = [...doc.querySelectorAll(SELECTORS.unclaimedRows)].slice(0, 12).map(row => row.dataset.raidId || row.dataset.href || '').join('|');
-    return `${stateInfo.type}|${assistRows}|${unclaimedRows}|${doc.body?.childElementCount || 0}`;
+    return `${detected.type}|${assistRows}|${unclaimedRows}|${doc.body?.childElementCount || 0}`;
   }
 
   function captureFrameState() {
@@ -1271,8 +1276,9 @@
     let signature = '';
     try {
       doc = frameDocument();
-      screen = detectScreenState(doc).type;
-      signature = screenSignature(doc);
+      const stateInfo = detectScreenState(doc);
+      screen = stateInfo.type;
+      signature = screenSignature(doc, stateInfo);
     } catch {}
     return { doc, href, screen, signature, at: performance.now() };
   }
@@ -1389,7 +1395,7 @@
         const changed = doc !== baseline.doc
           || currentFrameUrl() !== baseline.href
           || stateInfo.type !== baseline.screen
-          || screenSignature(doc) !== baseline.signature;
+          || screenSignature(doc, stateInfo) !== baseline.signature;
         if (!changed) return false;
       }
       return { document: doc, state: stateInfo.type, url: currentFrameUrl() };
@@ -2203,8 +2209,21 @@
     let loadingEnded = false;
     let observer = null;
     try {
-      observer = new MutationObserver(() => { sawMutation = true; });
-      observer.observe(currentDoc.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const observationRoot = beforeList.parentElement || beforeList;
+      observer = new MutationObserver(records => {
+        sawMutation = records.some(record =>
+          record.target === observationRoot
+          || record.target === beforeList
+          || beforeList.contains(record.target)
+        );
+      });
+      observer.observe(observationRoot, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+        characterData: true
+      });
       const waitPromise = monitorFrame(() => {
         const docNow = frameDocument();
         const listNow = docNow.querySelector(SELECTORS.assistList);
@@ -2410,12 +2429,18 @@
   }
 
   function elementDisplayOn(element) {
-    return Boolean(element && (computedVisible(element) || element.classList.contains('display-on')) && !element.classList.contains('display-off'));
+    return Boolean(
+      element
+      && !element.classList.contains('display-off')
+      && (element.classList.contains('display-on') || computedVisible(element))
+    );
   }
 
   function turnSignature(doc = frameDocument()) {
     const turn = doc.querySelector(SELECTORS.turn);
-    return turn ? `${turn.textContent || ''}|${turn.innerHTML || ''}` : '';
+    if (!turn) return '';
+    const classes = Array.from(turn.children, child => child.className || '').join(',');
+    return `${turn.textContent || ''}|${classes}`;
   }
 
   function attackSnapshot(doc = frameDocument()) {

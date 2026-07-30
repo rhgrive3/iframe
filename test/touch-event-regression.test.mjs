@@ -102,6 +102,40 @@ test('auto-attack establishes a ready baseline before watching for attack', () =
   assert.match(source, /const baseline = armed\.snapshot/);
 });
 
+test('visibility checks short-circuit definite hidden and display-on states', () => {
+  const visibilityStart = source.indexOf('function computedVisible');
+  const visibilityEnd = source.indexOf('function hiddenOrAbsent', visibilityStart);
+  const visibilityBlock = source.slice(visibilityStart, visibilityEnd);
+  assert.ok(visibilityStart >= 0 && visibilityEnd > visibilityStart);
+  assert.ok(visibilityBlock.indexOf('const inlineStyle = element.style') < visibilityBlock.indexOf('getComputedStyle'));
+
+  const displayStart = source.indexOf('function elementDisplayOn');
+  const displayEnd = source.indexOf('function turnSignature', displayStart);
+  const displayBlock = source.slice(displayStart, displayEnd);
+  assert.ok(displayStart >= 0 && displayEnd > displayStart);
+  assert.match(displayBlock, /classList\.contains\('display-on'\) \|\| computedVisible\(element\)/);
+});
+
+test('frame signatures reuse detected state and avoid serializing turn HTML', () => {
+  assert.match(source, /function screenSignature\(doc = frameDocument\(\), stateInfo = null\)/);
+  assert.match(source, /signature = screenSignature\(doc, stateInfo\)/);
+  assert.match(source, /screenSignature\(doc, stateInfo\) !== baseline\.signature/);
+  const turnStart = source.indexOf('function turnSignature');
+  const turnEnd = source.indexOf('function attackSnapshot', turnStart);
+  const turnBlock = source.slice(turnStart, turnEnd);
+  assert.match(turnBlock, /Array\.from\(turn\.children/);
+  assert.doesNotMatch(turnBlock, /innerHTML/);
+});
+
+test('assist refresh observes only the list region', () => {
+  const start = source.indexOf('async function refreshAssistList');
+  const end = source.indexOf('function visibleSupporterRows', start);
+  const block = source.slice(start, end);
+  assert.match(block, /const observationRoot = beforeList\.parentElement \|\| beforeList/);
+  assert.match(block, /observer\.observe\(observationRoot/);
+  assert.doesNotMatch(block, /observer\.observe\(currentDoc\.documentElement/);
+});
+
 test('repo patch request builder emits guarded exact replacements', () => {
   const request = buildRequest({
     head: 'a'.repeat(40),
