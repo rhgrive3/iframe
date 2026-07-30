@@ -1,0 +1,1 @@
+Apply route-scoped sound restoration and isolate native API hook failures.
