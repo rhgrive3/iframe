@@ -1,0 +1,82 @@
+name: Apply rebased professional UX patch
+
+on:
+  push:
+    branches:
+      - 'ux/professional-controller-v2'
+    paths:
+      - '.github/workflows/apply-professional-ux-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ux/professional-controller-v2
+          fetch-depth: 0
+
+      - name: Build UX patch from reviewed branch
+        shell: bash
+        run: |
+          git fetch origin ux/professional-controller
+          git diff --full-index b930710be0f6ef908bc0a55ed4119a5d502f3ef7..origin/ux/professional-controller -- \
+            a.js tests/autoflow.static.test.mjs tests/safari-performance-regression.test.mjs > /tmp/ux.patch
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('/tmp/ux.patch')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+          output = []
+          index = 0
+          while index < len(lines):
+              if lines[index].startswith('@@ '):
+                  end = index + 1
+                  while end < len(lines) and not lines[end].startswith(('@@ ', 'diff --git ')):
+                      end += 1
+                  hunk = lines[index:end]
+                  if not any('APP_VERSION' in line for line in hunk):
+                      output.extend(hunk)
+                  index = end
+                  continue
+              output.append(lines[index])
+              index += 1
+          path.write_text(''.join(output), encoding='utf-8')
+          PY
+
+      - name: Apply onto latest main
+        shell: bash
+        run: |
+          git apply --3way /tmp/ux.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+          old = '  const APP_VERSION = 39;'
+          if source.count(old) != 1:
+              raise SystemExit(f'expected one current version marker, found {source.count(old)}')
+          path.write_text(source.replace(old, '  const APP_VERSION = 40;', 1), encoding='utf-8')
+          PY
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Commit generated changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js tests/autoflow.static.test.mjs tests/safari-performance-regression.test.mjs
+          git rm .github/workflows/apply-professional-ux-v2.yml
+          git commit -m 'feat: professionalize controller UX'
+          git push origin HEAD:ux/professional-controller-v2
