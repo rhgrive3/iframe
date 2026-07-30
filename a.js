@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 33;
+  const APP_VERSION = 34;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -2301,11 +2301,19 @@
 
   async function tapPopupOk(popup, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expected = null } = {}) {
     if (!popup?.ok) throw new FlowError('表示中エラーポップアップのOKが見つかりません', 'POPUP_OK_MISSING');
+    if (expected) {
+      return runObservedAction(
+        waitSignal => waitForGbfState(expected, {
+          signal: waitSignal,
+          timeoutMs,
+          description: 'エラー後画面待ち'
+        }),
+        () => jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK' }),
+        { signal, cancelMessage: 'エラー後画面監視を解除しました' }
+      );
+    }
     const before = captureFrameState();
     await jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK' });
-    if (expected) {
-      return waitForGbfState(expected, { signal, timeoutMs, description: 'エラー後画面待ち' });
-    }
     return monitorFrame(() => {
       const current = popupInfo();
       if (!current) return { closed: true };
@@ -2379,11 +2387,14 @@
 
   function assistListSignature(list) {
     if (!list) return '';
-    return [...list.children].filter(row => row.matches?.('.btn-multi-raid.lis-raid.search')).map(row => {
+    let signature = '';
+    for (const row of list.children) {
+      if (!row.matches?.('.btn-multi-raid.lis-raid.search')) continue;
       const hp = row.querySelector('.prt-raid-gauge-inner')?.style.width || '';
       const people = normalizePopupText(row.querySelector('.prt-flees-in')?.textContent || '');
-      return `${row.dataset.raidId || ''}:${hp}:${people}`;
-    }).join('|');
+      signature += `${row.dataset.raidId || ''}:${hp}:${people}|`;
+    }
+    return signature;
   }
 
   async function waitRandomized(baseSec, jitterSec, signal) {
@@ -2391,6 +2402,53 @@
     const jitter = Math.max(0, finite(jitterSec, 0));
     const actual = Math.max(0, base + randomUniform(-jitter, jitter));
     await abortableDelay(actual * 1000, signal);
+  }
+
+  async function runAssistListTransition(beforeList, config, signal, action, {
+    expectedSlot = null,
+    description = '救援一覧切替完了待ち',
+    cancelMessage = '救援一覧切替監視を解除しました'
+  } = {}) {
+    const beforeSignature = assistListSignature(beforeList);
+    const observationRoot = beforeList.parentElement || beforeList;
+    let sawMutation = false;
+    let sawLoading = false;
+    let loadingEnded = false;
+    const observer = new MutationObserver(() => { sawMutation = true; });
+    observer.observe(observationRoot, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+      characterData: true
+    });
+    try {
+      return await runObservedAction(
+        waitSignal => monitorFrame(() => {
+          const docNow = frameDocument();
+          const listNow = docNow.querySelector(SELECTORS.assistList);
+          const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
+          if (loadingVisible) sawLoading = true;
+          if (sawLoading && !loadingVisible) loadingEnded = true;
+          const reconstructed = Boolean(listNow && listNow !== beforeList);
+          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
+          const slotReady = expectedSlot == null || activeAssistSlot(docNow) === expectedSlot;
+          if (!slotReady || !completed || !listNow || loadingVisible) return false;
+          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+        }, {
+          signal: waitSignal,
+          timeoutMs: config.timeoutSec * 1000,
+          stableMs: 0,
+          description,
+          observeRoots: []
+        }),
+        action,
+        { signal, cancelMessage }
+      );
+    } finally {
+      observer.disconnect();
+    }
   }
 
   async function refreshAssistList(config, context, { waitForCompletion = true } = {}) {
@@ -2406,57 +2464,21 @@
     const beforeList = currentDoc.querySelector(SELECTORS.assistList);
     if (!refresh || !computedVisible(refresh)) throw new FlowError('救援一覧の更新ボタンが表示されていません', 'REFRESH_MISSING');
     if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
-    const beforeSignature = assistListSignature(beforeList);
     if (!waitForCompletion) {
       await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
       return { tapped: true, waitedForCompletion: false };
     }
-
-    let sawMutation = false;
-    let sawLoading = false;
-    let loadingEnded = false;
-    let observer = null;
-    try {
-      const observationRoot = beforeList.parentElement || beforeList;
-      observer = new MutationObserver(records => {
-        sawMutation ||= records.some(record =>
-          record.target === observationRoot
-          || record.target === beforeList
-          || beforeList.contains(record.target)
-        );
-      });
-      observer.observe(observationRoot, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['class', 'style'],
-        characterData: true
-      });
-      const completion = await runObservedAction(
-        waitSignal => monitorFrame(() => {
-          const docNow = frameDocument();
-          const listNow = docNow.querySelector(SELECTORS.assistList);
-          const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
-          if (loadingVisible) sawLoading = true;
-          if (sawLoading && !loadingVisible) loadingEnded = true;
-          const reconstructed = Boolean(listNow && listNow !== beforeList);
-          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
-          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
-          if (!completed || !listNow || loadingVisible) return false;
-          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
-        }, {
-          signal: waitSignal,
-          timeoutMs: config.timeoutSec * 1000,
-          stableMs: DEFAULT_STABLE_MS,
-          description: '救援一覧更新完了待ち'
-        }),
-        () => jqTapStrict(refresh, { signal, label: '救援一覧更新' }),
-        { signal, cancelMessage: '救援一覧更新監視を解除しました' }
-      );
-      return { tapped: true, waitedForCompletion: true, completion };
-    } finally {
-      observer?.disconnect();
-    }
+    const completion = await runAssistListTransition(
+      beforeList,
+      config,
+      signal,
+      () => jqTapStrict(refresh, { signal, label: '救援一覧更新' }),
+      {
+        description: '救援一覧更新完了待ち',
+        cancelMessage: '救援一覧更新監視を解除しました'
+      }
+    );
+    return { tapped: true, waitedForCompletion: true, completion };
   }
 
   async function switchAssistSlot(slot, config, context) {
@@ -2476,53 +2498,18 @@
     if (!button || !computedVisible(button)) throw new FlowError(`救援番号${normalized}が表示されていません`, 'ASSIST_SLOT_MISSING');
     if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
     if (beforeActive === normalized) return { tapped: false, slot: normalized, alreadyActive: true };
-
-    const beforeSignature = assistListSignature(beforeList);
-    let sawMutation = false;
-    let sawLoading = false;
-    let loadingEnded = false;
-    let observer = null;
-    try {
-      const observationRoot = beforeList.parentElement || beforeList;
-      observer = new MutationObserver(records => {
-        sawMutation ||= records.some(record =>
-          record.target === observationRoot
-          || record.target === beforeList
-          || beforeList.contains(record.target)
-        );
-      });
-      observer.observe(observationRoot, {
-        subtree: true,
-        childList: true,
-        attributes: true,
-        attributeFilter: ['class', 'style'],
-        characterData: true
-      });
-      const completion = await runObservedAction(
-        waitSignal => monitorFrame(() => {
-          const docNow = frameDocument();
-          const listNow = docNow.querySelector(SELECTORS.assistList);
-          const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
-          if (loadingVisible) sawLoading = true;
-          if (sawLoading && !loadingVisible) loadingEnded = true;
-          const reconstructed = Boolean(listNow && listNow !== beforeList);
-          const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
-          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
-          if (activeAssistSlot(docNow) !== normalized || !completed || !listNow || loadingVisible) return false;
-          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
-        }, {
-          signal: waitSignal,
-          timeoutMs: config.timeoutSec * 1000,
-          stableMs: DEFAULT_STABLE_MS,
-          description: `救援番号${normalized}切替完了待ち`
-        }),
-        () => jqTapStrict(button, { signal, label: `救援番号${normalized}` }),
-        { signal, cancelMessage: `救援番号${normalized}切替監視を解除しました` }
-      );
-      return { tapped: true, slot: normalized, completion };
-    } finally {
-      observer?.disconnect();
-    }
+    const completion = await runAssistListTransition(
+      beforeList,
+      config,
+      signal,
+      () => jqTapStrict(button, { signal, label: `救援番号${normalized}` }),
+      {
+        expectedSlot: normalized,
+        description: `救援番号${normalized}切替完了待ち`,
+        cancelMessage: `救援番号${normalized}切替監視を解除しました`
+      }
+    );
+    return { tapped: true, slot: normalized, completion };
   }
 
   function activeAssistSlot(doc = frameDocument()) {
@@ -2589,13 +2576,15 @@
     if (result.deckOk) return { alreadySelected: true, deckOk: result.deckOk };
     const selected = chooseSupporter(result.rows, config.supporterCandidates);
     if (!selected) throw new FlowError('有効なサポーター行または召喚石レベルを取得できません', 'SUPPORTER_NOT_FOUND');
-    const statePromise = waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
-      signal,
-      timeoutMs: config.timeoutSec * 1000,
-      description: 'サポーター選択後待ち'
-    });
-    await jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}` });
-    const next = await statePromise;
+    const next = await runObservedAction(
+      waitSignal => waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+        signal: waitSignal,
+        timeoutMs: config.timeoutSec * 1000,
+        description: 'サポーター選択後待ち'
+      }),
+      () => jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}` }),
+      { signal, cancelMessage: 'サポーター選択監視を解除しました' }
+    );
     if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
     return { selected, next };
   }
@@ -2608,13 +2597,15 @@
     if (deckOk && computedVisible(deckOk)) return { alreadySelected: true, deckOk };
     const auto = doc.querySelector(SELECTORS.supporterAuto);
     if (!auto || !computedVisible(auto)) throw new FlowError('サポーター自動選択ボタンが表示されていません', 'SUPPORTER_AUTO_MISSING');
-    const statePromise = waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
-      signal,
-      timeoutMs: config.timeoutSec * 1000,
-      description: 'サポーター自動選択後待ち'
-    });
-    await jqTapStrict(auto, { signal, label: 'サポーター自動選択' });
-    return statePromise;
+    return runObservedAction(
+      waitSignal => waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+        signal: waitSignal,
+        timeoutMs: config.timeoutSec * 1000,
+        description: 'サポーター自動選択後待ち'
+      }),
+      () => jqTapStrict(auto, { signal, label: 'サポーター自動選択' }),
+      { signal, cancelMessage: 'サポーター自動選択監視を解除しました' }
+    );
   }
 
   async function returnToAssistFromUnclaimed(config, context) {
@@ -2622,15 +2613,18 @@
     const doc = frameDocument();
     const returnButton = doc.querySelector(SELECTORS.assistReturn);
     if (returnButton && computedVisible(returnButton)) {
-      const waitPromise = waitForFrameReady({
-        signal,
-        timeoutMs: config.timeoutSec * 1000,
-        expectedScreen: 'assist',
-        before: captureFrameState(),
-        requireChange: true
-      });
-      await jqTapStrict(returnButton, { signal, label: '救援一覧へ戻る' });
-      return waitPromise;
+      const before = captureFrameState();
+      return runObservedAction(
+        waitSignal => waitForFrameReady({
+          signal: waitSignal,
+          timeoutMs: config.timeoutSec * 1000,
+          expectedScreen: 'assist',
+          before,
+          requireChange: true
+        }),
+        () => jqTapStrict(returnButton, { signal, label: '救援一覧へ戻る' }),
+        { signal, cancelMessage: '救援一覧復帰監視を解除しました' }
+      );
     }
     return performFrameOperation(() => {
       frameWindow().location.href = gameRouteUrl('#quest/assist/multi/0');
@@ -2645,21 +2639,28 @@
       throwIfAborted(signal);
       const doc = frameDocument();
       assertNoUnknownPopup(doc);
-      const rows = [...doc.querySelectorAll(SELECTORS.unclaimedRows)];
-      if (!rows.length) break;
+      const topRow = doc.querySelector(SELECTORS.unclaimedRows);
+      if (!topRow) break;
       if (processed >= config.maxItems) throw new FlowError('未確認バトル処理が安全上限件数を超えました', 'UNCLAIMED_LIMIT');
-      const topRow = rows[0];
       const href = String(topRow.dataset.href || '');
       const before = captureFrameState();
-      const resultPromise = monitorFrame(() => {
-        const url = currentFrameUrl();
-        const docNow = frameDocument();
-        if (!pageBaseReady(docNow)) return false;
-        const changed = docNow !== before.doc || url !== before.href || url.includes('result_multi/') || !docNow.querySelector(SELECTORS.unclaimedList);
-        return changed ? { url } : false;
-      }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: DEFAULT_STABLE_MS, description: '未確認結果画面待ち' });
-      await jqTapStrict(topRow, { signal, label: `未確認バトル ${href}` });
-      await resultPromise;
+      await runObservedAction(
+        waitSignal => monitorFrame(() => {
+          const url = currentFrameUrl();
+          const docNow = frameDocument();
+          if (!pageBaseReady(docNow)) return false;
+          const changed = docNow !== before.doc || url !== before.href || url.includes('result_multi/') || !docNow.querySelector(SELECTORS.unclaimedList);
+          return changed ? { url } : false;
+        }, {
+          signal: waitSignal,
+          timeoutMs: config.timeoutSec * 1000,
+          stableMs: DEFAULT_STABLE_MS,
+          description: '未確認結果画面待ち',
+          observeRoots: gbfStateObservationRoots
+        }),
+        () => jqTapStrict(topRow, { signal, label: `未確認バトル ${href}` }),
+        { signal, cancelMessage: '未確認結果画面監視を解除しました' }
+      );
       processed += 1;
       await performFrameOperation(() => {
         frameWindow().location.href = gameRouteUrl('#quest/assist/unclaimed/0/0');
@@ -3024,13 +3025,15 @@
     const doc = frameDocument();
     const button = doc.querySelector(SELECTORS.deckOk);
     if (!button || !computedVisible(button)) throw new FlowError('編成確認OKが表示されていません', 'DECK_OK_MISSING');
-    const statePromise = waitForGbfState(['BATTLE', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
-      signal,
-      timeoutMs: config.timeoutSec * 1000,
-      description: '編成確認後待ち'
-    });
-    await jqTapStrict(button, { signal, label: '編成確認OK' });
-    const next = await statePromise;
+    const next = await runObservedAction(
+      waitSignal => waitForGbfState(['BATTLE', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
+        signal: waitSignal,
+        timeoutMs: config.timeoutSec * 1000,
+        description: '編成確認後待ち'
+      }),
+      () => jqTapStrict(button, { signal, label: '編成確認OK' }),
+      { signal, cancelMessage: '編成確認後監視を解除しました' }
+    );
     if (next.type === 'BATTLE') {
       await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
       return { battle: true };

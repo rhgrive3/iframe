@@ -154,22 +154,27 @@ test('frame signatures are screen-specific and turn scans stay shallow', () => {
 });
 
 test('assist refresh observes only the list region', () => {
-  const start = source.indexOf('async function refreshAssistList');
-  const end = source.indexOf('function visibleSupporterRows', start);
+  const start = source.indexOf('async function runAssistListTransition');
+  const end = source.indexOf('async function refreshAssistList', start);
   const block = source.slice(start, end);
   assert.match(block, /const observationRoot = beforeList\.parentElement \|\| beforeList/);
   assert.match(block, /observer\.observe\(observationRoot/);
+  assert.match(block, /observeRoots: \[\]/);
   assert.doesNotMatch(block, /observer\.observe\(currentDoc\.documentElement/);
 });
 
 test('assist HP polling keeps tapping when a refresh produces no DOM mutation', () => {
+  const transitionStart = source.indexOf('async function runAssistListTransition');
+  const transitionEnd = source.indexOf('async function refreshAssistList', transitionStart);
+  const transitionBlock = source.slice(transitionStart, transitionEnd);
+  assert.match(transitionBlock, /new MutationObserver\(\(\) => \{ sawMutation = true; \}\)/);
+
   const refreshStart = source.indexOf('async function refreshAssistList');
-  const refreshEnd = source.indexOf('function visibleSupporterRows', refreshStart);
+  const refreshEnd = source.indexOf('function activeAssistSlot', refreshStart);
   const refreshBlock = source.slice(refreshStart, refreshEnd);
   assert.match(refreshBlock, /\{ waitForCompletion = true \} = \{\}/);
   assert.match(refreshBlock, /if \(!waitForCompletion\)/);
   assert.match(refreshBlock, /return \{ tapped: true, waitedForCompletion: false \}/);
-  assert.match(refreshBlock, /sawMutation \|\|= records\.some/);
 
   const flowStart = source.indexOf('async function assistSelectFullFlow');
   const flowEnd = source.indexOf('function evaluateWorkflowCondition', flowStart);

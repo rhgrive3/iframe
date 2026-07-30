@@ -67,12 +67,16 @@ test('multiple assist slots cycle while single selection retains refresh behavio
 });
 
 test('assist slot switching waits for the new list before rescanning', () => {
+  const shared = source.slice(source.indexOf('async function runAssistListTransition'), source.indexOf('async function refreshAssistList'));
+  assert.ok(shared.includes('const observationRoot = beforeList.parentElement || beforeList'));
+  assert.ok(shared.includes('const observer = new MutationObserver'));
+  assert.ok(shared.includes('observeRoots: []'));
+  assert.ok(shared.includes('expectedSlot == null || activeAssistSlot(docNow) === expectedSlot'));
+  assert.ok(shared.includes('reconstructed || changedSignature || loadingEnded || sawMutation'));
   const body = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
   assert.ok(body.includes('const beforeList = currentDoc.querySelector(SELECTORS.assistList)'));
-  assert.ok(body.includes('const completion = await runObservedAction'));
-  assert.ok(body.includes('signal: waitSignal'));
-  assert.ok(body.includes('activeAssistSlot(docNow) !== normalized'));
-  assert.ok(body.includes('reconstructed || changedSignature || loadingEnded || sawMutation'));
+  assert.ok(body.includes('runAssistListTransition'));
+  assert.ok(body.includes('expectedSlot: normalized'));
   const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
   assert.ok(flow.includes('if (slot === currentSlot)'));
 });
@@ -97,10 +101,12 @@ test('max-assist recovery navigates directly to notification-backed unclaimed ba
 test('failed observed actions are canceled and log DOM stays lightweight', () => {
   assert.ok(source.includes('async function runObservedAction'));
   assert.ok(source.includes("controller.abort(new DOMException(cancelMessage, 'AbortError'))"));
+  const shared = source.slice(source.indexOf('async function runAssistListTransition'), source.indexOf('async function refreshAssistList'));
+  assert.ok(shared.includes('runObservedAction'));
   const refresh = source.slice(source.indexOf('async function refreshAssistList'), source.indexOf('async function switchAssistSlot'));
-  assert.ok(refresh.includes('runObservedAction'));
+  assert.ok(refresh.includes('runAssistListTransition'));
   const slot = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
-  assert.ok(slot.includes('runObservedAction'));
+  assert.ok(slot.includes('runAssistListTransition'));
   assert.ok(source.includes('const MAX_LOGS = 20'));
   assert.ok(source.includes('state.logs.slice(-MAX_LOGS)'));
   assert.ok(source.includes('while (ui.logList.children.length > MAX_LOGS)'));
@@ -123,4 +129,22 @@ test('runtime hot paths avoid redundant document scans', () => {
   const battleEnd = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
   assert.ok(battleEnd.includes("url.includes('result_multi/')"));
   assert.ok(!battleEnd.includes('detectScreenState(doc)'));
+});
+
+test('tap-backed state waits share immediate cancellation cleanup', () => {
+  const ranges = [
+    ['async function tapPopupOk', 'function parseAssistRow'],
+    ['async function selectSupporterConditional', 'async function selectSupporterAuto'],
+    ['async function selectSupporterAuto', 'async function returnToAssistFromUnclaimed'],
+    ['async function returnToAssistFromUnclaimed', 'async function confirmAllUnclaimed'],
+    ['async function confirmAllUnclaimed', 'function fullAutoState'],
+    ['async function pressDeckConfirm', 'async function assistSelectFullFlow']
+  ];
+  for (const [startName, endName] of ranges) {
+    const block = source.slice(source.indexOf(startName), source.indexOf(endName));
+    assert.ok(block.includes('runObservedAction'), `${startName} must use runObservedAction`);
+  }
+  const unclaimed = source.slice(source.indexOf('async function confirmAllUnclaimed'), source.indexOf('function fullAutoState'));
+  assert.ok(unclaimed.includes('const topRow = doc.querySelector(SELECTORS.unclaimedRows)'));
+  assert.ok(!unclaimed.includes('querySelectorAll(SELECTORS.unclaimedRows)'));
 });
