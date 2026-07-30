@@ -1,0 +1,37 @@
+name: Validate Repository Patch Bridge
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/apply_repo_patch.py
+      - .github/workflows/repo-patch-bridge.yml
+      - .github/workflows/repo-patch-bridge-ci.yml
+      - tests/repo_patch_bridge.test.py
+  push:
+    branches: [main]
+    paths:
+      - .github/scripts/apply_repo_patch.py
+      - .github/workflows/repo-patch-bridge.yml
+      - .github/workflows/repo-patch-bridge-ci.yml
+      - tests/repo_patch_bridge.test.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repo-patch-bridge-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile bridge script
+        run: python -m py_compile .github/scripts/apply_repo_patch.py
+      - name: Run bridge tests
+        run: python tests/repo_patch_bridge.test.py
