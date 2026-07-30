@@ -10,7 +10,7 @@ on:
 permissions:
   contents: write
   pull-requests: read
-  issues: read
+  issues: write
 
 concurrency:
   group: finalize-touch-scroll-refactor
@@ -23,7 +23,7 @@ jobs:
        github.event.pull_request.head.ref == 'refactor/truncated-touch-scroll-sync' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'issues' &&
-       github.event.issue.title == 'run-truncated-touch-scroll-refactor')
+       github.event.issue.title == 'run-truncated-touch-scroll-refactor-debug-20260730')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -31,11 +31,30 @@ jobs:
         with:
           ref: refactor/truncated-touch-scroll-sync
           fetch-depth: 0
+      - name: Report start
+        if: github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body "touch refactor finalizer started at $(git rev-parse HEAD)"
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - name: Apply exact refactor
-        run: python .github/scripts/apply_touch_refactor.py
+        id: apply
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          python .github/scripts/apply_touch_refactor.py > /tmp/apply.log 2>&1
+          status=$?
+          cat /tmp/apply.log
+          if [ "$status" -ne 0 ]; then
+            if [ "${{ github.event_name }}" = "issues" ]; then
+              gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body-file /tmp/apply.log
+            fi
+            exit "$status"
+          fi
       - name: Validate
         run: |
           node --check a.js
@@ -47,3 +66,8 @@ jobs:
           git add -A
           git commit -m 'refactor: synchronize synthetic touch and scroll physics'
           git push origin HEAD:refactor/truncated-touch-scroll-sync
+      - name: Report completion
+        if: success() && github.event_name == 'issues'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh issue comment "${{ github.event.issue.number }}" --repo "$GITHUB_REPOSITORY" --body "touch refactor finalizer completed at $(git rev-parse HEAD)"
