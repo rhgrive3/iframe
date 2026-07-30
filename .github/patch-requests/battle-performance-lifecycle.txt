@@ -1,2 +1,2 @@
 Suspend runtime polling while disabled and roll back failed setting persistence.
-Retry after fixing generated test quote escaping.
+Retry after fixing generated test quote escaping and migrating the prior assertion.
