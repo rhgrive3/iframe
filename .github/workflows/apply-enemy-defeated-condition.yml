@@ -7,6 +7,7 @@ on:
       - main
     paths:
       - '.github/workflows/apply-enemy-defeated-condition.yml'
+      - '.github/workflows/battle-ended-trigger.txt'
 
 permissions:
   contents: write
@@ -81,6 +82,7 @@ test('battle ended is available as a workflow condition', () => {
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/apply-enemy-defeated-condition.yml
+          git rm -f .github/workflows/battle-ended-trigger.txt
           git add a.js tests/autoflow.static.test.mjs
           git commit -m 'feat: add battle-ended workflow condition'
           git push origin HEAD:main
