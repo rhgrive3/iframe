@@ -2672,16 +2672,20 @@
     parentSignal?.addEventListener('abort', onParentAbort, { once: true });
     const baseline = attackSnapshot();
     const promise = monitorFrame(() => {
-      const current = attackSnapshot();
+      const doc = frameDocument();
+      const battleEnd = detectBattleEndState(doc);
+      if (battleEnd) return { battleEnd };
+      const current = attackSnapshot(doc);
       const transition = attackTransitionFromBaseline(baseline, current);
       if (!transition) return false;
-      const auto = fullAutoState();
+      const auto = fullAutoState(doc);
       return auto.on || isAttackInProgress(current) ? transition : false;
     }, {
       signal: controller.signal,
       timeoutMs,
       stableMs: 0,
-      description: 'フルオート押下後の攻撃開始待ち'
+      description: 'フルオート押下後の攻撃開始待ち',
+      observeRoots: battleObservationRoots
     }).then(
       result => ({ ok: true, result }),
       error => ({ ok: false, error })
@@ -2707,33 +2711,70 @@
   async function waitForAutoAttack(config, context) {
     const { signal } = context;
     const timeoutMs = config.timeoutSec * 1000;
-    await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
+    try {
+      const initialEnd = safeBattleEndState();
+      if (initialEnd) return restartWorkflowAfterBattleEnd(config, context, initialEnd);
 
-    const pendingAttack = await consumePendingAutoAttack(timeoutMs);
-    if (pendingAttack) return pendingAttack;
+      await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
 
-    const initial = attackSnapshot();
-    if (isAttackInProgress(initial)) return { alreadyAttacking: true, snapshot: initial };
+      const pendingAttack = await consumePendingAutoAttack(timeoutMs);
+      if (pendingAttack?.battleEnd) return restartWorkflowAfterBattleEnd(config, context, pendingAttack.battleEnd);
+      if (pendingAttack) return pendingAttack;
 
-    const auto = fullAutoState();
-    if (!auto.on) {
-      await ensureFullAuto(config, context);
-      const enabledByThisBlock = await consumePendingAutoAttack(timeoutMs);
-      if (enabledByThisBlock) return enabledByThisBlock;
+      const initial = attackSnapshot();
+      if (isAttackInProgress(initial)) return { alreadyAttacking: true, snapshot: initial };
+
+      const auto = fullAutoState();
+      if (!auto.on) {
+        await ensureFullAuto(config, context);
+        const enabledByThisBlock = await consumePendingAutoAttack(timeoutMs);
+        if (enabledByThisBlock?.battleEnd) return restartWorkflowAfterBattleEnd(config, context, enabledByThisBlock.battleEnd);
+        if (enabledByThisBlock) return enabledByThisBlock;
+      }
+
+      const armed = await monitorFrame(() => {
+        const doc = frameDocument();
+        const battleEnd = detectBattleEndState(doc);
+        if (battleEnd) return { battleEnd };
+        const snapshot = attackSnapshot(doc);
+        if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
+        const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
+        return attackReady ? { snapshot, alreadyAttacking: false } : false;
+      }, {
+        signal,
+        timeoutMs,
+        stableMs: 0,
+        description: 'フルオート攻撃受付待ち',
+        observeRoots: battleObservationRoots
+      });
+      if (armed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, armed.battleEnd);
+      if (armed.alreadyAttacking) return armed;
+
+      const baseline = armed.snapshot;
+      const transition = await monitorFrame(() => {
+        const doc = frameDocument();
+        const battleEnd = detectBattleEndState(doc);
+        if (battleEnd) return { battleEnd };
+        return attackTransitionFromBaseline(baseline, attackSnapshot(doc));
+      }, {
+        signal,
+        timeoutMs,
+        stableMs: 0,
+        description: 'フルオート攻撃開始待ち',
+        observeRoots: battleObservationRoots
+      });
+      if (transition.battleEnd) return restartWorkflowAfterBattleEnd(config, context, transition.battleEnd);
+      return transition;
+    } catch (error) {
+      if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
+      if (error?.code === 'TIMEOUT') {
+        const visibleEnd = safeBattleEndState();
+        if (visibleEnd) return restartWorkflowAfterBattleEnd(config, context, visibleEnd);
+        const probe = await reloadForBattleEndProbe(config, context);
+        if (probe.endState) return restartWorkflowAfterBattleEnd(config, context, probe.endState);
+      }
+      throw error;
     }
-
-    const armed = await monitorFrame(() => {
-      const snapshot = attackSnapshot();
-      if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
-      const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
-      return attackReady ? { snapshot, alreadyAttacking: false } : false;
-    }, { signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃受付待ち' });
-    if (armed.alreadyAttacking) return armed;
-
-    const baseline = armed.snapshot;
-    return monitorFrame(() => attackTransitionFromBaseline(baseline, attackSnapshot()), {
-      signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃開始待ち'
-    });
   }
 
   async function recoverKnownPopup(stateInfo, refreshConfig, context) {
