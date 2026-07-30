@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 23;
+  const APP_VERSION = 24;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -174,6 +174,7 @@
     recordedPoints: [],
     recordStartedAt: 0,
     activeRecordPointers: new Map(),
+    lastFullAutoEnabledAt: 0,
     dockX: null,
     dockY: null
   };
@@ -2404,6 +2405,7 @@
     });
     if (found.on) return { changed: false };
     await jqTapStrict(found.button, { signal, label: 'フルオート' });
+    state.lastFullAutoEnabledAt = performance.now();
     return { changed: true };
   }
 
@@ -2437,34 +2439,53 @@
   }
 
   async function waitForAutoAttack(config, context) {
-  const { signal } = context;
-  await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
-  const auto = fullAutoState();
-  if (!auto.on) await ensureFullAuto(config, context);
+    const { signal } = context;
+    const timeoutMs = config.timeoutSec * 1000;
+    await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
 
-  const armed = await monitorFrame(() => {
-    const snapshot = attackSnapshot();
-    if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
-    const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
-    return attackReady ? { snapshot, alreadyAttacking: false } : false;
-  }, {
-    signal,
-    timeoutMs: config.timeoutSec * 1000,
-    stableMs: 0,
-    description: 'フルオート攻撃受付待ち'
-  });
-  if (armed.alreadyAttacking) return armed;
+    const consumeRecentFullAutoEnable = () => {
+      const enabledAt = finite(state.lastFullAutoEnabledAt, 0);
+      if (enabledAt <= 0 || performance.now() - enabledAt > timeoutMs) return null;
+      state.lastFullAutoEnabledAt = 0;
+      return { triggeredByFullAutoToggle: true, enabledAt };
+    };
 
-  const baseline = armed.snapshot;
-  return monitorFrame(() => {
-    const current = attackSnapshot();
-    const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
-    const startBecameHidden = baseline.startVisible && !current.startVisible;
-    const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
-    const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged;
-    return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
-  }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 0, description: 'フルオート攻撃開始待ち' });
-}
+    const recentEnable = consumeRecentFullAutoEnable();
+    if (recentEnable) return recentEnable;
+
+    const initial = attackSnapshot();
+    if (isAttackInProgress(initial)) return { alreadyAttacking: true, snapshot: initial };
+
+    const auto = fullAutoState();
+    if (!auto.on) {
+      await ensureFullAuto(config, context);
+      const enabledByThisBlock = consumeRecentFullAutoEnable();
+      if (enabledByThisBlock) return enabledByThisBlock;
+    }
+
+    const armed = await monitorFrame(() => {
+      const snapshot = attackSnapshot();
+      if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
+      const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
+      return attackReady ? { snapshot, alreadyAttacking: false } : false;
+    }, {
+      signal,
+      timeoutMs,
+      stableMs: 0,
+      description: 'フルオート攻撃受付待ち'
+    });
+    if (armed.alreadyAttacking) return armed;
+
+    const baseline = armed.snapshot;
+    return monitorFrame(() => {
+      const current = attackSnapshot();
+      const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
+      const startBecameHidden = baseline.startVisible && !current.startVisible;
+      const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
+      const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged;
+      return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
+    }, { signal, timeoutMs, stableMs: 0, description: 'フルオート攻撃開始待ち' });
+  }
 
   async function recoverKnownPopup(stateInfo, refreshConfig, context) {
     if (stateInfo.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
