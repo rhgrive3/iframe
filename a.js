@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 29;
+  const APP_VERSION = 30;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -39,6 +39,7 @@
     assistRows: '#prt-search-list > .btn-multi-raid.lis-raid.search',
     assistSlot: '#prt-search-switch .btn-search-switch',
     unclaimedAttention: '.btn-unconfirmed-result.flow-unclaimed.attention',
+    unclaimedEntry: '.prt-btn-flow .btn-unconfirmed.flow-unclaimed[data-href^="quest/assist/unclaimed/"]',
     supporterScreen: '#cnt-quest.cnt-quest.supporter_raid',
     supporterRows: '.btn-supporter.lis-supporter',
     supporterAuto: '.btn-autoselect-supporter',
@@ -2874,13 +2875,14 @@
     if (stateInfo.type === 'MAX_ASSIST_ERROR') {
       const doc = frameDocument();
       const attention = doc.querySelector(SELECTORS.unclaimedAttention);
-      if (attention && computedVisible(attention)) {
+      const entry = doc.querySelector(SELECTORS.unclaimedEntry) || attention;
+      if (attention && computedVisible(attention) && entry) {
         const waitPromise = waitForGbfState(['UNCLAIMED_LIST'], {
           signal: context.signal,
           timeoutMs: refreshConfig.timeoutSec * 1000,
           description: '通知付き未確認バトル画面待ち'
         });
-        await jqTapStrict(attention, { signal: context.signal, label: '通知付き未確認バトル' });
+        await jqTapStrict(entry, { signal: context.signal, label: '通知付き未確認バトル' });
         await waitPromise;
         const result = await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
         return { retry: true, reason: `最大3件エラー後に未確認バトルを${result.processed}件処理しました` };

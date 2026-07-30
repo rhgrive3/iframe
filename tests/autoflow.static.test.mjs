@@ -77,5 +77,8 @@ test('max-assist recovery clears notification-backed unclaimed battles', () => {
   const body = source.slice(source.indexOf('async function recoverKnownPopup'), source.indexOf('async function pressDeckConfirm'));
   assert.ok(body.includes("stateInfo.type === 'MAX_ASSIST_ERROR'"));
   assert.ok(body.includes('SELECTORS.unclaimedAttention'));
+  assert.ok(source.includes('.prt-btn-flow .btn-unconfirmed.flow-unclaimed[data-href^=\"quest/assist/unclaimed/\"]'));
+  assert.ok(body.includes('const entry = doc.querySelector(SELECTORS.unclaimedEntry) || attention'));
+  assert.ok(body.includes('await jqTapStrict(entry'));
   assert.ok(body.includes('confirmAllUnclaimed'));
 });
