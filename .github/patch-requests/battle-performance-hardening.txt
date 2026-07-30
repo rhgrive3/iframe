@@ -1,1 +1,2 @@
 Apply route-scoped sound restoration and isolate native API hook failures.
+Retry after fixing generated test escaping.
