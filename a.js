@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 20;
+  const APP_VERSION = 21;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1515,7 +1515,7 @@
     }
   }
 
-  function dispatchSyntheticTouch(win, target, type, touch, active, { allowCanceled = false } = {}) {
+  function dispatchSyntheticTouch(win, target, type, touch, active) {
     if (typeof win.TouchEvent !== 'function') {
       throw new FlowError('この環境は標準TouchEventに対応していません', 'TOUCH_EVENT_UNSUPPORTED');
     }
@@ -1533,10 +1533,10 @@
     } catch (error) {
       throw new FlowError(`TouchEvent生成に失敗しました: ${error.message}`, 'TOUCH_EVENT_CONSTRUCTION_FAILED');
     }
-    const accepted = target.dispatchEvent(event);
-    if ((!accepted || event.defaultPrevented) && !allowCanceled) {
-      throw new FlowError(`${type}が対象側でキャンセルされました`, 'TOUCH_EVENT_CANCELED');
-    }
+    // preventDefault() is a normal part of many touch handlers: it suppresses
+    // emulated mouse/click behavior while the page still consumes the gesture.
+    // Do not terminate touchmove/touchend merely because dispatchEvent() is false.
+    target.dispatchEvent(event);
     return event;
   }
 
@@ -1814,7 +1814,7 @@
 
     try {
       const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, activePoint);
-      dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true, { allowCanceled: true });
+      dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
       touchActive = true;
       const startedAt = highResolutionNow(win);
       while (true) {
@@ -1823,7 +1823,7 @@
         const scrollProgress = integrateScrollVelocity(elapsedProgress) / SCROLL_VELOCITY_AREA;
         activePoint = sampleCorrelatedTrajectoryPoint(trajectory, elapsedProgress);
         const moveTouch = createSyntheticTouch(win, dispatchTarget, identifier, activePoint);
-        dispatchSyntheticTouch(win, dispatchTarget, 'touchmove', moveTouch, true, { allowCanceled: true });
+        dispatchSyntheticTouch(win, dispatchTarget, 'touchmove', moveTouch, true);
         setScrollPosition(
           win,
           scroller,
@@ -1835,7 +1835,7 @@
 
       activePoint = gesture.end;
       const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, activePoint);
-      dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false, { allowCanceled: true });
+      dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
       touchActive = false;
 
       if (useInertia) {
@@ -1864,7 +1864,7 @@
       if (touchActive) {
         try {
           const cancelTouch = createSyntheticTouch(win, dispatchTarget, identifier, activePoint);
-          dispatchSyntheticTouch(win, dispatchTarget, 'touchcancel', cancelTouch, false, { allowCanceled: true });
+          dispatchSyntheticTouch(win, dispatchTarget, 'touchcancel', cancelTouch, false);
         } catch {}
       }
       throw error;
