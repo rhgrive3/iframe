@@ -57,3 +57,25 @@ test('synthetic touch execution remains serialized and cancel-safe', () => {
   assert.match(source, /function dispatchSyntheticTouch/);
   assert.match(source, /'touchcancel'/);
 });
+
+test('multiple assist slots cycle while single selection retains refresh behavior', () => {
+  assert.ok(source.includes('assistSlots: [1]'));
+  assert.ok(source.includes('function normalizeAssistSlots'));
+  assert.ok(source.includes('selectedSlots.length > 1'));
+  assert.ok(source.includes('await switchAssistSlot(slot, refreshConfig, context)'));
+  assert.ok(source.includes('await refreshAssistList(refreshConfig, context, { waitForCompletion: false })'));
+});
+
+test('multi-slot evaluation enters the first eligible row', () => {
+  const body = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
+  assert.ok(body.includes('[...ranked].sort((a, b) => a.index - b.index)[0]'));
+  assert.ok(body.includes('activeAssistSlot(doc)'));
+});
+
+test('max-assist recovery clears notification-backed unclaimed battles', () => {
+  assert.ok(source.includes('.btn-unconfirmed-result.flow-unclaimed.attention'));
+  const body = source.slice(source.indexOf('async function recoverKnownPopup'), source.indexOf('async function pressDeckConfirm'));
+  assert.ok(body.includes("stateInfo.type === 'MAX_ASSIST_ERROR'"));
+  assert.ok(body.includes('SELECTORS.unclaimedAttention'));
+  assert.ok(body.includes('confirmAllUnclaimed'));
+});

@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 28;
+  const APP_VERSION = 29;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -37,6 +37,8 @@
     assistRefresh: '#prt-assist-search .btn-search-refresh',
     assistList: '#prt-search-list',
     assistRows: '#prt-search-list > .btn-multi-raid.lis-raid.search',
+    assistSlot: '#prt-search-switch .btn-search-switch',
+    unclaimedAttention: '.btn-unconfirmed-result.flow-unclaimed.attention',
     supporterScreen: '#cnt-quest.cnt-quest.supporter_raid',
     supporterRows: '.btn-supporter.lis-supporter',
     supporterAuto: '.btn-autoselect-supporter',
@@ -395,7 +397,7 @@
   function defaultBlockConfig(type) {
     switch (type) {
       case 'gbfAssistSelect':
-        return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, supporterCandidates: defaultSupporterCandidates() };
+        return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
       case 'gbfSupporterAuto':
         return { timeoutSec: 15 };
       case 'gbfSupporterConditional':
@@ -452,6 +454,13 @@
     return block;
   }
 
+  function normalizeAssistSlots(value) {
+    const raw = Array.isArray(value) ? value : [value];
+    const slots = [...new Set(raw.map(item => int(item, 0)).filter(item => item >= 1 && item <= 4))]
+      .sort((a, b) => a - b);
+    return slots.length ? slots : [1];
+  }
+
   function normalizeCandidates(value) {
     const raw = Array.isArray(value) ? value : [];
     return [0, 1, 2].map(index => ({
@@ -484,6 +493,7 @@
           jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
           timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
           maxAttempts: clamp(int(config.maxAttempts, 10000), 1, 100000),
+          assistSlots: normalizeAssistSlots(config.assistSlots),
           supporterCandidates: normalizeCandidates(config.supporterCandidates)
         };
         break;
@@ -909,6 +919,32 @@
     container.append(grid);
   }
 
+  function renderAssistSlots(block, container) {
+    const selectedSlots = normalizeAssistSlots(block.config.assistSlots);
+    const grid = element('div', { className: 'grid2' });
+    for (const slot of [1, 2, 3, 4]) {
+      const input = element('input', { type: 'checkbox' });
+      input.checked = selectedSlots.includes(slot);
+      input.addEventListener('change', () => {
+        let accepted = true;
+        updateBlockConfig(block, config => {
+          const slots = new Set(normalizeAssistSlots(config.assistSlots));
+          if (input.checked) slots.add(slot);
+          else if (slots.size > 1) slots.delete(slot);
+          else accepted = false;
+          config.assistSlots = [...slots].sort((a, b) => a - b);
+        });
+        if (!accepted) input.checked = true;
+      });
+      grid.append(field(`救援${slot}`, input));
+    }
+    container.append(
+      element('div', { className: 'cardTitle', text: '巡回する救援番号（2件以上で有効）' }),
+      grid,
+      element('div', { className: 'hint', text: '複数選択時はこの順で切替。1件だけなら従来どおり更新ボタンを使用します。' })
+    );
+  }
+
   function renderBlockConfig(block, container) {
     const config = block.config;
     const grid = element('div', { className: 'grid2' });
@@ -923,6 +959,7 @@
         addNumber('状態待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         addNumber('最大再試行回数', 'maxAttempts', 1, 100000, 1);
         container.append(grid);
+        renderAssistSlots(block, container);
         renderCandidates(block, container);
         return;
       case 'gbfSupporterConditional':
@@ -2346,6 +2383,29 @@
     }
   }
 
+  async function switchAssistSlot(slot, config, context) {
+    const { signal } = context;
+    const normalized = int(slot, 0);
+    if (normalized < 1 || normalized > 4) throw new FlowError(`救援番号が不正です: ${slot}`, 'INVALID_ASSIST_SLOT');
+    await waitRandomized(config.baseDelaySec, config.jitterSec, signal);
+    const doc = frameDocument();
+    assertNoUnknownPopup(doc);
+    if (detectScreenState(doc).type !== 'ASSIST_LIST') {
+      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist' });
+    }
+    const currentDoc = frameDocument();
+    const button = currentDoc.querySelector(`${SELECTORS.assistSlot}[data-slot="${normalized}"]`);
+    if (!button || !computedVisible(button)) throw new FlowError(`救援番号${normalized}が表示されていません`, 'ASSIST_SLOT_MISSING');
+    await jqTapStrict(button, { signal, label: `救援番号${normalized}` });
+    return { tapped: true, slot: normalized };
+  }
+
+  function activeAssistSlot(doc = frameDocument()) {
+    const active = doc.querySelector(`${SELECTORS.assistSlot}.active[data-slot]`);
+    const slot = Number.parseInt(active?.dataset.slot || '', 10);
+    return Number.isInteger(slot) ? slot : null;
+  }
+
   function visibleSupporterRows(doc = frameDocument()) {
     return [...doc.querySelectorAll(SELECTORS.supporterRows)].filter(computedVisible);
   }
@@ -2811,6 +2871,21 @@
       return { retry: true, reason: '未確認バトルを処理しました' };
     }
     await tapPopupOk(stateInfo, { signal: context.signal, timeoutMs: refreshConfig.timeoutSec * 1000, expected: ['ASSIST_LIST'] });
+    if (stateInfo.type === 'MAX_ASSIST_ERROR') {
+      const doc = frameDocument();
+      const attention = doc.querySelector(SELECTORS.unclaimedAttention);
+      if (attention && computedVisible(attention)) {
+        const waitPromise = waitForGbfState(['UNCLAIMED_LIST'], {
+          signal: context.signal,
+          timeoutMs: refreshConfig.timeoutSec * 1000,
+          description: '通知付き未確認バトル画面待ち'
+        });
+        await jqTapStrict(attention, { signal: context.signal, label: '通知付き未確認バトル' });
+        await waitPromise;
+        const result = await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
+        return { retry: true, reason: `最大3件エラー後に未確認バトルを${result.processed}件処理しました` };
+      }
+    }
     await refreshAssistList(refreshConfig, context);
     return { retry: true, reason: stateInfo.type === 'MAX_ASSIST_ERROR' ? '最大3件エラーから再試行' : '参戦人数上限から再試行' };
   }
@@ -2848,6 +2923,9 @@
   async function assistSelectFullFlow(config, context) {
     const { signal } = context;
     const refreshConfig = { baseDelaySec: config.baseDelaySec, jitterSec: config.jitterSec, timeoutSec: config.timeoutSec };
+    const selectedSlots = normalizeAssistSlots(config.assistSlots);
+    const cyclesAssistSlots = selectedSlots.length > 1;
+    let slotCursor = 0;
     for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
       throwIfAborted(signal);
       context.setProgress(`${attempt}回目`);
@@ -2870,12 +2948,28 @@
       assertNoUnknownPopup(doc);
       const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
       const ranked = rankAssistRows(rows, config.minimumHp);
+      if (cyclesAssistSlots && !selectedSlots.includes(activeAssistSlot(doc))) {
+        const slot = selectedSlots[slotCursor % selectedSlots.length];
+        slotCursor = (slotCursor + 1) % selectedSlots.length;
+        context.setProgress(`${attempt}回目・救援${slot}へ切替`);
+        await switchAssistSlot(slot, refreshConfig, context);
+        continue;
+      }
       if (!ranked.length) {
-        await refreshAssistList(refreshConfig, context, { waitForCompletion: false });
+        if (cyclesAssistSlots) {
+          const slot = selectedSlots[slotCursor % selectedSlots.length];
+          slotCursor = (slotCursor + 1) % selectedSlots.length;
+          context.setProgress(`${attempt}回目・救援${slot}へ切替`);
+          await switchAssistSlot(slot, refreshConfig, context);
+        } else {
+          await refreshAssistList(refreshConfig, context, { waitForCompletion: false });
+        }
         continue;
       }
 
-      const selected = ranked[0];
+      const selected = cyclesAssistSlots
+        ? [...ranked].sort((a, b) => a.index - b.index)[0]
+        : ranked[0];
       const tapped = await tapCurrentAssistRow(selected, context);
       if (!tapped) continue;
 
