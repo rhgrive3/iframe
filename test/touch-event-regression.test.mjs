@@ -61,10 +61,20 @@ test('hybrid scroll dispatches touchmove and updates scroll position in the same
   assert.match(block, /dispatchSyntheticTouch\(win, dispatchTarget, 'touchend'/);
 });
 
-test('TouchEvent lists remain coherent and cancellation is retained', () => {
+test('TouchEvent lists remain coherent and cancellation cleanup is retained', () => {
   assert.match(source, /const activeTouches = active \? \[touch\] : \[\]/);
   assert.match(source, /touches: activeTouches/);
   assert.match(source, /targetTouches: activeTouches/);
   assert.match(source, /changedTouches: \[touch\]/);
   assert.match(source, /'touchcancel'/);
+});
+
+test('preventDefault is treated as normal touch-handler feedback, not a gesture failure', () => {
+  const start = source.indexOf('function dispatchSyntheticTouch');
+  const end = source.indexOf('function scrollableAncestors', start);
+  const block = source.slice(start, end);
+  assert.match(block, /target\.dispatchEvent\(event\)/);
+  assert.doesNotMatch(block, /event\.defaultPrevented/);
+  assert.doesNotMatch(block, /TOUCH_EVENT_CANCELED/);
+  assert.doesNotMatch(source, /allowCanceled/);
 });
