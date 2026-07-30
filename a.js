@@ -6,6 +6,7 @@
   const APP_VERSION = 42;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
+  const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
   const LEGACY_STORAGE_KEYS = Array.from({ length: 11 }, (_, index) =>
     `__fullscreen_iframe_autoclicker_state_v${11 - index}__`
@@ -70,16 +71,28 @@
     attackDummy: '.prt-attack-start-dummy',
     attackCancel: '.btn-attack-cancel',
     attackActor: '.prt-command .btn-command-character.attack',
-    turn: '#js-turn-num-count'
+    turn: '#js-turn-num-count',
+    myPageScreen: '.cnt-mypage'
   });
+  const MY_PAGE_BUTTON_SELECTORS = Object.freeze([
+    '.btn-footer-mypage[data-href="mypage"]',
+    '.btn-treasure-footer-mypage[data-href="mypage"]',
+    '.btn-head-mypage[data-href="mypage"]'
+  ]);
 
-  const previous = window[GLOBAL_KEY];
-  if (previous?.destroy) previous.destroy();
+  {
+    const previous = window[GLOBAL_KEY];
+    if (previous?.destroy) previous.destroy({ restoreHost: false });
+  }
   document.getElementById(ROOT_ID)?.remove();
-  const focusBeforeInstall = document.activeElement;
+  let focusBeforeInstall = document.activeElement;
   const backgroundBody = document.body;
   const backgroundWasInert = Boolean(backgroundBody?.inert);
   const backgroundAriaHidden = backgroundBody?.getAttribute('aria-hidden') ?? null;
+  const backgroundStyle = backgroundBody ? {
+    visibility: backgroundBody.style.visibility,
+    contentVisibility: backgroundBody.style.contentVisibility
+  } : null;
 
   const root = document.createElement('div');
   root.id = ROOT_ID;
@@ -878,7 +891,11 @@
     dockX: null,
     dockY: null,
     dockWidth: null,
-    dockHeight: null
+    dockHeight: null,
+    hostRuntimeReleased: Boolean(window[HOST_RUNTIME_RELEASED_KEY]),
+    telemetryTimers: new Set(),
+    frameGeneration: 0,
+    frameNavigationId: 0
   };
 
   const cleanup = new Set();
@@ -1148,6 +1165,8 @@
     gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、撃破時は指定ルートから先頭へ復帰' },
     gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃開始または敵撃破通知を低負荷で監視' },
     gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
+    gbfMyPage: { category: 'gbf', label: 'MyPageボタンを押す', description: '戦闘終了を待ち、ゲーム標準の完全再読込でMyPageへ戻る' },
+    gbfReleaseResources: { category: 'gbf', label: 'Safariメモリを解放して戻る', description: '戦闘終了後にMyPageを経由し、Canvas・音声・旧Viewを解放して指定画面へ戻る' },
     repeat: { category: 'control', label: '指定回数繰り返す', description: '子ブロックを指定回数実行', container: true },
     repeatUntil: { category: 'control', label: '条件成立まで繰り返す', description: '前判定型。成立済みなら0回', container: true },
     if: { category: 'control', label: '条件分岐', description: '成立時と不成立時の子ブロックを分岐', container: true, elseBranch: true },
@@ -1200,10 +1219,16 @@
         return {
           timeoutSec: 15,
           battleEndRoute: '#quest/assist/multi/0',
-          battleEndExpectedScreen: 'assist'
+          battleEndExpectedScreen: 'assist',
+          memoryReliefEveryBattles: 3,
+          memoryReliefSettleSec: 1.5
         };
       case 'gbfRefreshAssist':
         return { baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15 };
+      case 'gbfMyPage':
+        return { timeoutSec: 45, battleTimeoutSec: 1800, settleSec: 1.5 };
+      case 'gbfReleaseResources':
+        return { destination: 'assist', timeoutSec: 45, battleTimeoutSec: 1800, settleSec: 2 };
       case 'repeat':
         return { count: 5 };
       case 'repeatUntil':
@@ -1308,7 +1333,9 @@
         block.config = {
           timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
           battleEndRoute: String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0',
-          battleEndExpectedScreen: normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist')
+          battleEndExpectedScreen: normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist'),
+          memoryReliefEveryBattles: clamp(int(config.memoryReliefEveryBattles, 3), 0, 100),
+          memoryReliefSettleSec: clamp(finite(config.memoryReliefSettleSec, 1.5), 0, 30)
         };
         break;
       case 'gbfDeckConfirm':
@@ -1326,6 +1353,21 @@
           baseDelaySec: clamp(finite(config.baseDelaySec, 0.6), 0, 600),
           jitterSec: clamp(finite(config.jitterSec, 0), 0, 600),
           timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600)
+        };
+        break;
+      case 'gbfMyPage':
+        block.config = {
+          timeoutSec: clamp(finite(config.timeoutSec, 45), 1, 600),
+          battleTimeoutSec: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200),
+          settleSec: clamp(finite(config.settleSec, 1.5), 0, 30)
+        };
+        break;
+      case 'gbfReleaseResources':
+        block.config = {
+          destination: ['assist', 'mypage', 'current'].includes(config.destination) ? config.destination : 'assist',
+          timeoutSec: clamp(finite(config.timeoutSec, 45), 1, 600),
+          battleTimeoutSec: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200),
+          settleSec: clamp(finite(config.settleSec, 2), 0, 30)
         };
         break;
       case 'repeat':
@@ -1382,7 +1424,7 @@
   }
 
   function normalizeExpectedScreen(value) {
-    const allowed = ['auto', 'assist', 'supporter', 'unclaimed', 'battle', 'result'];
+    const allowed = ['auto', 'assist', 'supporter', 'unclaimed', 'battle', 'result', 'mypage'];
     return allowed.includes(value) ? value : 'auto';
   }
 
@@ -1742,6 +1784,9 @@
     ['gbf-fullauto', 'グラブル：フルオートをON', () => [createBlock('gbfEnsureFullAuto')]],
     ['gbf-attack-wait', 'グラブル：フルオート攻撃開始まで待つ', () => [createBlock('gbfWaitAutoAttack')]],
     ['gbf-full-flow', 'グラブル：救援参加フルフロー', () => [createBlock('gbfAssistSelect'), createBlock('gbfEnsureFullAuto'), createBlock('gbfWaitAutoAttack')]],
+    ['gbf-mypage', 'グラブル：MyPageボタンで完全再読込', () => [createBlock('gbfMyPage')]],
+    ['gbf-memory-relief', 'グラブル：Safariメモリを解放', () => [createBlock('gbfReleaseResources')]],
+    ['gbf-low-memory-flow', 'グラブル：省メモリ救援フロー', () => [createBlock('gbfAssistSelect'), createBlock('gbfEnsureFullAuto'), createBlock('gbfWaitAutoAttack'), createBlock('gbfReleaseResources')]],
     ['control-repeat', '制御：指定回数繰り返す', () => [createBlock('repeat', { children: [createBlock('gbfEnsureFullAuto'), createBlock('gbfWaitAutoAttack'), createBlock('randomWait', { config: { minSeconds: 0.5, maxSeconds: 0.8 } })] })]],
     ['control-until', '制御：条件成立まで繰り返す', () => [createBlock('repeatUntil')]],
     ['wait-random', '待機：指定区間をランダム待機', () => [createBlock('randomWait')]],
@@ -2084,6 +2129,8 @@
       case 'gbfEnsureFullAuto':
       case 'gbfWaitAutoAttack': {
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('何戦ごとに完全軽量化（0=無効）', 'memoryReliefEveryBattles', 0, 100, 1);
+        addNumber('軽量化後の休止（秒）', 'memoryReliefSettleSec', 0, 30, 0.1);
         const recoveryRoute = textInput(
           config.battleEndRoute,
           input => updateBlockConfig(block, next => { next.battleEndRoute = input.value; }),
@@ -2092,7 +2139,7 @@
         );
         grid.append(field('敵撃破時の戻り先ルート', recoveryRoute));
         const recoveryScreen = selectInput(config.battleEndExpectedScreen, [
-          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面'], ['mypage', 'MyPage']
         ], input => updateBlockConfig(block, next => { next.battleEndExpectedScreen = input.value; }));
         grid.append(field('戻り先の目的画面', recoveryScreen));
         break;
@@ -2111,6 +2158,23 @@
         addNumber('待機ずれ ±秒', 'jitterSec', 0, 600, 0.1);
         addNumber('更新タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         break;
+      case 'gbfMyPage':
+        addNumber('MyPage読込タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('戦闘終了待ち上限（秒）', 'battleTimeoutSec', 1, 7200, 1);
+        addNumber('読込後の休止（秒）', 'settleSec', 0, 30, 0.1);
+        break;
+      case 'gbfReleaseResources': {
+        const destination = selectInput(config.destination, [
+          ['assist', '救援一覧へ戻る'],
+          ['mypage', 'MyPageに留まる'],
+          ['current', '現在のURLを再構築']
+        ], input => updateBlockConfig(block, next => { next.destination = input.value; }));
+        grid.append(field('軽量化後の移動先', destination));
+        addNumber('画面読込タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        addNumber('戦闘終了待ち上限（秒）', 'battleTimeoutSec', 1, 7200, 1);
+        addNumber('MyPageでの休止（秒）', 'settleSec', 0, 30, 0.1);
+        break;
+      }
       case 'repeat':
         addNumber('繰り返す回数', 'count', 0, MAX_REPEAT_COUNT, 1);
         break;
@@ -2149,7 +2213,7 @@
       case 'iframeReady': {
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         const expected = selectInput(config.expectedScreen, [
-          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面'], ['mypage', 'MyPage']
         ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
         grid.append(field('目的画面', expected));
         break;
@@ -2164,7 +2228,7 @@
         grid.append(field('ゲーム内ルート', route));
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         const expected = selectInput(config.expectedScreen, [
-          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面'], ['mypage', 'MyPage']
         ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
         grid.append(field('目的画面', expected));
         break;
@@ -2738,12 +2802,43 @@
     }
   }
 
-  function releaseFrameRuntime(frame) {
-    if (!frame) return;
+  function releaseKnownGraphicsContexts(win) {
+    const stages = new Set([
+      win?.stage,
+      win?.Game?.view?.stage,
+      win?.exportRoot?.stage,
+      ...Object.values(win?.cjs?.stage || {})
+    ].filter(Boolean));
+    for (const stage of stages) {
+      for (const key of ['_webGLContext', 'webGLContext', '_gl', 'gl']) {
+        try { stage?.[key]?.getExtension?.('WEBGL_lose_context')?.loseContext?.(); } catch {}
+      }
+      try {
+        if (stage.canvas) {
+          stage.canvas.width = 0;
+          stage.canvas.height = 0;
+        }
+      } catch {}
+    }
+  }
+
+  function releaseImageResources(doc) {
     try {
-      const win = frame.contentWindow;
-      const doc = frame.contentDocument;
+      for (const image of doc?.images || []) {
+        try {
+          image.removeAttribute('srcset');
+          image.removeAttribute('sizes');
+          image.src = '';
+        } catch {}
+      }
+    } catch {}
+  }
+
+  function releaseWindowRuntime(win, doc, { stopWindow = true } = {}) {
+    if (!win || !doc) return;
+    try {
       stopRuntimeTelemetry(win);
+      try { releaseKnownGraphicsContexts(win); } catch {}
 
       let routerCleaned = false;
       try {
@@ -2776,6 +2871,7 @@
       try { win?.createjs?.WebAudioPlugin?.reset?.(); } catch {}
 
       releaseCanvasResources(doc);
+      releaseImageResources(doc);
       try {
         for (const media of doc?.querySelectorAll?.('audio,video') || []) {
           try { media.pause?.(); } catch {}
@@ -2793,8 +2889,63 @@
         win.lib = null;
         win.images = null;
       } catch {}
-      try { win?.stop?.(); } catch {}
+      if (stopWindow) {
+        try { win.stop?.(); } catch {}
+      }
     } catch {}
+  }
+
+  function releaseFrameRuntime(frame) {
+    if (!frame) return;
+    try {
+      releaseWindowRuntime(frame.contentWindow, frame.contentDocument, { stopWindow: true });
+    } catch {}
+  }
+
+  function hideBackgroundRendering() {
+    if (!backgroundBody) return;
+    backgroundBody.style.visibility = 'hidden';
+    backgroundBody.style.contentVisibility = 'hidden';
+  }
+
+  function discardHostRuntimeShell() {
+    focusBeforeInstall = null;
+    try { backgroundBody?.replaceChildren(); } catch {}
+    for (const key of [
+      'Game',
+      'Backbone',
+      'createjs',
+      'requirejs',
+      'require',
+      'requireAMD',
+      'requireESM',
+      'define',
+      'jQuery',
+      '$',
+      '_',
+      'stage',
+      'exportRoot',
+      'cjs',
+      'lib',
+      'images'
+    ]) {
+      try { window[key] = null; } catch {}
+    }
+  }
+
+  function releaseHostRuntimeOnce() {
+    const hostLooksLikeGranblue = Boolean(
+      window.Game
+      && (window.Game.router || window.Game.view || window.createjs)
+      && document.querySelector('#wrapper, .contents, .cnt-raid-stage, .cnt-mypage')
+    );
+    if (!hostLooksLikeGranblue && !state.hostRuntimeReleased) return;
+    hideBackgroundRendering();
+    if (state.hostRuntimeReleased) return;
+    state.hostRuntimeReleased = true;
+    window[HOST_RUNTIME_RELEASED_KEY] = true;
+    releaseWindowRuntime(window, document, { stopWindow: false });
+    discardHostRuntimeShell();
   }
 
   function blankFrame(frame) {
@@ -2809,7 +2960,7 @@
         resolve();
       };
       frame.addEventListener('load', finish);
-      timer = setTimeout(finish, 400);
+      timer = setTimeout(finish, 1200);
       try { frame.contentWindow.location.replace('about:blank'); }
       catch {
         try { frame.src = 'about:blank'; }
@@ -2820,32 +2971,54 @@
 
   function handleFrameLoad() {
     const loadedFrame = iframe;
+    state.frameGeneration += 1;
+    let loadedSameOrigin = false;
     stopRuntimeTelemetry(loadedFrame?.contentWindow);
-    setTimeout(() => {
+    const telemetryTimer = setTimeout(() => {
+      state.telemetryTimers.delete(telemetryTimer);
       if (!state.destroyed && iframe === loadedFrame) stopRuntimeTelemetry(loadedFrame?.contentWindow);
     }, 1200);
+    state.telemetryTimers.add(telemetryTimer);
     try {
       urlInput.value = iframe.contentWindow.location.href;
+      loadedSameOrigin = new URL(urlInput.value, location.href).origin === location.origin;
       state.legacy.url = urlInput.value;
       saveLegacyState();
       if (!state.running && !state.legacyRunning) setStatus('読込完了');
     } catch {
       if (!state.running && !state.legacyRunning) setStatus('読込完了・別オリジン');
     }
+    if (loadedSameOrigin) releaseHostRuntimeOnce();
   }
 
   function bindFrameLoad(frame) {
     frame.addEventListener('load', handleFrameLoad);
   }
 
-  async function replaceFrame(destination) {
+  async function replaceFrame(destination, { forceNewElement = false } = {}) {
     const targetUrl = String(destination || '').trim();
     if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
+    if (state.destroyed) throw new DOMException('AutoFlowは終了しています', 'AbortError');
+    const navigationId = ++state.frameNavigationId;
+    const assertCurrentNavigation = () => {
+      if (state.destroyed || navigationId !== state.frameNavigationId) {
+        throw new DOMException('より新しいiframe遷移に置き換えられました', 'AbortError');
+      }
+    };
     const previousFrame = iframe;
     previousFrame.removeEventListener('load', handleFrameLoad);
     releaseFrameRuntime(previousFrame);
     await blankFrame(previousFrame);
+    assertCurrentNavigation();
     await new Promise(resolve => setTimeout(resolve, 0));
+    assertCurrentNavigation();
+    if (!forceNewElement) {
+      bindFrameLoad(previousFrame);
+      try { previousFrame.contentWindow.location.replace(targetUrl); }
+      catch { previousFrame.src = targetUrl; }
+      if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = previousFrame;
+      return previousFrame;
+    }
     const nextFrame = previousFrame.cloneNode(false);
     nextFrame.removeAttribute('src');
     bindFrameLoad(nextFrame);
@@ -2903,6 +3076,8 @@
     if (assist) return { type: 'ASSIST_LIST', element: assist, document: doc };
     const battle = doc.querySelector(SELECTORS.battleScreen);
     if (battle) return { type: 'BATTLE', element: battle, document: doc };
+    const myPage = doc.querySelector(SELECTORS.myPageScreen);
+    if (myPage) return { type: 'MYPAGE', element: myPage, document: doc };
     if (currentFrameUrl().includes('result_multi/')) return { type: 'RESULT', document: doc };
     return { type: 'UNKNOWN', document: doc };
   }
@@ -2930,7 +3105,7 @@
     return `${detected.type}|${detail}|${doc.body?.childElementCount || 0}`;
   }
 
-  function captureFrameState() {
+  function captureFrameState({ includeDocument = false } = {}) {
     let doc = null;
     let href = currentFrameUrl();
     let screen = 'UNAVAILABLE';
@@ -2941,16 +3116,24 @@
       screen = stateInfo.type;
       signature = screenSignature(doc, stateInfo);
     } catch {}
-    return { doc, href, screen, signature, at: performance.now() };
+    return {
+      doc: includeDocument ? doc : null,
+      generation: state.frameGeneration,
+      href,
+      screen,
+      signature,
+      at: performance.now()
+    };
   }
 
   function expectedScreenMatches(expected, doc, stateInfo = detectScreenState(doc)) {
-    if (!expected || expected === 'auto') return ['ASSIST_LIST', 'SUPPORTER', 'DECK_CONFIRM', 'UNCLAIMED_LIST', 'BATTLE', 'RESULT'].includes(stateInfo.type);
+    if (!expected || expected === 'auto') return ['ASSIST_LIST', 'SUPPORTER', 'DECK_CONFIRM', 'UNCLAIMED_LIST', 'BATTLE', 'RESULT', 'MYPAGE'].includes(stateInfo.type);
     if (expected === 'assist') return stateInfo.type === 'ASSIST_LIST';
     if (expected === 'supporter') return stateInfo.type === 'SUPPORTER' || stateInfo.type === 'DECK_CONFIRM';
     if (expected === 'unclaimed') return stateInfo.type === 'UNCLAIMED_LIST';
     if (expected === 'battle') return stateInfo.type === 'BATTLE';
     if (expected === 'result') return stateInfo.type === 'RESULT' || currentFrameUrl().includes('result_multi/');
+    if (expected === 'mypage') return stateInfo.type === 'MYPAGE';
     return false;
   }
 
@@ -2981,15 +3164,25 @@
       let interval = null;
       let stableSince = null;
       let lastMutation = performance.now();
+      let listenedFrame = null;
+      let observerScheduled = false;
+      let observerTimer = null;
+      let observerFrame = null;
 
       const cleanupMonitor = () => {
         observer?.disconnect();
         observer = null;
         observedDoc = null;
         observedRoots = [];
+        clearTimeout(observerTimer);
+        observerTimer = null;
+        if (observerFrame != null) cancelAnimationFrame(observerFrame);
+        observerFrame = null;
+        observerScheduled = false;
         clearTimeout(timeout);
         clearInterval(interval);
-        iframe.removeEventListener('load', onFrameLoad);
+        listenedFrame?.removeEventListener('load', onFrameLoad);
+        listenedFrame = null;
         signal?.removeEventListener('abort', onAbort);
       };
       const finish = (callback, value) => {
@@ -3004,7 +3197,14 @@
         bindObserver();
         evaluate();
       };
+      const syncFrameListener = () => {
+        if (listenedFrame === iframe) return;
+        listenedFrame?.removeEventListener('load', onFrameLoad);
+        listenedFrame = iframe;
+        listenedFrame?.addEventListener('load', onFrameLoad);
+      };
       const bindObserver = () => {
+        syncFrameListener();
         let doc;
         try { doc = frameDocument(); } catch { return; }
         if (lightweightMode && !observeOnLightweight) {
@@ -3032,15 +3232,20 @@
         observedDoc = doc;
         observedRoots = roots;
         if (!roots.length) return;
-        let scheduled = false;
         observer = new MutationObserver(() => {
           lastMutation = performance.now();
           stableSince = null;
-          if (scheduled) return;
-          scheduled = true;
-          const run = () => { scheduled = false; evaluate(); };
-          if (observeOnLightweight) queueMicrotask(run);
-          else requestAnimationFrame(run);
+          if (observerScheduled) return;
+          observerScheduled = true;
+          const run = () => {
+            observerTimer = null;
+            observerFrame = null;
+            observerScheduled = false;
+            if (!settled) evaluate();
+          };
+          if (observeOnLightweight && lightweightMode) observerTimer = setTimeout(run, 120);
+          else if (observeOnLightweight) queueMicrotask(run);
+          else observerFrame = requestAnimationFrame(run);
         });
         for (const rootNode of roots) {
           try {
@@ -3057,6 +3262,7 @@
       const evaluate = () => {
         if (settled) return;
         if (signal?.aborted) return onAbort();
+        syncFrameListener();
         bindObserver();
         let result;
         try {
@@ -3078,11 +3284,12 @@
         finish(resolve, result === true ? {} : result);
       };
 
-      iframe.addEventListener('load', onFrameLoad);
+      syncFrameListener();
       signal?.addEventListener('abort', onAbort, { once: true });
       if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
       if (allowInterval) {
-        const pollingInterval = intervalMs ?? (timeoutMs === 0 ? 1000 : (lightweightMode ? 750 : 300));
+        const requestedInterval = intervalMs ?? (timeoutMs === 0 ? 1000 : (lightweightMode ? 750 : 300));
+        const pollingInterval = lightweightMode && observeOnLightweight ? Math.max(240, requestedInterval) : requestedInterval;
         interval = setInterval(evaluate, Math.max(50, pollingInterval));
       }
       bindObserver();
@@ -3098,7 +3305,8 @@
       if (!pageBaseReady(doc)) return false;
       if (!expectedScreenMatches(expectedScreen, doc, stateInfo)) return false;
       if (requireChange) {
-        const changed = doc !== baseline.doc
+        const changed = (baseline.generation != null && state.frameGeneration !== baseline.generation)
+          || (baseline.doc && doc !== baseline.doc)
           || currentFrameUrl() !== baseline.href
           || stateInfo.type !== baseline.screen
           || screenSignature(doc, stateInfo) !== baseline.signature;
@@ -3109,7 +3317,7 @@
   }
 
   async function performFrameOperation(operation, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', requireChange = true } = {}) {
-    const before = captureFrameState();
+    const before = captureFrameState({ includeDocument: true });
     return runObservedAction(
       waitSignal => waitForFrameReady({ signal: waitSignal, timeoutMs, expectedScreen, before, requireChange }),
       () => {
@@ -3865,7 +4073,7 @@
         { signal, cancelMessage: 'エラー後画面監視を解除しました' }
       );
     }
-    const before = captureFrameState();
+    const before = captureFrameState({ includeDocument: true });
     await jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK' });
     return monitorFrame(() => {
       const current = popupInfo();
@@ -4168,7 +4376,7 @@
     const doc = frameDocument();
     const returnButton = doc.querySelector(SELECTORS.assistReturn);
     if (returnButton && computedVisible(returnButton)) {
-      const before = captureFrameState();
+      const before = captureFrameState({ includeDocument: true });
       return runObservedAction(
         waitSignal => waitForFrameReady({
           signal: waitSignal,
@@ -4198,7 +4406,7 @@
       if (!topRow) break;
       if (processed >= config.maxItems) throw new FlowError('未確認バトル処理が安全上限件数を超えました', 'UNCLAIMED_LIMIT');
       const href = String(topRow.dataset.href || '');
-      const before = captureFrameState();
+      const before = captureFrameState({ includeDocument: true });
       await runObservedAction(
         waitSignal => monitorFrame(() => {
           const url = currentFrameUrl();
@@ -4236,16 +4444,24 @@
   }
 
   function battleObservationRoots(doc = frameDocument()) {
-    return [
+    const essential = [
       doc.querySelector(SELECTORS.fullAuto),
-      doc.querySelector('#cnt-raid-information'),
-      doc.querySelector('.prt-command .prt-member'),
-      doc.querySelector('.prt-gauge-area'),
-      doc.querySelector(SELECTORS.turn),
+      doc.querySelector(SELECTORS.attackStart),
+      doc.querySelector(SELECTORS.attackDummy),
+      doc.querySelector(SELECTORS.attackCancel),
       doc.querySelector('.prt-command-end'),
       doc.querySelector('#pop'),
       doc.querySelector('#pop-force')
-    ].filter(Boolean);
+    ];
+    if (!lightweightMode) {
+      essential.push(
+        doc.querySelector('#cnt-raid-information'),
+        doc.querySelector('.prt-command .prt-member'),
+        doc.querySelector('.prt-gauge-area'),
+        doc.querySelector(SELECTORS.turn)
+      );
+    }
+    return essential.filter(Boolean);
   }
 
   function detectBattleEndState(doc = frameDocument()) {
@@ -4255,12 +4471,12 @@
     if (notice && computedVisible(notice)) {
       const text = normalizePopupText(notice.textContent || '');
       if (!text || text.includes(BATTLE_END_MESSAGE)) {
-        return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE, element: notice };
+        return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE };
       }
     }
     const resultButton = doc.querySelector(SELECTORS.battleResult);
     if (resultButton && computedVisible(resultButton)) {
-      return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出', element: resultButton };
+      return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出' };
     }
     return null;
   }
@@ -4269,19 +4485,153 @@
     try { return detectBattleEndState(); } catch { return null; }
   }
 
+  function visibleMyPageButton(doc = frameDocument()) {
+    for (const selector of MY_PAGE_BUTTON_SELECTORS) {
+      const button = doc.querySelector(selector);
+      if (button && computedVisible(button)) return button;
+    }
+    return null;
+  }
+
+  async function waitForBattleEndBeforeCleanup(config, context) {
+    const current = safeDetectScreenState();
+    if (current.type !== 'BATTLE') return { alreadySafe: true, state: current.type };
+    context.setProgress?.('戦闘終了を待機中');
+    return monitorFrame(() => {
+      const doc = frameDocument();
+      const endState = detectBattleEndState(doc);
+      if (endState) return { endState };
+      const detected = detectScreenState(doc);
+      if (['RESULT', 'ASSIST_LIST', 'UNCLAIMED_LIST', 'MYPAGE'].includes(detected.type)) {
+        return { state: detected.type };
+      }
+      return false;
+    }, {
+      signal: context.signal,
+      timeoutMs: clamp(finite(config.battleTimeoutSec, 1800), 1, 7200) * 1000,
+      stableMs: 0,
+      description: '軽量化前の戦闘終了待ち',
+      observeRoots: battleObservationRoots,
+      observeOnLightweight: true,
+      observeCharacterData: false,
+      intervalMs: 500
+    });
+  }
+
+  async function navigateToGranblueMyPage(config, context, { skipBattleWait = false } = {}) {
+    if (!skipBattleWait) await waitForBattleEndBeforeCleanup(config, context);
+    throwIfAborted(context.signal);
+    clearPendingAutoAttack('MyPageへ移動するため攻撃監視を解除しました');
+    const timeoutMs = clamp(finite(config.timeoutSec, 45), 1, 600) * 1000;
+    const before = captureFrameState({ includeDocument: false });
+    let button = visibleMyPageButton();
+    let usedButton = false;
+    context.setProgress?.(button ? 'MyPageボタンで完全再読込中' : 'MyPageを再構築中');
+
+    if (button) {
+      try {
+        await runObservedAction(
+          waitSignal => waitForFrameReady({
+            signal: waitSignal,
+            timeoutMs,
+            expectedScreen: 'mypage',
+            before,
+            requireChange: true
+          }),
+          () => {
+            const tapTarget = button;
+            button = null;
+            return jqTapStrict(tapTarget, { signal: context.signal, label: 'MyPage', fast: true });
+          },
+          { signal: context.signal, cancelMessage: 'MyPage読込監視を解除しました' }
+        );
+        usedButton = true;
+      } catch (error) {
+        if (error?.name === 'AbortError') throw error;
+        const fallbackBefore = captureFrameState({ includeDocument: false });
+        await replaceFrame(gameRouteUrl('#mypage'));
+        await waitForFrameReady({
+          signal: context.signal,
+          timeoutMs,
+          expectedScreen: 'mypage',
+          before: fallbackBefore,
+          requireChange: true
+        });
+      }
+    } else {
+      await replaceFrame(gameRouteUrl('#mypage'));
+      await waitForFrameReady({
+        signal: context.signal,
+        timeoutMs,
+        expectedScreen: 'mypage',
+        before,
+        requireChange: true
+      });
+    }
+
+    const settleMs = clamp(finite(config.settleSec, 1.5), 0, 30) * 1000;
+    if (settleMs > 0) {
+      context.setProgress?.('Safariのリソース解放待ち');
+      await abortableDelay(settleMs, context.signal);
+    }
+    return { state: 'MYPAGE', usedButton };
+  }
+
+  async function hardNavigateAfterRelief(targetUrl, expectedScreen, config, context) {
+    const before = captureFrameState({ includeDocument: false });
+    context.setProgress?.('軽量化後の画面を再構築中');
+    await replaceFrame(targetUrl);
+    return waitForFrameReady({
+      signal: context.signal,
+      timeoutMs: clamp(finite(config.timeoutSec, 45), 1, 600) * 1000,
+      expectedScreen,
+      before,
+      requireChange: true
+    });
+  }
+
+  async function releaseGranblueResources(config, context) {
+    await waitForBattleEndBeforeCleanup(config, context);
+    const currentUrl = currentFrameUrl();
+    await navigateToGranblueMyPage(config, context, { skipBattleWait: true });
+    if (config.destination === 'mypage') return { state: 'MYPAGE' };
+    const targetUrl = config.destination === 'current'
+      ? currentUrl
+      : gameRouteUrl('#quest/assist/multi/0');
+    const expectedScreen = config.destination === 'assist' ? 'assist' : 'auto';
+    return hardNavigateAfterRelief(targetUrl, expectedScreen, config, context);
+  }
+
   async function reloadForBattleEndProbe(config, context) {
     const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
     clearPendingAutoAttack('敵撃破判定のため再読み込みします');
     let reloadError = null;
     try {
-      await performFrameOperation(() => frameWindow().location.reload(), {
+      const before = captureFrameState();
+      await replaceFrame(currentFrameUrl());
+      await waitForFrameReady({
         signal: context.signal,
         timeoutMs,
         expectedScreen: 'auto',
+        before,
         requireChange: true
       });
     } catch (error) {
-      reloadError = error;
+      if (error?.name === 'AbortError') {
+        throw error;
+      } else {
+        try {
+          await performFrameOperation(() => frameWindow().location.reload(), {
+            signal: context.signal,
+            timeoutMs,
+            expectedScreen: 'auto',
+            requireChange: true
+          });
+        } catch (fallbackError) {
+          if (fallbackError?.name === 'AbortError') throw fallbackError;
+          reloadError = fallbackError;
+        }
+      }
     }
     return { endState: safeBattleEndState(), state: safeDetectScreenState(), reloadError };
   }
@@ -4292,7 +4642,24 @@
     const expectedScreen = normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist');
     const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
     const targetUrl = gameRouteUrl(route);
+    context.completedBattles = int(context.completedBattles, 0) + 1;
+    const reliefEvery = clamp(int(config.memoryReliefEveryBattles, 3), 0, 100);
+    const shouldRelieve = reliefEvery > 0 && context.completedBattles % reliefEvery === 0;
     context.setProgress?.('敵撃破を検出・復帰中');
+
+    if (shouldRelieve) {
+      await navigateToGranblueMyPage({
+        timeoutSec: Math.max(45, finite(config.timeoutSec, 15)),
+        battleTimeoutSec: 1,
+        settleSec: clamp(finite(config.memoryReliefSettleSec, 1.5), 0, 30)
+      }, context, { skipBattleWait: true });
+      await hardNavigateAfterRelief(targetUrl, expectedScreen, {
+        timeoutSec: Math.max(45, finite(config.timeoutSec, 15))
+      }, context);
+      throw new FlowRestart(`${context.completedBattles}戦完了・MyPage経由で軽量化して先頭へ戻ります`, {
+        route, expectedScreen, endState, completedBattles: context.completedBattles, memoryRelief: true
+      });
+    }
 
     let alreadyReady = false;
     try {
@@ -4394,7 +4761,13 @@
     return `${normalizePopupText(turn.textContent || '')}|${structure}`;
   }
 
-  function battleProgressSignature(doc = frameDocument()) {
+  const battleProgressCache = new WeakMap();
+
+  function battleProgressSignature(doc = frameDocument(), turn = turnSignature(doc)) {
+    if (lightweightMode) {
+      const cached = battleProgressCache.get(doc);
+      if (cached && performance.now() - cached.at < 350) return cached.value;
+    }
     const enemyHp = Array.from(doc.querySelectorAll('[id^="enemy-hp"]'), element =>
       normalizePopupText(element.textContent || '')
     ).join(',');
@@ -4404,13 +4777,16 @@
     const memberGauge = Array.from(doc.querySelectorAll('.prt-command .prt-member .prt-gauge-special-inner'), element =>
       element.style.width || element.getAttribute('style') || ''
     ).join(',');
-    return `${turnSignature(doc)}|${enemyHp}|${memberHp}|${memberGauge}`;
+    const value = `${turn}|${enemyHp}|${memberHp}|${memberGauge}`;
+    if (lightweightMode) battleProgressCache.set(doc, { at: performance.now(), value });
+    return value;
   }
 
   function attackSnapshot(doc = frameDocument()) {
     const start = doc.querySelector(SELECTORS.attackStart);
     const dummy = doc.querySelector(SELECTORS.attackDummy);
     const cancel = doc.querySelector(SELECTORS.attackCancel);
+    const turn = turnSignature(doc);
     return {
       start,
       dummy,
@@ -4419,8 +4795,8 @@
       dummyVisible: elementDisplayOn(dummy),
       cancelVisible: elementDisplayOn(cancel),
       actorAttacking: Boolean(doc.querySelector(SELECTORS.attackActor)),
-      turn: turnSignature(doc),
-      progress: battleProgressSignature(doc)
+      turn,
+      progress: battleProgressSignature(doc, turn)
     };
   }
 
@@ -4916,6 +5292,12 @@
         case 'gbfRefreshAssist':
           await refreshAssistList(block.config, blockContext);
           break;
+        case 'gbfMyPage':
+          await navigateToGranblueMyPage(block.config, blockContext);
+          break;
+        case 'gbfReleaseResources':
+          await releaseGranblueResources(block.config, blockContext);
+          break;
         case 'repeat': {
           const count = clamp(int(block.config.count, 0), 0, MAX_REPEAT_COUNT);
           for (let index = 0; index < count; index++) {
@@ -4959,12 +5341,17 @@
           await waitForWorkflowCondition(block.config.condition, blockContext, { timeoutSec: block.config.timeoutSec, stableMs: block.config.stableMs });
           break;
         case 'iframeReload':
-          await performFrameOperation(() => frameWindow().location.reload(), {
-            signal: context.signal,
-            timeoutMs: block.config.timeoutSec * 1000,
-            expectedScreen: block.config.expectedScreen,
-            requireChange: true
-          });
+          {
+            const before = captureFrameState({ includeDocument: false });
+            await replaceFrame(currentFrameUrl());
+            await waitForFrameReady({
+              signal: context.signal,
+              timeoutMs: block.config.timeoutSec * 1000,
+              expectedScreen: block.config.expectedScreen,
+              before,
+              requireChange: true
+            });
+          }
           break;
         case 'iframeBack':
           if (frameWindow().history.length <= 1) throw new FlowError('iframeに戻れる履歴がありません', 'NO_HISTORY');
@@ -5018,7 +5405,8 @@
       startedAt: performance.now(),
       cycle: 0,
       totalCycles: null,
-      restartCount: 0
+      restartCount: 0,
+      completedBattles: 0
     };
     state.running = context;
     const restoreExpandedDock = enterRuntimeCompactMode();
@@ -6663,17 +7051,20 @@
     stopLegacy(reason);
   }
 
-  function destroy() {
+  function destroy({ restoreHost = true } = {}) {
     if (state.destroyed) return;
     commitActiveEditorInput();
     if (state.externalWorkflowConflict) saveWorkflowCheckpoint('別タブ競合中の最終ローカル版');
     flushWorkflowStore();
     saveLegacyState();
     state.destroyed = true;
+    state.frameNavigationId += 1;
     stopEverything('終了');
     if (state.recording) finishLegacyRecording({ apply: false });
     clearTimeout(state.toastTimer);
     clearTimeout(state.autosaveTimer);
+    for (const timer of state.telemetryTimers) clearTimeout(timer);
+    state.telemetryTimers.clear();
     if (state.announceFrame) cancelAnimationFrame(state.announceFrame);
     clearLegacyMarkers();
     for (const callback of cleanup) {
@@ -6690,18 +7081,28 @@
       backgroundBody.inert = backgroundWasInert;
       if (backgroundAriaHidden == null) backgroundBody.removeAttribute('aria-hidden');
       else backgroundBody.setAttribute('aria-hidden', backgroundAriaHidden);
+      if (!state.hostRuntimeReleased || restoreHost) {
+        backgroundBody.style.visibility = backgroundStyle?.visibility || '';
+        backgroundBody.style.contentVisibility = backgroundStyle?.contentVisibility || '';
+      }
     }
     if (!backgroundWasInert && focusBeforeInstall?.isConnected) {
       requestAnimationFrame(() => focusBeforeInstall.focus?.({ preventScroll: true }));
     }
     if (window[GLOBAL_KEY]?.destroy === destroy) delete window[GLOBAL_KEY];
+    if (restoreHost && state.hostRuntimeReleased) {
+      setTimeout(() => window.location.reload(), 0);
+    }
   }
 
   byId('loadUrl').addEventListener('click', loadUrlFromBar);
   urlInput.addEventListener('keydown', event => { if (event.key === 'Enter') loadUrlFromBar(); });
   byId('backFrame').addEventListener('click', () => { try { iframe.contentWindow.history.back(); } catch { toast('戻る操作に失敗しました'); } });
   byId('forwardFrame').addEventListener('click', () => { try { iframe.contentWindow.history.forward(); } catch { toast('進む操作に失敗しました'); } });
-  byId('reloadFrame').addEventListener('click', () => { try { iframe.contentWindow.location.reload(); } catch { iframe.src = iframe.src; } });
+  byId('reloadFrame').addEventListener('click', async () => {
+    try { await replaceFrame(currentFrameUrl()); }
+    catch (error) { toast(`再読み込み失敗: ${error.message}`); }
+  });
   byId('hideBrowser').addEventListener('click', () => setBrowserHidden(true));
   ui.browserHandle.addEventListener('click', () => setBrowserHidden(false));
   byId('closeApp').addEventListener('click', () => { if ((state.running || state.legacyRunning) && !confirm('実行中です。停止して終了しますか？')) return; destroy(); });
@@ -6984,6 +7385,11 @@
     waitForAutoAttack,
     confirmAllUnclaimed,
     refreshAssistList,
+    navigateToGranblueMyPage,
+    releaseGranblueResources,
+    visibleMyPageButton,
+    replaceFrame,
+    restartWorkflowAfterBattleEnd,
     TEMPLATES,
     BLOCK_DEFINITIONS,
     ERROR_MESSAGES,
