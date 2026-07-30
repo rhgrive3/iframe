@@ -1,1 +1,0 @@
-trigger battle-ended workflow condition patch v4
