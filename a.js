@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 30;
+  const APP_VERSION = 31;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -2396,9 +2396,56 @@
     }
     const currentDoc = frameDocument();
     const button = currentDoc.querySelector(`${SELECTORS.assistSlot}[data-slot="${normalized}"]`);
+    const beforeList = currentDoc.querySelector(SELECTORS.assistList);
+    const beforeActive = activeAssistSlot(currentDoc);
     if (!button || !computedVisible(button)) throw new FlowError(`救援番号${normalized}が表示されていません`, 'ASSIST_SLOT_MISSING');
-    await jqTapStrict(button, { signal, label: `救援番号${normalized}` });
-    return { tapped: true, slot: normalized };
+    if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
+    if (beforeActive === normalized) return { tapped: false, slot: normalized, alreadyActive: true };
+
+    const beforeSignature = assistListSignature(beforeList);
+    let sawMutation = false;
+    let sawLoading = false;
+    let loadingEnded = false;
+    let observer = null;
+    try {
+      const observationRoot = beforeList.parentElement || beforeList;
+      observer = new MutationObserver(records => {
+        sawMutation ||= records.some(record =>
+          record.target === observationRoot
+          || record.target === beforeList
+          || beforeList.contains(record.target)
+        );
+      });
+      observer.observe(observationRoot, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        attributeFilter: ['class', 'style'],
+        characterData: true
+      });
+      const waitPromise = monitorFrame(() => {
+        const docNow = frameDocument();
+        const listNow = docNow.querySelector(SELECTORS.assistList);
+        const loadingVisible = !hiddenOrAbsent(docNow, '#loading') || !hiddenOrAbsent(docNow, '#ready');
+        if (loadingVisible) sawLoading = true;
+        if (sawLoading && !loadingVisible) loadingEnded = true;
+        const reconstructed = Boolean(listNow && listNow !== beforeList);
+        const changedSignature = Boolean(listNow && assistListSignature(listNow) !== beforeSignature);
+        const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
+        if (activeAssistSlot(docNow) !== normalized || !completed || !listNow || loadingVisible) return false;
+        return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+      }, {
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        stableMs: DEFAULT_STABLE_MS,
+        description: `救援番号${normalized}切替完了待ち`
+      });
+      await jqTapStrict(button, { signal, label: `救援番号${normalized}` });
+      const completion = await waitPromise;
+      return { tapped: true, slot: normalized, completion };
+    } finally {
+      observer?.disconnect();
+    }
   }
 
   function activeAssistSlot(doc = frameDocument()) {
@@ -2959,7 +3006,12 @@
       }
       if (!ranked.length) {
         if (cyclesAssistSlots) {
-          const slot = selectedSlots[slotCursor % selectedSlots.length];
+          const currentSlot = activeAssistSlot(doc);
+          let slot = selectedSlots[slotCursor % selectedSlots.length];
+          if (slot === currentSlot) {
+            slotCursor = (slotCursor + 1) % selectedSlots.length;
+            slot = selectedSlots[slotCursor % selectedSlots.length];
+          }
           slotCursor = (slotCursor + 1) % selectedSlots.length;
           context.setProgress(`${attempt}回目・救援${slot}へ切替`);
           await switchAssistSlot(slot, refreshConfig, context);

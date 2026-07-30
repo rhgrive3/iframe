@@ -66,6 +66,17 @@ test('multiple assist slots cycle while single selection retains refresh behavio
   assert.ok(source.includes('await refreshAssistList(refreshConfig, context, { waitForCompletion: false })'));
 });
 
+test('assist slot switching waits for the new list before rescanning', () => {
+  const body = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
+  assert.ok(body.includes('const beforeList = currentDoc.querySelector(SELECTORS.assistList)'));
+  assert.ok(body.includes('const waitPromise = monitorFrame'));
+  assert.ok(body.includes('activeAssistSlot(docNow) !== normalized'));
+  assert.ok(body.includes('reconstructed || changedSignature || loadingEnded || sawMutation'));
+  assert.ok(body.includes('const completion = await waitPromise'));
+  const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
+  assert.ok(flow.includes('if (slot === currentSlot)'));
+});
+
 test('multi-slot evaluation enters the first eligible row', () => {
   const body = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
   assert.ok(body.includes('[...ranked].sort((a, b) => a.index - b.index)[0]'));
