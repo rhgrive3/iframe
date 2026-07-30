@@ -1,20 +1,29 @@
-# Trigger update: battle-ended condition, not enemy HP.
-name: Add battle ended condition
+name: Apply battle-ended workflow condition
 
 on:
-  push:
+  pull_request_target:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
     paths:
-      - '.github/workflows/apply-enemy-defeated-condition.yml'
-      - '.github/workflows/battle-ended-trigger.txt'
+      - '.github/patch-requests/battle-ended.txt'
 
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: battle-ended-condition-patch
+  cancel-in-progress: false
 
 jobs:
   patch:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'automation/battle-ended-condition'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +31,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Apply condition patch
+      - name: Apply battle-ended condition patch
         shell: bash
         run: |
           python3 - <<'PY'
@@ -84,7 +93,7 @@ test('battle ended is available as a workflow condition', () => {
             node --test "${test_files[@]}"
           fi
 
-      - name: Commit patch and remove bridge
+      - name: Commit patch and remove temporary files
         shell: bash
         run: |
           git config user.name 'github-actions[bot]'
