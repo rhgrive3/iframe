@@ -93,3 +93,10 @@ test('auto attack wait resolves during continuously mutating animation', () => {
   assert.match(source, /stableMs: 0, description: 'フルオート攻撃開始待ち'/);
   assert.doesNotMatch(source, /stableMs: 40, description: 'フルオート攻撃開始待ち'/);
 });
+
+test('auto-attack establishes a ready baseline before watching for attack', () => {
+  assert.match(source, /description: 'フルオート攻撃受付待ち'/);
+  assert.match(source, /const attackReady = snapshot\.startVisible && !snapshot\.cancelVisible && !snapshot\.dummyVisible/);
+  assert.match(source, /if \(armed\.alreadyAttacking\) return armed/);
+  assert.match(source, /const baseline = armed\.snapshot/);
+});
