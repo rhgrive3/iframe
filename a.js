@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 41;
+  const APP_VERSION = 42;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1214,6 +1214,7 @@
           element('span', { text: block.type === 'if' ? '条件成立時' : '内側の処理' }),
           element('button', { text: '＋子' })
         ]);
+        childLabel.lastElementChild.disabled = Boolean(state.running);
         childLabel.lastElementChild.addEventListener('click', () => setInsertion(block.children, block.children.length, `「${definition.label}」の内側`));
         childArea.append(childLabel);
         renderBlockList(block.children, childArea, depth + 1, 'children');
@@ -1222,6 +1223,7 @@
       if (definition.elseBranch) {
         const elseArea = element('div', { className: 'childArea' });
         const elseLabel = element('div', { className: 'childLabel' }, [element('span', { text: '条件不成立時' }), element('button', { text: '＋else' })]);
+        elseLabel.lastElementChild.disabled = Boolean(state.running);
         elseLabel.lastElementChild.addEventListener('click', () => setInsertion(block.elseChildren, block.elseChildren.length, '条件不成立側'));
         elseArea.append(elseLabel);
         renderBlockList(block.elseChildren, elseArea, depth + 1, 'elseChildren');
