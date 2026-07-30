@@ -101,8 +101,26 @@ test('failed observed actions are canceled and log DOM stays lightweight', () =>
   assert.ok(refresh.includes('runObservedAction'));
   const slot = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
   assert.ok(slot.includes('runObservedAction'));
-  assert.ok(source.includes('const MAX_RENDERED_LOGS = 40'));
-  assert.ok(source.includes('state.logs.slice(-MAX_RENDERED_LOGS)'));
-  assert.ok(source.includes('while (ui.logList.children.length > MAX_RENDERED_LOGS)'));
+  assert.ok(source.includes('const MAX_LOGS = 20'));
+  assert.ok(source.includes('state.logs.slice(-MAX_LOGS)'));
+  assert.ok(source.includes('while (ui.logList.children.length > MAX_LOGS)'));
+  assert.ok(!source.includes('MAX_RENDERED_LOGS'));
+  assert.ok(source.includes('LOG_TIME_FORMATTER.format(new Date())'));
   assert.ok(source.includes('function scheduleLogScroll'));
+});
+
+test('runtime hot paths avoid redundant document scans', () => {
+  const monitor = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
+  assert.ok(monitor.includes('if (lightweightMode)'));
+  assert.ok(monitor.indexOf('if (lightweightMode)') < monitor.indexOf('typeof observeRoots'));
+  const ready = source.slice(source.indexOf('async function waitForFrameReady'), source.indexOf('async function performFrameOperation'));
+  assert.ok(ready.includes('const baseline = requireChange ? (before || captureFrameState()) : null'));
+  const running = source.slice(source.indexOf('function blockCardById'), source.indexOf('async function runBlockList'));
+  assert.ok(running.includes('state.runningCard'));
+  assert.ok(running.includes('clearRunningBlockUi'));
+  assert.ok(!running.includes("querySelectorAll('.blockCard.running')"));
+  assert.ok(!running.includes("querySelectorAll('.progressBadge')"));
+  const battleEnd = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
+  assert.ok(battleEnd.includes("url.includes('result_multi/')"));
+  assert.ok(!battleEnd.includes('detectScreenState(doc)'));
 });

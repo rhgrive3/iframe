@@ -137,14 +137,19 @@ test('visibility checks short-circuit definite hidden and display-on states', ()
   assert.match(displayBlock, /classList\.contains\('display-on'\) \|\| computedVisible\(element\)/);
 });
 
-test('frame signatures reuse detected state and avoid serializing turn HTML', () => {
-  assert.match(source, /function screenSignature\(doc = frameDocument\(\), stateInfo = null\)/);
-  assert.match(source, /signature = screenSignature\(doc, stateInfo\)/);
-  assert.match(source, /screenSignature\(doc, stateInfo\) !== baseline\.signature/);
+test('frame signatures are screen-specific and turn scans stay shallow', () => {
+  const signatureStart = source.indexOf('function screenSignature');
+  const signatureEnd = source.indexOf('function captureFrameState', signatureStart);
+  const signatureBlock = source.slice(signatureStart, signatureEnd);
+  assert.match(signatureBlock, /detected\.type === 'ASSIST_LIST'/);
+  assert.match(signatureBlock, /detected\.type === 'UNCLAIMED_LIST'/);
+  assert.doesNotMatch(signatureBlock, /querySelectorAll\(SELECTORS\.assistRows\)/);
   const turnStart = source.indexOf('function turnSignature');
   const turnEnd = source.indexOf('function attackSnapshot', turnStart);
   const turnBlock = source.slice(turnStart, turnEnd);
   assert.match(turnBlock, /Array\.from\(turn\.children/);
+  assert.doesNotMatch(turnBlock, /querySelectorAll\('\*'\)/);
+  assert.doesNotMatch(turnBlock, /Array\.from\(node\.attributes/);
   assert.doesNotMatch(turnBlock, /innerHTML/);
 });
 

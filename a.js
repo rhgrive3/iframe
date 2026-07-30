@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 32;
+  const APP_VERSION = 33;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -23,8 +23,12 @@
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
-  const MAX_LOGS = 100;
-  const MAX_RENDERED_LOGS = 40;
+  const MAX_LOGS = 20;
+  const LOG_TIME_FORMATTER = new Intl.DateTimeFormat('ja-JP', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
   const BATTLE_END_MESSAGE = '敵が倒されたため、このバトルは終了しました。';
 
   const ERROR_MESSAGES = Object.freeze({
@@ -184,6 +188,8 @@
     recordStartedAt: 0,
     activeRecordPointers: new Map(),
     pendingAutoAttack: null,
+    runningCard: null,
+    runningBadge: null,
     dockX: null,
     dockY: null
   };
@@ -274,7 +280,8 @@
   );
 
   function setStatus(message) {
-    ui.status.textContent = String(message ?? '');
+    const next = String(message ?? '');
+    if (ui.status.textContent !== next) ui.status.textContent = next;
   }
 
   function toast(message) {
@@ -315,7 +322,7 @@
 
   function appendLog(message, level = '', blockName = '') {
     const log = {
-      time: new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      time: LOG_TIME_FORMATTER.format(new Date()),
       level,
       blockName,
       message: String(message)
@@ -325,7 +332,7 @@
     if (state.page !== 'logs') return;
     ui.logList.querySelector('.hint')?.remove();
     ui.logList.append(createLogRow(log));
-    while (ui.logList.children.length > MAX_RENDERED_LOGS) ui.logList.firstElementChild?.remove();
+    while (ui.logList.children.length > MAX_LOGS) ui.logList.firstElementChild?.remove();
     scheduleLogScroll();
   }
 
@@ -339,7 +346,7 @@
       return;
     }
     const fragment = document.createDocumentFragment();
-    for (const log of state.logs.slice(-MAX_RENDERED_LOGS)) fragment.append(createLogRow(log));
+    for (const log of state.logs.slice(-MAX_LOGS)) fragment.append(createLogRow(log));
     ui.logList.append(fragment);
     scheduleLogScroll();
   }
@@ -1174,6 +1181,8 @@
   }
 
   function renderWorkflowEditor() {
+    state.runningCard = null;
+    state.runningBadge = null;
     workflowEditor.textContent = '';
     const workflow = currentWorkflow();
     if (!workflow) return;
@@ -1378,13 +1387,17 @@
 
   function screenSignature(doc = frameDocument(), stateInfo = null) {
     const detected = stateInfo || detectScreenState(doc);
-    const assistRows = [...doc.querySelectorAll(SELECTORS.assistRows)].slice(0, 12).map(row => [
-      row.dataset.raidId || '',
-      row.querySelector('.prt-raid-gauge-inner')?.style.width || '',
-      normalizePopupText(row.querySelector('.prt-flees-in')?.textContent || '')
-    ].join(':')).join('|');
-    const unclaimedRows = [...doc.querySelectorAll(SELECTORS.unclaimedRows)].slice(0, 12).map(row => row.dataset.raidId || row.dataset.href || '').join('|');
-    return `${detected.type}|${assistRows}|${unclaimedRows}|${doc.body?.childElementCount || 0}`;
+    let detail = '';
+    if (detected.type === 'ASSIST_LIST') {
+      detail = assistListSignature(doc.querySelector(SELECTORS.assistList));
+    } else if (detected.type === 'UNCLAIMED_LIST') {
+      detail = Array.from(doc.querySelectorAll(SELECTORS.unclaimedRows), row =>
+        row.dataset.raidId || row.dataset.href || ''
+      ).slice(0, 12).join('|');
+    } else if (detected.type.endsWith('_ERROR')) {
+      detail = detected.text || detected.rawText || '';
+    }
+    return `${detected.type}|${detail}|${doc.body?.childElementCount || 0}`;
   }
 
   function captureFrameState() {
@@ -1454,6 +1467,15 @@
       const bindObserver = () => {
         let doc;
         try { doc = frameDocument(); } catch { return; }
+        if (lightweightMode) {
+          if (doc !== observedDoc) {
+            observer?.disconnect();
+            observer = null;
+            observedDoc = doc;
+            observedRoots = [];
+          }
+          return;
+        }
         let requestedRoots = observeRoots;
         if (typeof observeRoots === 'function') {
           try { requestedRoots = observeRoots(doc); } catch { requestedRoots = []; }
@@ -1469,7 +1491,7 @@
         observer?.disconnect();
         observedDoc = doc;
         observedRoots = roots;
-        if (lightweightMode || !roots.length) return;
+        if (!roots.length) return;
         let scheduled = false;
         observer = new MutationObserver(() => {
           lastMutation = performance.now();
@@ -1518,7 +1540,7 @@
   }
 
   async function waitForFrameReady({ signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', before = null, requireChange = false, stableMs = DEFAULT_STABLE_MS } = {}) {
-    const baseline = before || captureFrameState();
+    const baseline = requireChange ? (before || captureFrameState()) : null;
     return monitorFrame(() => {
       const doc = frameDocument();
       const stateInfo = detectScreenState(doc);
@@ -2247,13 +2269,26 @@
     return a + random() * (b - a);
   }
 
+  function gbfStateObservationRoots(doc = frameDocument()) {
+    return [
+      doc.querySelector('#pop'),
+      doc.querySelector('#prt-assist-search'),
+      doc.querySelector(SELECTORS.assistList),
+      doc.querySelector(SELECTORS.supporterScreen),
+      doc.querySelector(SELECTORS.unclaimedList),
+      doc.querySelector(SELECTORS.battleScreen),
+      doc.querySelector('#loading'),
+      doc.querySelector('#ready')
+    ].filter(Boolean);
+  }
+
   function waitForGbfState(accepted, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '画面状態待ち' } = {}) {
     const acceptedSet = new Set(accepted);
     return monitorFrame(() => {
       const stateInfo = detectScreenState();
       if (stateInfo.type === 'UNKNOWN_ERROR') return stateInfo;
       return acceptedSet.has(stateInfo.type) ? stateInfo : false;
-    }, { signal, timeoutMs, stableMs, description });
+    }, { signal, timeoutMs, stableMs, description, observeRoots: gbfStateObservationRoots });
   }
 
   function assertNoUnknownPopup(doc = frameDocument()) {
@@ -2657,8 +2692,8 @@
   }
 
   function detectBattleEndState(doc = frameDocument()) {
-    const stateInfo = detectScreenState(doc);
-    if (stateInfo.type === 'RESULT') return { type: 'RESULT', reason: 'リザルト画面を検出', url: currentFrameUrl() };
+    const url = currentFrameUrl();
+    if (url.includes('result_multi/')) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
     if (notice && computedVisible(notice)) {
       const text = normalizePopupText(notice.textContent || '');
@@ -2793,14 +2828,10 @@
   function turnSignature(doc = frameDocument()) {
     const turn = doc.querySelector(SELECTORS.turn);
     if (!turn) return '';
-    const nodes = Array.from(turn.children).flatMap(child => [child, ...child.querySelectorAll('*')]);
-    const structure = nodes.map(node => {
-      const attributes = Array.from(node.attributes, attribute => `${attribute.name}=${attribute.value}`)
-        .sort()
-        .join(',');
-      return `${node.tagName}:${attributes}`;
-    }).join('|');
-    return `${turn.textContent || ''}|${structure}`;
+    const structure = Array.from(turn.children, child =>
+      `${child.tagName}:${String(child.className || '')}:${child.getAttribute('style') || ''}`
+    ).join('|');
+    return `${normalizePopupText(turn.textContent || '')}|${structure}`;
   }
 
   function attackSnapshot(doc = frameDocument()) {
@@ -3135,7 +3166,7 @@
       case 'gbfAssist':
         return screen === 'ASSIST_LIST';
       case 'gbfUnclaimedEmpty':
-        return Boolean(doc.querySelector(SELECTORS.unclaimedList)) && doc.querySelectorAll(SELECTORS.unclaimedRows).length === 0;
+        return Boolean(doc.querySelector(SELECTORS.unclaimedList)) && !doc.querySelector(SELECTORS.unclaimedRows);
       case 'selectorVisible': {
         if (!config.selector) throw new FlowError('監視セレクタが空です', 'INVALID_SELECTOR');
         let element;
@@ -3174,33 +3205,53 @@
     });
   }
 
+  function blockCardById(blockId) {
+    const escapedId = window.CSS?.escape ? window.CSS.escape(blockId) : String(blockId).replace(/["\\]/g, '\\$&');
+    return shadow.querySelector(`.blockCard[data-block-id="${escapedId}"]`);
+  }
+
+  function clearRunningBlockUi() {
+    state.runningCard?.classList.remove('running');
+    state.runningBadge?.remove();
+    state.runningCard = null;
+    state.runningBadge = null;
+  }
+
   function setRunningBlock(context, block, progress = '') {
     context.currentBlockId = block?.id || null;
     state.blockProgress.clear();
-    shadow.querySelectorAll('.blockCard.running').forEach(card => card.classList.remove('running'));
-    shadow.querySelectorAll('.progressBadge').forEach(badge => badge.remove());
+    clearRunningBlockUi();
     if (!block) return;
     if (progress) state.blockProgress.set(block.id, progress);
-    const escapedId = window.CSS?.escape ? window.CSS.escape(block.id) : String(block.id).replace(/["\\]/g, '\\$&');
-    const card = shadow.querySelector(`.blockCard[data-block-id="${escapedId}"]`);
+    const card = blockCardById(block.id);
+    state.runningCard = card;
     card?.classList.add('running');
-    if (card && progress) card.querySelector('.blockName')?.append(element('span', { className: 'progressBadge', text: progress }));
+    if (card && progress) {
+      const badge = element('span', { className: 'progressBadge', text: progress });
+      card.querySelector('.blockName')?.append(badge);
+      state.runningBadge = badge;
+    }
   }
 
   function updateBlockProgress(context, block, progress) {
     context.currentBlockId = block.id;
-    state.blockProgress.set(block.id, progress);
-    const escapedId = window.CSS?.escape ? window.CSS.escape(block.id) : String(block.id).replace(/[\"\\]/g, '\\$&');
-    const card = shadow.querySelector(`.blockCard[data-block-id="${escapedId}"]`);
-    if (card) {
-      card.classList.add('running');
-      let badge = card.querySelector('.progressBadge');
-      if (!badge) {
-        badge = element('span', { className: 'progressBadge' });
-        card.querySelector('.blockName')?.append(badge);
-      }
-      badge.textContent = progress;
+    const text = String(progress ?? '');
+    state.blockProgress.set(block.id, text);
+    let card = state.runningCard;
+    if (!card || !card.isConnected || card.dataset.blockId !== block.id) {
+      clearRunningBlockUi();
+      card = blockCardById(block.id);
+      state.runningCard = card;
+      card?.classList.add('running');
     }
+    if (!card) return;
+    let badge = state.runningBadge;
+    if (!badge || !badge.isConnected) {
+      badge = card.querySelector('.progressBadge') || element('span', { className: 'progressBadge' });
+      if (!badge.isConnected) card.querySelector('.blockName')?.append(badge);
+      state.runningBadge = badge;
+    }
+    if (badge.textContent !== text) badge.textContent = text;
   }
 
   async function runBlockList(blocks, context) {
