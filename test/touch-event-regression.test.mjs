@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { buildRequest, formatIssueBody } from '../tools/repo-patch-request.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
@@ -99,4 +100,23 @@ test('auto-attack establishes a ready baseline before watching for attack', () =
   assert.match(source, /const attackReady = snapshot\.startVisible && !snapshot\.cancelVisible && !snapshot\.dummyVisible/);
   assert.match(source, /if \(armed\.alreadyAttacking\) return armed/);
   assert.match(source, /const baseline = armed\.snapshot/);
+});
+
+test('repo patch request builder emits guarded exact replacements', () => {
+  const request = buildRequest({
+    head: 'a'.repeat(40),
+    message: 'fix: sample',
+    operation: { type: 'replace', replacements: [{ path: 'a.js', old: 'x', new: 'y', expected_count: 1 }] }
+  });
+  assert.equal(request.target_branch, 'main');
+  assert.equal(request.validation, 'autoflow');
+  assert.equal(request.expected_head_sha, 'a'.repeat(40));
+});
+
+test('repo patch issue body preserves markers and JSON payload', () => {
+  const body = formatIssueBody(buildRequest({
+    head: 'b'.repeat(40), message: 'fix: sample', operation: { type: 'unified_diff', patch: 'diff --git a/a b/a\\n' }
+  }));
+  assert.match(body, /repo-patch-request:v1/);
+  assert.match(body, /expected_head_sha/);
 });
