@@ -1,4 +1,5 @@
-name: Add enemy defeated condition
+# Trigger update: battle-ended condition, not enemy HP.
+name: Add battle ended condition
 
 on:
   push:
@@ -37,13 +38,13 @@ jobs:
           source = source[:version.start(1)] + str(current + 1) + source[version.end(1):]
 
           option_old = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattle', 'バトル画面である'],"
-          option_new = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfEnemyDefeated', '敵が倒された'],\n    ['gbfBattle', 'バトル画面である'],"
+          option_new = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattleEnded', '戦闘が終了した'],\n    ['gbfBattle', 'バトル画面である'],"
           if source.count(option_old) != 1:
               raise SystemExit(f'condition option insertion point mismatch: {source.count(option_old)}')
           source = source.replace(option_old, option_new, 1)
 
           evaluator_old = "      case 'gbfAttackWaiting': {\n        if (screen !== 'BATTLE') return false;\n        const attack = attackSnapshot(doc);\n        return attack.startVisible && !isAttackInProgress(attack);\n      }\n      case 'gbfBattle':"
-          evaluator_new = "      case 'gbfAttackWaiting': {\n        if (screen !== 'BATTLE') return false;\n        const attack = attackSnapshot(doc);\n        return attack.startVisible && !isAttackInProgress(attack);\n      }\n      case 'gbfEnemyDefeated':\n        return Boolean(detectBattleEndState(doc));\n      case 'gbfBattle':"
+          evaluator_new = "      case 'gbfAttackWaiting': {\n        if (screen !== 'BATTLE') return false;\n        const attack = attackSnapshot(doc);\n        return attack.startVisible && !isAttackInProgress(attack);\n      }\n      case 'gbfBattleEnded':\n        return Boolean(detectBattleEndState(doc));\n      case 'gbfBattle':"
           if source.count(evaluator_old) != 1:
               raise SystemExit(f'condition evaluator insertion point mismatch: {source.count(evaluator_old)}')
           source = source.replace(evaluator_old, evaluator_new, 1)
@@ -52,13 +53,13 @@ jobs:
 
           test_path = Path('tests/autoflow.static.test.mjs')
           tests = test_path.read_text(encoding='utf-8')
-          marker = "test('enemy defeated is available as a workflow condition'"
+          marker = "test('battle ended is available as a workflow condition'"
           if marker not in tests:
               tests += """
 
-test('enemy defeated is available as a workflow condition', () => {
-  assert.ok(source.includes("['gbfEnemyDefeated', '敵が倒された']"));
-  assert.ok(source.includes("case 'gbfEnemyDefeated':"));
+test('battle ended is available as a workflow condition', () => {
+  assert.ok(source.includes("['gbfBattleEnded', '戦闘が終了した']"));
+  assert.ok(source.includes("case 'gbfBattleEnded':"));
   assert.ok(source.includes('return Boolean(detectBattleEndState(doc));'));
 });
 """
@@ -81,5 +82,5 @@ test('enemy defeated is available as a workflow condition', () => {
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/apply-enemy-defeated-condition.yml
           git add a.js tests/autoflow.static.test.mjs
-          git commit -m 'feat: add enemy defeated workflow condition'
+          git commit -m 'feat: add battle-ended workflow condition'
           git push origin HEAD:main
