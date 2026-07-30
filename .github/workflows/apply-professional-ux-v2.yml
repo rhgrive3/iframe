@@ -29,43 +29,23 @@ jobs:
         shell: bash
         run: |
           git fetch origin ux/professional-controller
-          git diff --full-index b930710be0f6ef908bc0a55ed4119a5d502f3ef7..origin/ux/professional-controller -- \
+          git diff b930710be0f6ef908bc0a55ed4119a5d502f3ef7..origin/ux/professional-controller -- \
             a.js tests/autoflow.static.test.mjs tests/safari-performance-regression.test.mjs > /tmp/ux.patch
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path('/tmp/ux.patch')
-          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
-          output = []
-          index = 0
-          while index < len(lines):
-              if lines[index].startswith('@@ '):
-                  end = index + 1
-                  while end < len(lines) and not lines[end].startswith(('@@ ', 'diff --git ')):
-                      end += 1
-                  hunk = lines[index:end]
-                  if not any('APP_VERSION' in line for line in hunk):
-                      output.extend(hunk)
-                  index = end
-                  continue
-              output.append(lines[index])
-              index += 1
-          path.write_text(''.join(output), encoding='utf-8')
+          patch = path.read_text(encoding='utf-8')
+          old = "-  const APP_VERSION = 38;\n+  const APP_VERSION = 39;"
+          new = "-  const APP_VERSION = 39;\n+  const APP_VERSION = 40;"
+          if patch.count(old) != 1:
+              raise SystemExit(f'expected one version hunk, found {patch.count(old)}')
+          path.write_text(patch.replace(old, new, 1), encoding='utf-8')
           PY
 
       - name: Apply onto latest main
         shell: bash
-        run: |
-          git apply --3way /tmp/ux.patch
-          python3 - <<'PY'
-          from pathlib import Path
-          path = Path('a.js')
-          source = path.read_text(encoding='utf-8')
-          old = '  const APP_VERSION = 39;'
-          if source.count(old) != 1:
-              raise SystemExit(f'expected one current version marker, found {source.count(old)}')
-          path.write_text(source.replace(old, '  const APP_VERSION = 40;', 1), encoding='utf-8')
-          PY
+        run: git apply --reject --whitespace=fix /tmp/ux.patch
 
       - name: Validate
         shell: bash
