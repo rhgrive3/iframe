@@ -1,0 +1,55 @@
+name: Fix auto attack wait stability
+
+on:
+  push:
+    branches: [fix/auto-attack-wait-stability]
+    paths:
+      - .github/workflows/fix-auto-attack-wait-stability.yml
+      - .attack-wait-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/auto-attack-wait-stability
+          fetch-depth: 0
+      - name: Patch false stability requirement
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('a.js')
+          source = path.read_text(encoding='utf-8')
+          old = "    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 40, description: 'フルオート攻撃開始待ち' });"
+          new = "    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 0, description: 'フルオート攻撃開始待ち' });"
+          if source.count(old) != 1:
+              raise SystemExit(f'wait target count: {source.count(old)}')
+          source = source.replace(old, new, 1)
+          path.write_text(source, encoding='utf-8')
+      - name: Add regression test
+        shell: bash
+        run: |
+          cat >> test/touch-event-regression.test.mjs <<'EOF'
+          test('auto attack wait resolves during continuously mutating animation', () => {
+            assert.match(source, /stableMs: 0, description: 'フルオート攻撃開始待ち'/);
+            assert.doesNotMatch(source, /stableMs: 40, description: 'フルオート攻撃開始待ち'/);
+          });
+          EOF
+          rm -f .attack-wait-trigger .github/workflows/fix-auto-attack-wait-stability.yml
+      - name: Verify
+        run: |
+          node --check a.js
+          node --test test/touch-event-regression.test.mjs
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'fix: resolve auto attack wait during animation'
+          git push origin HEAD:fix/auto-attack-wait-stability
