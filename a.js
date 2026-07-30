@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 42;
+  const APP_VERSION = 43;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -187,6 +187,11 @@
         max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;
         border:1px solid var(--line-strong);border-radius:var(--radius-lg);color:var(--text);
         background:var(--panel);box-shadow:var(--shadow-lg);overflow:hidden;isolation:isolate
+      }
+      #dock.narrowViewport{
+        width:var(--dock-width,86vw);width:var(--dock-width,86dvw);
+        height:var(--dock-height,54vh);height:var(--dock-height,54dvh);
+        max-width:calc(100dvw - 18px);max-height:calc(100dvh - 54px);border-radius:14px
       }
       #dock::before{
         content:'';position:absolute;z-index:-1;inset:0 0 auto;height:150px;pointer-events:none;
@@ -522,7 +527,7 @@
         #browserBar button,#browserBar input{height:44px;min-height:44px}
         #browserBar input{padding:4px 8px;font-size:16px}
         #loadUrl{font-size:10px}
-        #dock{left:6px;width:min(390px,calc(100dvw - 18px));height:min(560px,66dvh);max-height:calc(100dvh - 54px);border-radius:14px}
+        #dock{left:6px;width:var(--dock-width,min(340px,86vw));width:var(--dock-width,min(340px,86dvw));height:var(--dock-height,min(480px,54vh));height:var(--dock-height,min(480px,54dvh));max-height:calc(100dvh - 54px);border-radius:14px}
         #dock.compact{width:104px;height:48px;border-radius:24px}
         #dockHeader{grid-template-columns:40px minmax(0,1fr) 40px 40px;gap:3px;min-height:56px;padding:5px 7px}
         #dockGrip,#toggleCompact,#closeApp{width:40px;height:40px;min-height:40px}
@@ -910,7 +915,15 @@
 
   const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
   const lightweightMode = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? false;
-  const narrowScreen = window.matchMedia?.('(max-width: 620px)').matches ?? false;
+  function isNarrowViewport() {
+    if (window.matchMedia?.('(max-width: 620px)').matches) return true;
+    return [window.visualViewport?.width, window.screen?.width, window.innerWidth].some(value => {
+      const width = Number(value);
+      return Number.isFinite(width) && width > 0 && width <= 620;
+    });
+  }
+  const narrowScreen = isNarrowViewport();
+  dock.classList.toggle('narrowViewport', narrowScreen);
   const dragLock = { active: false, pointerId: null, owner: null, restore: null };
 
   function consumeDragEvent(event, immediate = false) {
@@ -7250,6 +7263,7 @@
   bindFrameLoad(iframe);
 
   const resizeHandler = () => {
+    dock.classList.toggle('narrowViewport', isNarrowViewport());
     positionDock();
     for (const action of state.legacy?.actions || []) {
       if (action.type === 'click') {

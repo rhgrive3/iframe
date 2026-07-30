@@ -208,12 +208,15 @@ test('lightweight execution keeps only error logs and removes continuous overlay
   assert.ok(source.includes("if (!lightweightMode) {\n      renderPalette();\n      renderWorkflowEditor();\n    }"));
 });
 
-test('narrow phones launch compact with a reduced editor footprint', () => {
-  assert.ok(source.includes("const narrowScreen = window.matchMedia?.('(max-width: 620px)').matches ?? false"));
+test('narrow phones launch compact with viewport-independent resizable sizing', () => {
+  assert.ok(source.includes('function isNarrowViewport()'));
+  assert.ok(source.includes('window.screen?.width'));
+  assert.ok(source.includes("dock.classList.toggle('narrowViewport', narrowScreen)"));
+  assert.ok(source.includes("dock.classList.toggle('narrowViewport', isNarrowViewport())"));
   assert.ok(source.includes('setBrowserHidden(state.legacy.browserHidden || narrowScreen)'));
   assert.ok(source.includes('setCompact(state.legacy.compact || narrowScreen)'));
-  assert.ok(source.includes('width:min(390px,calc(100dvw - 18px))'));
-  assert.ok(source.includes('height:min(560px,66dvh)'));
+  assert.ok(source.includes('width:var(--dock-width,min(340px,86dvw))'));
+  assert.ok(source.includes('height:var(--dock-height,min(480px,54dvh))'));
   assert.ok(source.includes('button{min-height:40px}'));
   assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
 });
@@ -244,7 +247,7 @@ test('assist flow uses reduced reaction latency only after a raid is selected', 
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 42'));
+  assert.ok(source.includes('const APP_VERSION = 43'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
