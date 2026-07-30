@@ -242,3 +242,18 @@ test('assist flow uses reduced reaction latency only after a raid is selected', 
   assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true })'));
   assert.ok(flow.includes('fastTap: true'));
 });
+
+test('professional UX exposes truthful runtime and accessible recovery state', () => {
+  assert.ok(source.includes('const APP_VERSION = 41'));
+  assert.ok(source.includes('function syncRunControls()'));
+  assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
+  assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
+  assert.ok(source.includes("dock.setAttribute('aria-busy', String(isRunning))"));
+  assert.ok(source.includes('role="tablist"'));
+  assert.ok(source.includes('aria-selected="true"'));
+  assert.ok(source.includes("button.setAttribute('aria-selected', String(active))"));
+  assert.ok(source.includes('section.hidden = !active'));
+  assert.ok(source.includes('id="workflowErrorRetry"'));
+  assert.ok(source.includes("setAutosaveStatus('saving')"));
+  assert.ok(source.includes("if (mode === 'replace' && workflow.blocks.length"));
+});
