@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - refactor/truncated-touch-scroll-sync
-    paths:
-      - .github/scripts/apply_touch_refactor.py
-      - .github/workflows/apply-touch-refactor.yml
 
 permissions:
   contents: write
