@@ -36,7 +36,8 @@ jobs:
           if not version:
               raise SystemExit('APP_VERSION marker not found')
           current = int(version.group(1))
-          source = source[:version.start(1)] + str(current + 1) + source[version.end(1):]
+          next_version = current + 1
+          source = source[:version.start(1)] + str(next_version) + source[version.end(1):]
 
           option_old = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattle', 'バトル画面である'],"
           option_new = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattleEnded', '戦闘が終了した'],\n    ['gbfBattle', 'バトル画面である'],"
@@ -49,11 +50,18 @@ jobs:
           if source.count(evaluator_old) != 1:
               raise SystemExit(f'condition evaluator insertion point mismatch: {source.count(evaluator_old)}')
           source = source.replace(evaluator_old, evaluator_new, 1)
-
           path.write_text(source, encoding='utf-8')
 
           test_path = Path('tests/autoflow.static.test.mjs')
           tests = test_path.read_text(encoding='utf-8')
+          version_assertion = f"assert.ok(source.includes('const APP_VERSION = {current}'));"
+          if version_assertion in tests:
+              tests = tests.replace(
+                  version_assertion,
+                  f"assert.ok(source.includes('const APP_VERSION = {next_version}'));",
+                  1,
+              )
+
           marker = "test('battle ended is available as a workflow condition'"
           if marker not in tests:
               tests += """
@@ -64,7 +72,7 @@ test('battle ended is available as a workflow condition', () => {
   assert.ok(source.includes('return Boolean(detectBattleEndState(doc));'));
 });
 """
-              test_path.write_text(tests, encoding='utf-8')
+          test_path.write_text(tests, encoding='utf-8')
           PY
 
       - name: Validate
