@@ -8,6 +8,8 @@ on:
       - tests/**
       - .github/workflows/validate-autoflow.yml
       - .auto-attack-latch-pr-trigger
+  issues:
+    types: [opened]
   push:
     branches: [main]
     paths:
@@ -20,12 +22,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
+  group: autoflow-validation-${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   patch-auto-attack-latch:
-    if: github.event_name == 'pull_request' && github.event.pull_request.title == 'Trigger auto attack latch fix v1'
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.title == 'Trigger auto attack latch fix v1') ||
+      (github.event_name == 'issues' && github.event.issue.title == 'run-auto-attack-latch-fix-v2')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -169,7 +173,9 @@ jobs:
           git push origin HEAD:main
 
   validate:
-    if: github.event_name != 'pull_request' || github.event.pull_request.title != 'Trigger auto attack latch fix v1'
+    if: >-
+      !((github.event_name == 'pull_request' && github.event.pull_request.title == 'Trigger auto attack latch fix v1') ||
+      (github.event_name == 'issues' && github.event.issue.title == 'run-auto-attack-latch-fix-v2'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
