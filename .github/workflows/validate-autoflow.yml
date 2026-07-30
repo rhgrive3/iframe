@@ -1,4 +1,99 @@
-name: Validate Auto Flow
+name: Apply battle-ended condition patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/battle-ended-trigger.txt
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Apply battle-ended workflow condition
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          source_path = Path('a.js')
+          source = source_path.read_text(encoding='utf-8')
+
+          version = re.search(r'const APP_VERSION = (\d+);', source)
+          if not version:
+              raise SystemExit('APP_VERSION marker not found')
+          current_version = int(version.group(1))
+          next_version = current_version + 1
+
+          option_old = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattle', 'バトル画面である'],"
+          option_new = "    ['gbfAttackWaiting', '攻撃待機中'],\n    ['gbfBattleEnded', '戦闘が終了した'],\n    ['gbfBattle', 'バトル画面である'],"
+          if source.count(option_old) != 1:
+              raise SystemExit(f'condition option insertion point mismatch: {source.count(option_old)}')
+          source = source.replace(option_old, option_new, 1)
+
+          evaluator_old = "      case 'gbfAttackWaiting': {\n        if (screen !== 'BATTLE') return false;\n        const attack = attackSnapshot(doc);\n        return attack.startVisible && !isAttackInProgress(attack);\n      }\n      case 'gbfBattle':"
+          evaluator_new = "      case 'gbfAttackWaiting': {\n        if (screen !== 'BATTLE') return false;\n        const attack = attackSnapshot(doc);\n        return attack.startVisible && !isAttackInProgress(attack);\n      }\n      case 'gbfBattleEnded':\n        return Boolean(detectBattleEndState(doc));\n      case 'gbfBattle':"
+          if source.count(evaluator_old) != 1:
+              raise SystemExit(f'condition evaluator insertion point mismatch: {source.count(evaluator_old)}')
+          source = source.replace(evaluator_old, evaluator_new, 1)
+          source = source[:version.start(1)] + str(next_version) + source[version.end(1):]
+          source_path.write_text(source, encoding='utf-8')
+
+          test_path = Path('tests/autoflow.static.test.mjs')
+          tests = test_path.read_text(encoding='utf-8')
+          tests = tests.replace(
+              f"assert.ok(source.includes('const APP_VERSION = {current_version}'));",
+              f"assert.ok(source.includes('const APP_VERSION = {next_version}'));",
+          )
+          marker = "test('battle ended is available as a workflow condition'"
+          if marker not in tests:
+              tests += """
+
+test('battle ended is available as a workflow condition', () => {
+  assert.ok(source.includes("['gbfBattleEnded', '戦闘が終了した']"));
+  assert.ok(source.includes("case 'gbfBattleEnded':"));
+  assert.ok(source.includes('return Boolean(detectBattleEndState(doc));'));
+  const conditionCase = source.slice(
+    source.indexOf("case 'gbfBattleEnded':"),
+    source.indexOf("case 'gbfBattle':")
+  );
+  assert.ok(!conditionCase.includes('enemy-hp'));
+  assert.ok(!conditionCase.includes('txt-gauge-value'));
+});
+"""
+          test_path.write_text(tests, encoding='utf-8')
+          PY
+
+      - name: Validate generated change
+        shell: bash
+        run: |
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Restore standard workflow and commit
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          Path('.github/workflows/validate-autoflow.yml').write_text("""name: Validate Auto Flow
 
 on:
   pull_request:
@@ -19,7 +114,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: autoflow-validation-${{ github.event.pull_request.number || github.ref }}
+  group: autoflow-validation
   cancel-in-progress: true
 
 jobs:
@@ -35,3 +130,12 @@ jobs:
         run: node --check a.js
       - name: Regression checks
         run: node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+""", encoding='utf-8')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm -f .github/workflows/apply-enemy-defeated-condition.yml
+          git rm -f .github/workflows/battle-ended-trigger.txt
+          git add a.js tests/autoflow.static.test.mjs .github/workflows/validate-autoflow.yml
+          git commit -m 'feat: add battle-ended workflow condition'
+          git push origin HEAD:main
