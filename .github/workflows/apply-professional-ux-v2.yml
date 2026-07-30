@@ -6,6 +6,11 @@ on:
       - 'ux/professional-controller-v2'
     paths:
       - '.github/workflows/apply-professional-ux-v2.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-professional-ux-v2.yml'
 
 permissions:
   contents: write
