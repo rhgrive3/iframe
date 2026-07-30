@@ -2450,7 +2450,7 @@
       const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
       const started = current.cancelVisible || current.dummyVisible || current.actorAttacking || startReplaced || startBecameHidden || turnChanged;
       return started ? { current, startReplaced, startBecameHidden, turnChanged } : false;
-    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 40, description: 'フルオート攻撃開始待ち' });
+    }, { signal, timeoutMs: config.timeoutSec * 1000, stableMs: 0, description: 'フルオート攻撃開始待ち' });
   }
 
   async function recoverKnownPopup(stateInfo, refreshConfig, context) {
