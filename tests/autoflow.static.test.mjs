@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 47'));
+  assert.ok(source.includes('const APP_VERSION = 48'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -324,4 +324,17 @@ test('battle performance mode bootstraps into a same-origin iframe when only the
   const sync = source.slice(source.indexOf('function syncBattlePerformanceFrame'), source.indexOf('function setBattlePerformanceEnabled'));
   assert.ok(sync.includes('bootstrapBattlePerformanceFrameRuntime(win);'));
   assert.ok(sync.indexOf('bootstrapBattlePerformanceFrameRuntime(win);') < sync.indexOf('postMessage'));
+});
+
+
+test('battle performance hooks are isolated and restore audio outside battle routes', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const patchNow = child.slice(child.indexOf('function patchNow'), child.indexOf('function setEnabled'));
+  assert.ok(patchNow.includes('try { patchLoadQueue(); } catch {}'));
+  assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
+  assert.ok(patchNow.includes('if (isBattleRuntime())'));
+  assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
+  assert.ok(child.includes('try { prototype[name] = wrapped; } catch {}'));
+  assert.ok(child.includes('pollTimer = window.setInterval'));
+  assert.ok(child.includes('if (enabled) patchNow();'));
 });

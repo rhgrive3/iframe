@@ -120,8 +120,8 @@
         if (battleCanvas(this?.canvas)) return undefined;
         return original.apply(this, args);
       };
-      Object.defineProperty(wrapped, RENDER_MARKER, { value: true });
-      prototype[name] = wrapped;
+      try { Object.defineProperty(wrapped, RENDER_MARKER, { value: true }); } catch {}
+      try { prototype[name] = wrapped; } catch {}
     }
 
     function patchRendering() {
@@ -216,27 +216,35 @@
     }
 
     function patchImageSources() {
-      const descriptor = Object.getOwnPropertyDescriptor(window.HTMLImageElement?.prototype || {}, 'src');
-      if (descriptor?.get && descriptor?.set && descriptor.configurable) {
-        Object.defineProperty(window.HTMLImageElement.prototype, 'src', {
-          ...descriptor,
-          set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
-        });
-      }
-      const originalSetAttribute = window.Element?.prototype?.setAttribute;
-      if (typeof originalSetAttribute === 'function') {
-        window.Element.prototype.setAttribute = function (name, value) {
-          const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
-          return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
-        };
-      }
+      try {
+        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLImageElement?.prototype || {}, 'src');
+        if (descriptor?.get && descriptor?.set && descriptor.configurable) {
+          Object.defineProperty(window.HTMLImageElement.prototype, 'src', {
+            ...descriptor,
+            set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
+          });
+        }
+      } catch {}
+      try {
+        const originalSetAttribute = window.Element?.prototype?.setAttribute;
+        if (typeof originalSetAttribute === 'function') {
+          window.Element.prototype.setAttribute = function (name, value) {
+            const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
+            return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
+          };
+        }
+      } catch {}
     }
 
     function patchNow() {
       ensureStyle();
-      patchLoadQueue();
-      patchRendering();
-      patchSoundRuntime();
+      try { patchLoadQueue(); } catch {}
+      try { patchRendering(); } catch {}
+      if (isBattleRuntime()) {
+        try { patchSoundRuntime(); } catch {}
+      } else {
+        restoreSoundRuntime();
+      }
     }
 
     function setEnabled(next) {
@@ -261,8 +269,10 @@
     ensureStyle();
     if (enabled) patchNow();
     pollTimer = window.setInterval(() => {
-      if (enabled) patchNow();
-      else ensureStyle();
+      try {
+        if (enabled) patchNow();
+        else ensureStyle();
+      } catch {}
     }, 100);
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
@@ -280,7 +290,7 @@
     return;
   }
 
-  const APP_VERSION = 47;
+  const APP_VERSION = 48;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
