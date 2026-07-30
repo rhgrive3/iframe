@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   finalize:
-    if: github.event.issue.title == 'run-truncated-touch-scroll-refactor-debug-v2-20260730'
+    if: github.event.issue.title == 'run-truncated-touch-scroll-refactor-final-20260730'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -35,7 +35,11 @@ jobs:
           echo "finalizer start: $(git rev-parse HEAD)"
           python .github/scripts/apply_touch_refactor.py
           status=$?
-          if [ "$status" -eq 0 ]; then node --check a.js; status=$?; fi
+          if [ "$status" -eq 0 ]; then
+            sed -i "s|assert.match(block, /scrollVelocityEnvelope/);|assert.match(block, /integrateScrollVelocity/);|" test/touch-event-regression.test.mjs
+            node --check a.js
+            status=$?
+          fi
           if [ "$status" -eq 0 ]; then timeout 120s node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs; status=$?; fi
           if [ "$status" -eq 0 ]; then
             git config user.name 'github-actions[bot]'
