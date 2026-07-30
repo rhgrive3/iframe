@@ -247,11 +247,29 @@
       }
     }
 
+    function stopPoll() {
+      if (pollTimer == null) return;
+      window.clearInterval(pollTimer);
+      pollTimer = null;
+    }
+
+    function startPoll() {
+      if (pollTimer != null) return;
+      pollTimer = window.setInterval(() => {
+        try { patchNow(); } catch {}
+      }, 100);
+    }
+
     function setEnabled(next) {
       enabled = Boolean(next);
       ensureStyle();
-      if (enabled) patchNow();
-      else restoreSoundRuntime();
+      if (enabled) {
+        patchNow();
+        startPoll();
+      } else {
+        stopPoll();
+        restoreSoundRuntime();
+      }
     }
 
     const onMessage = event => {
@@ -267,16 +285,13 @@
     patchImageSources();
     patchRendering();
     ensureStyle();
-    if (enabled) patchNow();
-    pollTimer = window.setInterval(() => {
-      try {
-        if (enabled) patchNow();
-        else ensureStyle();
-      } catch {}
-    }, 100);
+    if (enabled) {
+      patchNow();
+      startPoll();
+    }
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
-    window.addEventListener('pagehide', () => window.clearInterval(pollTimer), { once: true });
+    window.addEventListener('pagehide', stopPoll, { once: true });
 
     window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
       get enabled() { return enabled; },
@@ -290,7 +305,7 @@
     return;
   }
 
-  const APP_VERSION = 48;
+  const APP_VERSION = 49;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1287,6 +1302,7 @@
   }
 
   function setBattlePerformanceEnabled(next, { notify = true } = {}) {
+    const previous = state.battlePerformanceEnabled;
     state.battlePerformanceEnabled = Boolean(next);
     ui.battlePerformanceToggle.checked = state.battlePerformanceEnabled;
     try {
@@ -1296,6 +1312,8 @@
         updatedAt: Date.now()
       }));
     } catch (error) {
+      state.battlePerformanceEnabled = previous;
+      ui.battlePerformanceToggle.checked = previous;
       appendLog(`バトル軽量化設定の保存失敗: ${error.message}`, 'error');
       if (notify) toast('バトル軽量化設定を保存できませんでした');
       return false;

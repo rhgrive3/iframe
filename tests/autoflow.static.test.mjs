@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 48'));
+  assert.ok(source.includes('const APP_VERSION = 49'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -336,5 +336,24 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
   assert.ok(child.includes('try { prototype[name] = wrapped; } catch {}'));
   assert.ok(child.includes('pollTimer = window.setInterval'));
-  assert.ok(child.includes('if (enabled) patchNow();'));
+  assert.ok(child.includes('try { patchNow(); } catch {}'));
+});
+
+
+test('battle performance polling only runs while the persistent setting is enabled', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  assert.ok(child.includes('function startPoll()'));
+  assert.ok(child.includes('function stopPoll()'));
+  assert.ok(child.includes('if (pollTimer != null) return;'));
+  assert.ok(child.includes('window.addEventListener(\'pagehide\', stopPoll, { once: true })'));
+  const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
+  assert.ok(enabled.includes('startPoll();'));
+  assert.ok(enabled.includes('stopPoll();'));
+});
+
+test('battle performance setting rolls back its UI state when persistence fails', () => {
+  const setter = source.slice(source.indexOf('function setBattlePerformanceEnabled'), source.indexOf('function consumeDragEvent'));
+  assert.ok(setter.includes('const previous = state.battlePerformanceEnabled;'));
+  assert.ok(setter.includes('state.battlePerformanceEnabled = previous;'));
+  assert.ok(setter.includes('ui.battlePerformanceToggle.checked = previous;'));
 });
