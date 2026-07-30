@@ -34,11 +34,22 @@ test('optional Touch physical attributes are omitted', () => {
   assert.doesNotMatch(source.slice(start, end), /radiusX|radiusY|rotationAngle|force/);
 });
 
-test('tap move count follows duration and distance and uses a noisy quadratic trajectory', () => {
+test('tap move density is duration-driven without a fixed four-point ceiling', () => {
   assert.match(source, /function determineTouchMoveCount\(durationMs, distancePx/);
-  assert.match(source, /if \(distancePx < 1\) return 1/);
-  assert.match(source, /if \(durationMs >= 100\)/);
-  assert.match(source, /TOUCH_MOVE_MAX_COUNT \+ 1/);
+  assert.match(source, /meanIntervalMs = sampleTruncatedNormal/);
+  assert.match(source, /dynamicMaximum = Math\.max\(2, Math\.floor\(duration \/ 5\.5\)\)/);
+  assert.match(source, /expectedCount = \(duration \/ meanIntervalMs\)/);
+  assert.doesNotMatch(source, /TOUCH_MOVE_MAX_COUNT/);
+});
+
+test('touchmove timestamps use randomized monotonic gaps instead of equal subdivisions', () => {
+  assert.match(source, /function sampleTouchMoveProgresses\(moveCount/);
+  assert.match(source, /Math\.exp\(sampleTruncatedNormal/);
+  assert.match(source, /correlatedWeight/);
+  assert.match(source, /progresses\.push\(elapsed \/ total\)/);
+  assert.match(source, /const moveProgresses = sampleTouchMoveProgresses\(moveCount\)/);
+  assert.match(source, /for \(const moveProgress of moveProgresses\)/);
+  assert.doesNotMatch(source, /moveIndex \/ \(moveCount \+ 1\)/);
   assert.match(source, /function quadraticBezier\(/);
   assert.match(source, /TOUCH_TRAJECTORY_NOISE_CORRELATION/);
   assert.match(source, /await waitForGestureProgress/);
