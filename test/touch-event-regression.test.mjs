@@ -172,6 +172,23 @@ test('assist HP polling keeps tapping when a refresh produces no DOM mutation', 
   assert.match(flowBlock, /refreshAssistList\(refreshConfig, context, \{ waitForCompletion: false \}\)/);
 });
 
+test('assist selection rebinds a replaced row by raid id instead of stopping', () => {
+  assert.match(source, /function findAssistRowByRaidId\(raidId, doc = frameDocument\(\)\)/);
+  assert.match(source, /String\(row\.dataset\.raidId \|\| ''\) === normalizedRaidId/);
+
+  const tapStart = source.indexOf('async function tapCurrentAssistRow');
+  const tapEnd = source.indexOf('function assistListSignature', tapStart);
+  const tapBlock = source.slice(tapStart, tapEnd);
+  assert.match(tapBlock, /error\?\.code !== 'STALE_TARGET'/);
+  assert.match(tapBlock, /target = raidId \? findAssistRowByRaidId\(raidId\) : null/);
+
+  const flowStart = source.indexOf('async function assistSelectFullFlow');
+  const flowEnd = source.indexOf('function evaluateWorkflowCondition', flowStart);
+  const flowBlock = source.slice(flowStart, flowEnd);
+  assert.match(flowBlock, /const tapped = await tapCurrentAssistRow\(selected, context\)/);
+  assert.match(flowBlock, /if \(!tapped\) continue/);
+});
+
 test('repo patch request builder emits guarded exact replacements', () => {
   const request = buildRequest({
     head: 'a'.repeat(40),

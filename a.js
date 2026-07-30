@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 26;
+  const APP_VERSION = 27;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -2183,6 +2183,39 @@
     });
   }
 
+  function findAssistRowByRaidId(raidId, doc = frameDocument()) {
+    const normalizedRaidId = String(raidId || '');
+    if (!normalizedRaidId) return null;
+    return [...doc.querySelectorAll(SELECTORS.assistRows)].find(row =>
+      String(row.dataset.raidId || '') === normalizedRaidId
+    ) || null;
+  }
+
+  async function tapCurrentAssistRow(selected, context, { maxRebinds = 20 } = {}) {
+    const { signal } = context;
+    const raidId = String(selected?.raidId || '');
+    const label = `救援 ${raidId || selected?.index + 1 || ''}`.trim();
+    let target = selected?.row || null;
+
+    for (let rebind = 0; rebind <= maxRebinds; rebind++) {
+      throwIfAborted(signal);
+      const latest = raidId ? findAssistRowByRaidId(raidId) : null;
+      if (latest) target = latest;
+      if (!target || !target.isConnected) return false;
+
+      try {
+        await jqTapStrict(target, { signal, label });
+        return true;
+      } catch (error) {
+        if (error?.code !== 'STALE_TARGET') throw error;
+        target = raidId ? findAssistRowByRaidId(raidId) : null;
+        if (!target) return false;
+      }
+    }
+
+    return false;
+  }
+
   function assistListSignature(list) {
     if (!list) return '';
     return [...list.children].filter(row => row.matches?.('.btn-multi-raid.lis-raid.search')).map(row => {
@@ -2651,12 +2684,13 @@
       }
 
       const selected = ranked[0];
-      const nextPromise = waitForGbfState([
+      const tapped = await tapCurrentAssistRow(selected, context);
+      if (!tapped) continue;
+
+      let next = await waitForGbfState([
         'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR',
         'DECK_CONFIRM', 'SUPPORTER', 'UNCLAIMED_LIST', 'BATTLE'
       ], { signal, timeoutMs: config.timeoutSec * 1000, description: '救援選択後待ち' });
-      await jqTapStrict(selected.row, { signal, label: `救援 ${selected.raidId || selected.index + 1}` });
-      let next = await nextPromise;
       if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
       if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
         await recoverKnownPopup(next, refreshConfig, context);
