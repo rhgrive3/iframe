@@ -91,7 +91,7 @@ test('preventDefault is treated as normal touch-handler feedback, not a gesture 
   assert.doesNotMatch(source, /allowCanceled/);
 });
 test('auto attack wait resolves during continuously mutating animation', () => {
-  assert.match(source, /stableMs: 0, description: 'フルオート攻撃開始待ち'/);
+  assert.match(source, /stableMs:\s*0[\s\S]{0,120}description: 'フルオート攻撃開始待ち'/);
   assert.doesNotMatch(source, /stableMs: 40, description: 'フルオート攻撃開始待ち'/);
 });
 
