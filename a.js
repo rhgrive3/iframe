@@ -362,8 +362,8 @@
     gbfSupporterConditional: { category: 'gbf', label: 'サポーターを条件選択する', description: '第1〜第3候補と最高レベルフォールバック' },
     gbfDeckConfirm: { category: 'gbf', label: '編成確認OKを押す', description: '前面エラーを優先して編成開始を確認' },
     gbfUnclaimedAll: { category: 'gbf', label: '未確認バトルをすべて確認する', description: '1ページ目の最上段を0件まで処理' },
-    gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、OFFなら1回だけtap' },
-    gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃ボタンは押さず状態変化だけを監視' },
+    gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、撃破時は指定ルートから先頭へ復帰' },
+    gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃開始または敵撃破通知を低負荷で監視' },
     gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
     repeat: { category: 'control', label: '指定回数繰り返す', description: '子ブロックを指定回数実行', container: true },
     repeatUntil: { category: 'control', label: '条件成立まで繰り返す', description: '前判定型。成立済みなら0回', container: true },
@@ -406,7 +406,11 @@
         return { timeoutSec: 30, maxItems: 10000 };
       case 'gbfEnsureFullAuto':
       case 'gbfWaitAutoAttack':
-        return { timeoutSec: 15 };
+        return {
+          timeoutSec: 15,
+          battleEndRoute: '#quest/assist/multi/0',
+          battleEndExpectedScreen: 'assist'
+        };
       case 'gbfRefreshAssist':
         return { baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15 };
       case 'repeat':
@@ -487,9 +491,15 @@
         block.config = { timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600), supporterCandidates: normalizeCandidates(config.supporterCandidates) };
         break;
       case 'gbfSupporterAuto':
+        block.config = { timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600) };
+        break;
       case 'gbfEnsureFullAuto':
       case 'gbfWaitAutoAttack':
-        block.config = { timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600) };
+        block.config = {
+          timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
+          battleEndRoute: String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0',
+          battleEndExpectedScreen: normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist')
+        };
         break;
       case 'gbfDeckConfirm':
         block.config = {
@@ -921,10 +931,23 @@
         renderCandidates(block, container);
         return;
       case 'gbfSupporterAuto':
-      case 'gbfEnsureFullAuto':
-      case 'gbfWaitAutoAttack':
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         break;
+      case 'gbfEnsureFullAuto':
+      case 'gbfWaitAutoAttack': {
+        addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        const recoveryRoute = textInput(
+          config.battleEndRoute,
+          input => updateBlockConfig(block, next => { next.battleEndRoute = input.value; }),
+          '#quest/assist/multi/0'
+        );
+        grid.append(field('敵撃破時の戻り先ルート', recoveryRoute));
+        const recoveryScreen = selectInput(config.battleEndExpectedScreen, [
+          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面']
+        ], input => updateBlockConfig(block, next => { next.battleEndExpectedScreen = input.value; }));
+        grid.append(field('戻り先の目的画面', recoveryScreen));
+        break;
+      }
       case 'gbfDeckConfirm':
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
         addNumber('エラー後更新基準（秒）', 'refreshBaseDelaySec', 0, 600, 0.1);

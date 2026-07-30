@@ -189,6 +189,27 @@ test('assist selection rebinds a replaced row by raid id instead of stopping', (
   assert.match(flowBlock, /if \(!tapped\) continue/);
 });
 
+test('battle-end waits navigate to a configurable route and restart at the first block', () => {
+  assert.match(source, /battleEndRoute: '#quest\/assist\/multi\/0'/);
+  assert.match(source, /battleEndExpectedScreen: 'assist'/);
+  assert.match(source, /class FlowRestart extends Error/);
+  assert.match(source, /async function restartWorkflowAfterBattleEnd/);
+  assert.match(source, /error instanceof FlowRestart/);
+  assert.match(source, /await runBlockList\(workflow\.blocks, context\)/);
+});
+
+test('battle waits detect raid end and observe only relevant battle controls', () => {
+  const start = source.indexOf('function battleObservationRoots');
+  const end = source.indexOf('async function recoverKnownPopup', start);
+  const block = source.slice(start, end);
+  assert.match(block, /#cnt-raid-information/);
+  assert.match(block, /#pop-force/);
+  assert.match(block, /detectBattleEndState/);
+  assert.match(block, /location\.reload\(\)/);
+  assert.match(block, /observeRoots: battleObservationRoots/);
+  assert.match(block, /error\?\.code === 'TIMEOUT'/);
+});
+
 test('repo patch request builder emits guarded exact replacements', () => {
   const request = buildRequest({
     head: 'a'.repeat(40),
