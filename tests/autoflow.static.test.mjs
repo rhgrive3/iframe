@@ -230,3 +230,15 @@ test('assist HP threshold blocks use inclusive above and below comparisons', () 
   const execute = source.slice(source.indexOf('async function executeWorkflowBlock'), source.indexOf('async function runWorkflow'));
   assert.ok(execute.includes("assistSelectFullFlow(block.config, blockContext, 'atMost')"));
 });
+
+test('assist flow uses reduced reaction latency only after a raid is selected', () => {
+  assert.ok(source.includes('const TOUCH_FAST_VISIBLE_LATENCY_MS'));
+  const tap = source.slice(source.indexOf('async function jqTapStrict'), source.indexOf('function randomUniform'));
+  assert.ok(tap.includes('fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS'));
+  const supporter = source.slice(source.indexOf('async function waitForSupporterRows'), source.indexOf('async function selectSupporterAuto'));
+  assert.ok(supporter.includes('stableMs: config.fastTap ? 0 : 80'));
+  assert.ok(supporter.includes('fast: Boolean(config.fastTap)'));
+  const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
+  assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true })'));
+  assert.ok(flow.includes('fastTap: true'));
+});

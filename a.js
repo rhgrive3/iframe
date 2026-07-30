@@ -3,7 +3,7 @@
 
   if (window.top !== window) return;
 
-  const APP_VERSION = 39;
+  const APP_VERSION = 40;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const LEGACY_STORAGE_KEY = '__fullscreen_iframe_autoclicker_state_v12__';
@@ -1780,6 +1780,7 @@
   }
 
   const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
+  const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 36, stdDev: 8, min: 20, max: 60 });
   const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
   const TOUCH_SCROLL_SETTLE_LATENCY_MS = Object.freeze({ mean: 72, stdDev: 16, min: 36, max: 130 });
   const TOUCH_SCROLL_INERTIA_LATENCY_MS = Object.freeze({ mean: 180, stdDev: 34, min: 110, max: 290 });
@@ -2374,7 +2375,7 @@
     }
   }
 
-  async function jqTapStrict(target, { signal, label: targetLabel = '対象' } = {}) {
+  async function jqTapStrict(target, { signal, label: targetLabel = '対象', fast = false } = {}) {
     if (!target || !target.isConnected) throw new FlowError(`${targetLabel}が見つかりません`, 'TARGET_MISSING');
     return queueExclusive(async () => {
       throwIfAborted(signal);
@@ -2391,7 +2392,8 @@
         let start = null;
         for (let attempt = 0; attempt < 4; attempt++) {
           await ensureTargetPointVisible(target, fractions, { signal });
-          await abortableDelay(sampleTruncatedNormalMs(TOUCH_VISIBLE_LATENCY_MS), signal);
+          const visibleLatency = fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS;
+          await abortableDelay(sampleTruncatedNormalMs(visibleLatency), signal);
           if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
             throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
           }
@@ -2544,7 +2546,7 @@
     ) || null;
   }
 
-  async function tapCurrentAssistRow(selected, context, { maxRebinds = 20 } = {}) {
+  async function tapCurrentAssistRow(selected, context, { maxRebinds = 20, fast = false } = {}) {
     const { signal } = context;
     const raidId = String(selected?.raidId || '');
     const label = `救援 ${raidId || selected?.index + 1 || ''}`.trim();
@@ -2557,7 +2559,7 @@
       if (!target || !target.isConnected) return false;
 
       try {
-        await jqTapStrict(target, { signal, label });
+        await jqTapStrict(target, { signal, label, fast });
         return true;
       } catch (error) {
         if (error?.code !== 'STALE_TARGET') throw error;
@@ -2747,7 +2749,7 @@
     }, {
       signal: context.signal,
       timeoutMs: config.timeoutSec * 1000,
-      stableMs: 80,
+      stableMs: config.fastTap ? 0 : 80,
       description: 'サポーター候補待ち'
     });
   }
@@ -2768,7 +2770,7 @@
         timeoutMs: config.timeoutSec * 1000,
         description: 'サポーター選択後待ち'
       }),
-      () => jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}` }),
+      () => jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}`, fast: Boolean(config.fastTap) }),
       { signal, cancelMessage: 'サポーター選択監視を解除しました' }
     );
     if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
@@ -3247,7 +3249,7 @@
         timeoutMs: config.timeoutSec * 1000,
         description: '編成確認後待ち'
       }),
-      () => jqTapStrict(button, { signal, label: '編成確認OK' }),
+      () => jqTapStrict(button, { signal, label: '編成確認OK', fast: Boolean(config.fastTap) }),
       { signal, cancelMessage: '編成確認後監視を解除しました' }
     );
     if (next.type === 'BATTLE') {
@@ -3317,7 +3319,7 @@
       const selected = cyclesAssistSlots
         ? [...ranked].sort((a, b) => a.index - b.index)[0]
         : ranked[0];
-      const tapped = await tapCurrentAssistRow(selected, context);
+      const tapped = await tapCurrentAssistRow(selected, context, { fast: true });
       if (!tapped) continue;
 
       let next = await waitForGbfState([
@@ -3338,7 +3340,8 @@
       if (next.type === 'SUPPORTER') {
         const supporterResult = await selectSupporterConditional({
           timeoutSec: config.timeoutSec,
-          supporterCandidates: config.supporterCandidates
+          supporterCandidates: config.supporterCandidates,
+          fastTap: true
         }, context);
         next = supporterResult.next || { type: 'DECK_CONFIRM' };
         if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
@@ -3352,7 +3355,8 @@
         const deckResult = await pressDeckConfirm({
           timeoutSec: config.timeoutSec,
           refreshBaseDelaySec: config.baseDelaySec,
-          refreshJitterSec: config.jitterSec
+          refreshJitterSec: config.jitterSec,
+          fastTap: true
         }, context);
         if (deckResult.retry) continue;
         if (deckResult.battle) return { attempts: attempt };

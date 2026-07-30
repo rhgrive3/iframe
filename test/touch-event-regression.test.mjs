@@ -12,7 +12,7 @@ test('all internally sampled interaction delays use rejection-sampled truncated 
   assert.match(source, /function sampleTruncatedNormal\(/);
   assert.match(source, /TRUNCATED_NORMAL_MAX_ATTEMPTS = 10_000/);
   assert.match(source, /if \(sample >= minValue && sample <= maxValue\) return sample/);
-  assert.match(source, /sampleTruncatedNormalMs\(TOUCH_VISIBLE_LATENCY_MS\)/);
+  assert.match(source, /sampleTruncatedNormalMs\(visibleLatency\)/);
   assert.match(source, /sampleTruncatedNormalMs\(TOUCH_HOLD_LATENCY_MS\)/);
   assert.match(source, /sampleTruncatedNormalMs\(TOUCH_SCROLL_SETTLE_LATENCY_MS\)/);
   assert.doesNotMatch(source, /sampleClampedNormalMs/);
@@ -217,7 +217,7 @@ test('assist selection rebinds a replaced row by raid id instead of stopping', (
   const flowStart = source.indexOf('async function assistSelectFullFlow');
   const flowEnd = source.indexOf('function evaluateWorkflowCondition', flowStart);
   const flowBlock = source.slice(flowStart, flowEnd);
-  assert.match(flowBlock, /const tapped = await tapCurrentAssistRow\(selected, context\)/);
+  assert.match(flowBlock, /const tapped = await tapCurrentAssistRow\(selected, context, \{ fast: true \}\)/);
   assert.match(flowBlock, /if \(!tapped\) continue/);
 });
 
