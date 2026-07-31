@@ -177,6 +177,8 @@ test('battle-end recovery explicitly releases Granblue graphics and telemetry be
     'content_close',
     'destroyImages',
     'Ticker?.removeAllEventListeners',
+    'Ticker?.reset',
+    'Tween?.removeAllTweens',
     'Sound?.reset',
     'WebAudioPlugin?.reset',
     'WEBGL_lose_context',
@@ -259,7 +261,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 56'));
+  assert.ok(source.includes('const APP_VERSION = 57'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -352,6 +354,8 @@ test('battle performance preserves game ticks while suppressing only the stage r
 
 test('battle performance mode bootstraps into a same-origin iframe when only the controller was injected', () => {
   assert.ok(source.includes('function bootstrapBattlePerformanceFrameRuntime(win)'));
+  assert.ok(source.includes('runtime?.version !== 2'));
+  assert.ok(source.includes('try { runtime?.destroy?.(); } catch {}'));
   assert.ok(source.includes('const bootstrap = win.Function('));
   assert.ok(source.includes('readBattlePerformanceSetting.toString()'));
   assert.ok(source.includes('installBattlePerformanceChildRuntime.toString()'));
@@ -370,6 +374,9 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
   assert.ok(child.includes('stage[name] = wrapper'));
+  assert.ok(child.includes('function restoreLoadQueue()'));
+  assert.ok(child.includes('function restoreImageSources()'));
+  assert.ok(child.includes('version: 2'));
   assert.ok(child.includes('pollTimer = window.setInterval'));
   assert.ok(child.includes('try { patchNow(); } catch {}'));
 });

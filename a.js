@@ -18,10 +18,11 @@
 
   function installBattlePerformanceChildRuntime() {
     const installed = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
-    if (installed?.setEnabled) {
+    if (installed?.version === 2 && installed?.setEnabled) {
       installed.setEnabled(readBattlePerformanceSetting());
       return;
     }
+    try { installed?.destroy?.(); } catch {}
 
     let enabled = readBattlePerformanceSetting();
     let destroyed = false;
@@ -32,11 +33,14 @@
     let soundFlagSnapshot = null;
     let createjsMuteSnapshot = null;
     let soundModulesRequested = false;
+    let imageSrcRestore = null;
+    let setAttributeRestore = null;
     const soundRestorers = [];
     const patchedSoundObjects = new WeakSet();
     const patchedStages = new Map();
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
     const STAGE_RENDER_MARKER = '__autoFlowBattlePerformanceStageRender__';
+    const runtimeToken = {};
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
     const refreshBattleRuntime = () => {
@@ -106,18 +110,45 @@
       return rewriteManifestItem(manifest);
     }
 
+    function restoreLoadQueue() {
+      const prototype = window.createjs?.LoadQueue?.prototype;
+      const marker = prototype?.[LOAD_QUEUE_MARKER];
+      if (!prototype || marker?.owner !== runtimeToken) return;
+      for (const [name, original] of marker.originals) {
+        try {
+          if (prototype[name] === marker.wrappers.get(name)) prototype[name] = original;
+        } catch {}
+      }
+      try { delete prototype[LOAD_QUEUE_MARKER]; } catch {}
+    }
+
     function patchLoadQueue() {
       const prototype = window.createjs?.LoadQueue?.prototype;
-      if (!prototype || prototype[LOAD_QUEUE_MARKER]) return;
-      Object.defineProperty(prototype, LOAD_QUEUE_MARKER, { value: true, configurable: true });
+      if (!prototype) return false;
+      const installed = prototype[LOAD_QUEUE_MARKER];
+      if (installed?.owner === runtimeToken) return true;
+      if (installed) return false;
+      const originals = new Map();
+      const wrappers = new Map();
       for (const name of ['loadManifest', 'loadFile']) {
         const original = prototype[name];
         if (typeof original !== 'function') continue;
-        prototype[name] = function (...args) {
+        const wrapped = function (...args) {
           if (args.length) args[0] = name === 'loadManifest' ? rewriteManifest(args[0]) : rewriteManifestItem(args[0]);
           return original.apply(this, args);
         };
+        originals.set(name, original);
+        wrappers.set(name, wrapped);
+        prototype[name] = wrapped;
       }
+      if (!originals.size) return false;
+      try {
+        Object.defineProperty(prototype, LOAD_QUEUE_MARKER, {
+          value: { owner: runtimeToken, originals, wrappers },
+          configurable: true
+        });
+      } catch {}
+      return true;
     }
 
     function battleStage(stage) {
@@ -164,6 +195,7 @@
           : typeof stage.draw === 'function' ? 'draw' : null;
         if (!name) continue;
         const original = stage[name];
+        const hadOwn = Object.prototype.hasOwnProperty.call(stage, name);
         const wrapper = function () { return true; };
         try { Object.defineProperty(wrapper, STAGE_RENDER_MARKER, { value: true }); } catch {}
         try {
@@ -172,7 +204,7 @@
             name,
             original,
             wrapper,
-            hadOwn: Object.prototype.hasOwnProperty.call(stage, name)
+            hadOwn
           });
           ready = true;
         } catch {}
@@ -261,30 +293,52 @@
       }
     }
 
+    function restoreImageSources() {
+      try { imageSrcRestore?.(); } catch {}
+      try { setAttributeRestore?.(); } catch {}
+      imageSrcRestore = null;
+      setAttributeRestore = null;
+    }
+
     function patchImageSources() {
-      try {
-        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLImageElement?.prototype || {}, 'src');
-        if (descriptor?.get && descriptor?.set && descriptor.configurable) {
-          Object.defineProperty(window.HTMLImageElement.prototype, 'src', {
-            ...descriptor,
-            set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
-          });
-        }
-      } catch {}
-      try {
-        const originalSetAttribute = window.Element?.prototype?.setAttribute;
-        if (typeof originalSetAttribute === 'function') {
-          window.Element.prototype.setAttribute = function (name, value) {
-            const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
-            return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
-          };
-        }
-      } catch {}
+      if (!imageSrcRestore) {
+        try {
+          const prototype = window.HTMLImageElement?.prototype;
+          const descriptor = Object.getOwnPropertyDescriptor(prototype || {}, 'src');
+          if (prototype && descriptor?.get && descriptor?.set && descriptor.configurable) {
+            const wrappedSet = function (value) {
+              return descriptor.set.call(this, rewriteAsset(value));
+            };
+            Object.defineProperty(prototype, 'src', { ...descriptor, set: wrappedSet });
+            imageSrcRestore = () => {
+              const current = Object.getOwnPropertyDescriptor(prototype, 'src');
+              if (current?.set === wrappedSet) Object.defineProperty(prototype, 'src', descriptor);
+            };
+          }
+        } catch {}
+      }
+      if (!setAttributeRestore) {
+        try {
+          const prototype = window.Element?.prototype;
+          const originalSetAttribute = prototype?.setAttribute;
+          if (prototype && typeof originalSetAttribute === 'function') {
+            const wrappedSetAttribute = function (name, value) {
+              const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
+              return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
+            };
+            prototype.setAttribute = wrappedSetAttribute;
+            setAttributeRestore = () => {
+              if (prototype.setAttribute === wrappedSetAttribute) prototype.setAttribute = originalSetAttribute;
+            };
+          }
+        } catch {}
+      }
     }
 
     function patchNow() {
       refreshBattleRuntime();
       ensureStyle();
+      try { patchImageSources(); } catch {}
       try { patchLoadQueue(); } catch {}
       if (isBattleRuntime()) {
         try { patchStageRendering(); } catch {}
@@ -326,6 +380,8 @@
         stopPoll();
         restoreStageRendering();
         restoreSoundRuntime();
+        restoreLoadQueue();
+        restoreImageSources();
       }
     }
 
@@ -355,6 +411,8 @@
       stopPoll();
       restoreStageRendering();
       restoreSoundRuntime();
+      restoreLoadQueue();
+      restoreImageSources();
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('hashchange', onRouteChange);
@@ -371,7 +429,6 @@
       }
     };
 
-    patchImageSources();
     ensureStyle();
     if (enabled) {
       patchNow();
@@ -386,6 +443,7 @@
     window.addEventListener('pagehide', destroy, { once: true });
 
     window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
+      version: 2,
       get enabled() { return enabled; },
       setEnabled,
       refresh: patchNow,
@@ -398,7 +456,7 @@
     return;
   }
 
-  const APP_VERSION = 56;
+  const APP_VERSION = 57;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1239,7 +1297,7 @@
             </div>
             <label class="settingToggle" for="battlePerformanceToggle">
               <input id="battlePerformanceToggle" type="checkbox">
-              <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、WebGL描画とバトル音声を止め、表示専用演出を最短化します。バトルロジックとタイムラインは維持します。</small></span>
+              <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、CreateJSの描画走査とバトル音声を止め、表示専用演出を最短化します。Ticker・バトルロジック・Tween・タイムラインは維持します。</small></span>
             </label>
             <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映し、次回のページ読込では画像取得前から適用します。OFFにした時、すでに省略済みの画像は次の再読込から復元されます。</div>
           </article>
@@ -1360,7 +1418,8 @@
     try {
       if (new URL(win.location.href).origin !== location.origin) return null;
       let runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
-      if (!runtime?.setEnabled) {
+      if (runtime?.version !== 2) {
+        try { runtime?.destroy?.(); } catch {}
         const bootstrap = win.Function(
           'BATTLE_PERFORMANCE_STORAGE_KEY',
           'BATTLE_PERFORMANCE_MESSAGE_TYPE',
@@ -3407,18 +3466,8 @@
 
       try { win?.Backbone?.history?.stop?.(); } catch {}
       try { win?.createjs?.Ticker?.removeAllEventListeners?.(); } catch {}
-      try {
-        const ticker = win?.createjs?.Ticker;
-        if (ticker?._timerId != null) {
-          if (ticker._raf) {
-            const cancel = win.cancelAnimationFrame || win.webkitCancelAnimationFrame;
-            cancel?.call(win, ticker._timerId);
-          } else {
-            win.clearTimeout(ticker._timerId);
-          }
-          ticker._timerId = null;
-        }
-      } catch {}
+      try { win?.createjs?.Ticker?.reset?.(true); } catch {}
+      try { win?.createjs?.Tween?.removeAllTweens?.(); } catch {}
       try { win?.createjs?.Sound?.stop?.(); } catch {}
       try { win?.createjs?.Sound?.reset?.(true); } catch {}
       try { win?.createjs?.WebAudioPlugin?.reset?.(); } catch {}
