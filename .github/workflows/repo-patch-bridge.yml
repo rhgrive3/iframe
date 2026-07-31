@@ -215,12 +215,12 @@ jobs:
           for item in resolved:
               print('-', item)
           PY
+            git add -A
             if git diff --name-only --diff-filter=U | grep -q .; then
               echo 'unresolved files remain:'
               git diff --name-only --diff-filter=U
               exit 1
             fi
-            git add -A
             git commit --no-edit
           fi
           node --check a.js
