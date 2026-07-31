@@ -7,6 +7,16 @@ import './granblue-captured-simulation.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
+test('selected button workflow block captures and taps one unique iframe element safely', () => {
+  assert.ok(source.includes("iframeTapElement: { category: 'frame', label: '指定ボタンを押す'"));
+  assert.ok(source.includes('function startElementPicker(blockId)'));
+  assert.ok(source.includes('function uniqueElementSelector(target'));
+  assert.ok(source.includes('event.stopImmediatePropagation?.()'));
+  assert.ok(source.includes("'TARGET_AMBIGUOUS'"));
+  assert.ok(source.includes('await tapConfiguredElement(block.config, blockContext)'));
+  assert.ok(source.includes("if (block.type === 'iframeTapElement')"));
+});
+
 test('top-level installation is guarded and replaces stale instances', () => {
   assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
   assert.ok(source.includes('if (window.top !== window) {'));

@@ -965,6 +965,24 @@
       .recordStatus strong{display:inline-flex;min-width:36px;justify-content:center;padding:3px 6px;border-radius:999px;background:var(--red-soft);color:#ffc0c6;font-size:9px}
       .recordPulse{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 4px rgba(255,107,120,.12);animation:statusPulse 1.3s ease-in-out infinite}
 
+      :host(.element-picking) #dock,
+      :host(.element-picking) #browserBar,
+      :host(.element-picking) #browserHandle,
+      :host(.element-picking) #markerLayer{visibility:hidden;pointer-events:none}
+      #elementPickerToolbar{
+        position:fixed;z-index:250;top:max(16px,calc(env(safe-area-inset-top) + 8px));left:50%;transform:translateX(-50%);
+        width:min(620px,calc(100dvw - 24px));display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+        gap:8px;padding:9px;border:1px solid rgba(102,184,255,.42);border-radius:15px;background:rgba(18,20,27,.98);
+        box-shadow:0 16px 44px rgba(0,0,0,.45)
+      }
+      #elementPickerToolbar[hidden]{display:none}
+      #elementPickerToolbar button{min-height:40px;height:40px}
+      .pickerStatus{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:center;min-width:0;padding-left:5px}
+      .pickerStatus strong,.pickerStatus small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .pickerStatus strong{font-size:11px;color:var(--text-soft)}
+      .pickerStatus small{margin-top:2px;font-size:9.5px;color:var(--muted)}
+      .pickerPulse{width:9px;height:9px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 4px rgba(102,184,255,.13);animation:statusPulse 1.3s ease-in-out infinite}
+
       #toast{
         position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translate(-50%,12px);
         visibility:hidden;max-width:calc(100vw - 24px);padding:11px 15px;border:1px solid var(--line-strong);border-radius:12px;
@@ -1104,6 +1122,10 @@
       <div class="recordStatus"><span class="recordPulse" aria-hidden="true"></span><span id="recordToolbarTitle">タッチを記録中</span><strong id="recordCount" role="status" aria-live="polite">0件</strong></div>
       <button id="recordCancel" class="ghost">キャンセル</button>
       <button id="recordFinish" class="primary">記録を完了</button>
+    </div>
+    <div id="elementPickerToolbar" role="dialog" aria-modal="true" aria-labelledby="elementPickerTitle" hidden>
+      <div class="pickerStatus"><span class="pickerPulse" aria-hidden="true"></span><span><strong id="elementPickerTitle">押すボタンを選択</strong><small id="elementPickerHint">iframe内のHTML要素をタップしてください。実際のゲーム操作は発火しません。</small></span></div>
+      <button id="elementPickerCancel" class="ghost">キャンセル</button>
     </div>
     <div id="browserBar" role="navigation" aria-label="対象ページのナビゲーション">
       <button id="backFrame" class="navButton" aria-label="戻る" title="戻る">‹</button>
@@ -1344,6 +1366,7 @@
     legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
+    elementPickerToolbar: byId('elementPickerToolbar'), elementPickerHint: byId('elementPickerHint'), elementPickerCancel: byId('elementPickerCancel'),
     undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
     validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
     validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle')
@@ -1383,6 +1406,7 @@
     recordStartedAt: 0,
     recordReturnFocus: null,
     activeRecordPointers: new Map(),
+    elementPicker: null,
     pendingAutoAttack: null,
     battleEndArmed: false,
     battleEndArmedAt: 0,
@@ -1809,6 +1833,7 @@
     fixedWait: { category: 'wait', label: '固定時間待機', description: '停止可能な固定待機' },
     randomWait: { category: 'wait', label: '指定区間をランダム待機', description: '最小〜最大の一様乱数' },
     watch: { category: 'wait', label: '要素または状態を監視する', description: 'MutationObserver中心で条件成立を待機' },
+    iframeTapElement: { category: 'frame', label: '指定ボタンを押す', description: '画面上で選択したHTML要素をタップ' },
     iframeReload: { category: 'frame', label: 'iframeを再読み込みする', description: '操作前からloadとDOM変化を監視' },
     iframeBack: { category: 'frame', label: 'iframeの履歴を1つ戻る', description: 'リロードせず履歴を戻る' },
     iframeRoute: { category: 'frame', label: '指定したゲーム内ルートへ移動する', description: 'hash/ゲーム内ルートへ移動して完了待機' },
@@ -1878,6 +1903,8 @@
         return { minSeconds: 0.5, maxSeconds: 0.8 };
       case 'watch':
         return { condition: { type: 'selectorVisible', selector: '', value: '' }, timeoutSec: 30, stableMs: 100 };
+      case 'iframeTapElement':
+        return { selector: '', targetLabel: '', timeoutSec: 30 };
       case 'iframeReload':
       case 'iframeBack':
         return { timeoutSec: 30, expectedScreen: 'auto' };
@@ -2033,6 +2060,13 @@
           condition: normalizeConditionConfig(config.condition),
           timeoutSec: clamp(finite(config.timeoutSec, 30), 0, 86400),
           stableMs: clamp(int(config.stableMs, 100), 0, 5000)
+        };
+        break;
+      case 'iframeTapElement':
+        block.config = {
+          selector: String(config.selector || '').trim().slice(0, 1000),
+          targetLabel: String(config.targetLabel || '').trim().slice(0, 120),
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600)
         };
         break;
       case 'iframeReload':
@@ -2839,6 +2873,34 @@
         addNumber('タイムアウト（秒、0=無制限）', 'timeoutSec', 0, 86400, 1);
         addNumber('成立安定時間（ms）', 'stableMs', 0, 5000, 10);
         break;
+      case 'iframeTapElement': {
+        const selector = textInput(
+          config.selector,
+          input => updateBlockConfig(block, next => { next.selector = input.value; }),
+          '#id または .class',
+          () => block.config.selector
+        );
+        selector.spellcheck = false;
+        const targetLabel = textInput(
+          config.targetLabel,
+          input => updateBlockConfig(block, next => { next.targetLabel = input.value; }),
+          '表示名',
+          () => block.config.targetLabel
+        );
+        grid.append(field('CSSセレクタ', selector), field('表示名', targetLabel));
+        addNumber('対象待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        container.append(grid);
+        const pick = element('button', {
+          className: 'primary',
+          text: config.selector ? '画面から選び直す' : '画面から選択'
+        });
+        pick.addEventListener('click', () => startElementPicker(block.id));
+        container.append(
+          element('div', { className: 'toolbar compactActions' }, [pick]),
+          element('div', { className: 'hint', text: '選択中はゲーム側のタップ処理を止め、選んだ要素の一意なCSSセレクタだけを保存します。' })
+        );
+        return;
+      }
       case 'iframeReload':
       case 'iframeBack':
       case 'iframeReady': {
@@ -3180,6 +3242,13 @@
           validateCondition(block, block.config.condition);
           if (finite(block.config.timeoutSec) === 0) add('warning', block, 'タイムアウトが無制限です');
         }
+        if (block.type === 'iframeTapElement') {
+          if (!String(block.config.selector || '').trim()) add('error', block, '押すボタンが選択されていません');
+          else {
+            const syntaxError = selectorSyntaxError(block.config.selector);
+            if (syntaxError) add('error', block, syntaxError);
+          }
+        }
         if (block.type === 'stop') stopped = true;
         if (Array.isArray(block.children)) visit(block.children, depth + 1);
         if (Array.isArray(block.elseChildren)) visit(block.elseChildren, depth + 1);
@@ -3188,7 +3257,7 @@
     visit(workflow.blocks);
     const blockListGuaranteesYield = blocks => blocks.some(block => {
       if (block.type === 'stop') return true;
-      if (['fixedWait', 'randomWait', 'watch', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady', 'parentTabRestart'].includes(block.type)) return true;
+      if (['fixedWait', 'randomWait', 'watch', 'iframeTapElement', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady', 'parentTabRestart'].includes(block.type)) return true;
       if (BLOCK_DEFINITIONS[block.type]?.category === 'gbf') return true;
       if (block.type === 'repeat' && int(block.config.count) > 0) return blockListGuaranteesYield(block.children || []);
       if (block.type === 'if') {
@@ -3407,6 +3476,288 @@
     } catch {
       return urlInput.value || iframe.src || '';
     }
+  }
+
+  const ELEMENT_PICKER_TARGET_SELECTOR = [
+    'button', 'a', 'input', 'select', 'textarea',
+    '[role="button"]', '[onclick]', '[data-href]', '[data-location-href]',
+    '[class*="btn-"]', '[class*="button"]'
+  ].join(',');
+  const ELEMENT_PICKER_ATTRIBUTES = Object.freeze([
+    'data-testid', 'data-test', 'data-href', 'data-location-href',
+    'data-slot', 'data-raid-id', 'aria-label', 'name', 'title', 'role'
+  ]);
+  const ELEMENT_PICKER_VOLATILE_CLASSES = new Set([
+    'active', 'selected', 'show', 'hide', 'hidden', 'display-on', 'display-off',
+    'on', 'off', 'enabled', 'disabled', 'focus', 'hover', 'touch', 'se'
+  ]);
+
+  function cssIdentifier(value, doc = document) {
+    const escape = doc.defaultView?.CSS?.escape || window.CSS?.escape;
+    if (escape) return escape(String(value));
+    return String(value).replace(/(^-?\d)|[^a-zA-Z0-9_-]/g, match =>
+      `\\${match.codePointAt(0).toString(16)} `
+    );
+  }
+
+  function cssAttributeValue(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\a ');
+  }
+
+  function selectorUniquelyMatches(doc, selector, target) {
+    try {
+      const matches = doc.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === target;
+    } catch {
+      return false;
+    }
+  }
+
+  function stablePickerClasses(element) {
+    return [...element.classList].filter(name =>
+      name
+      && name.length <= 80
+      && /^[a-zA-Z_][\w-]*$/.test(name)
+      && !ELEMENT_PICKER_VOLATILE_CLASSES.has(name)
+      && !/^(?:is-|has-)?(?:active|selected|show|hide|hidden|disabled|enabled)$/i.test(name)
+    ).slice(0, 3);
+  }
+
+  function pickerSelectorSegment(element, doc) {
+    const tag = element.localName || '*';
+    const classes = stablePickerClasses(element);
+    let segment = `${tag}${classes.map(name => `.${cssIdentifier(name, doc)}`).join('')}`;
+    const parent = element.parentElement;
+    if (!parent) return segment;
+    let duplicates = [];
+    try { duplicates = [...parent.children].filter(child => child.matches(segment)); } catch {}
+    if (duplicates.length > 1) {
+      const sameTag = [...parent.children].filter(child => child.localName === element.localName);
+      segment += `:nth-of-type(${sameTag.indexOf(element) + 1})`;
+    }
+    return segment;
+  }
+
+  function uniqueElementSelector(target, doc = target?.ownerDocument) {
+    if (!target || !doc || target.ownerDocument !== doc) {
+      throw new FlowError('選択したHTML要素を確認できません', 'PICKER_TARGET_INVALID');
+    }
+    if (target.id) {
+      const candidate = `#${cssIdentifier(target.id, doc)}`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const tag = target.localName || '*';
+    for (const name of ELEMENT_PICKER_ATTRIBUTES) {
+      const value = target.getAttribute(name);
+      if (!value || value.length > 240) continue;
+      const candidate = `${tag}[${name}="${cssAttributeValue(value)}"]`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const classes = stablePickerClasses(target);
+    if (classes.length) {
+      const candidate = `${tag}${classes.map(name => `.${cssIdentifier(name, doc)}`).join('')}`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const path = [];
+    let current = target;
+    for (let depth = 0; current && current.nodeType === 1 && depth < 12; depth++) {
+      path.unshift(pickerSelectorSegment(current, doc));
+      const candidate = path.join(' > ');
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+      if (current === doc.body || current === doc.documentElement) break;
+      current = current.parentElement;
+    }
+    throw new FlowError('選択した要素を一意に識別できませんでした', 'PICKER_SELECTOR_NOT_UNIQUE');
+  }
+
+  function preferredPickerTarget(raw) {
+    if (!raw || raw.nodeType !== 1) return null;
+    return raw.closest?.(ELEMENT_PICKER_TARGET_SELECTOR) || raw;
+  }
+
+  function pickerTargetLabel(target) {
+    const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const text = compact(
+      target.getAttribute('aria-label')
+      || target.getAttribute('title')
+      || target.textContent
+    ).slice(0, 60);
+    const classes = stablePickerClasses(target).slice(0, 2);
+    const descriptor = `${target.localName || 'element'}${target.id ? `#${target.id}` : classes.map(name => `.${name}`).join('')}`;
+    return (text ? `${text} (${descriptor})` : descriptor).slice(0, 120);
+  }
+
+  function suppressElementPickerEvent(event) {
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  }
+
+  function clearElementPickerHighlight(picker = state.elementPicker) {
+    const highlighted = picker?.highlighted;
+    if (!highlighted) return;
+    const {
+      element: highlightedElement,
+      outline,
+      outlinePriority,
+      outlineOffset,
+      outlineOffsetPriority,
+      cursor,
+      cursorPriority
+    } = highlighted;
+    if (highlightedElement?.style) {
+      highlightedElement.style.setProperty('outline', outline, outlinePriority);
+      highlightedElement.style.setProperty('outline-offset', outlineOffset, outlineOffsetPriority);
+      highlightedElement.style.setProperty('cursor', cursor, cursorPriority);
+    }
+    picker.highlighted = null;
+  }
+
+  function highlightElementPickerTarget(target, picker = state.elementPicker) {
+    if (!picker || picker.highlighted?.element === target) return;
+    clearElementPickerHighlight(picker);
+    if (!target?.style) return;
+    picker.highlighted = {
+      element: target,
+      outline: target.style.getPropertyValue('outline'),
+      outlinePriority: target.style.getPropertyPriority('outline'),
+      outlineOffset: target.style.getPropertyValue('outline-offset'),
+      outlineOffsetPriority: target.style.getPropertyPriority('outline-offset'),
+      cursor: target.style.getPropertyValue('cursor'),
+      cursorPriority: target.style.getPropertyPriority('cursor')
+    };
+    target.style.setProperty('outline', '3px solid #66b8ff', 'important');
+    target.style.setProperty('outline-offset', '2px', 'important');
+    target.style.setProperty('cursor', 'crosshair', 'important');
+  }
+
+  function stopElementPicker({ restoreFocus = true, message = '' } = {}) {
+    const picker = state.elementPicker;
+    if (!picker) return;
+    state.elementPicker = null;
+    clearTimeout(picker.finishTimer);
+    clearElementPickerHighlight(picker);
+    try { picker.cleanupDocument?.(); } catch {}
+    picker.frame?.removeEventListener('load', picker.onFrameLoad);
+    window.removeEventListener('keydown', picker.onKeyDown, true);
+    root.classList.remove('element-picking');
+    ui.elementPickerToolbar.hidden = true;
+    if (message) toast(message);
+    if (restoreFocus) focusBlockControl(picker.blockId, 'toggle', message || '要素選択を終了しました');
+  }
+
+  function bindElementPickerDocument(picker) {
+    picker.cleanupDocument?.();
+    picker.cleanupDocument = null;
+    let doc;
+    try {
+      doc = frameDocument();
+    } catch (error) {
+      ui.elementPickerHint.textContent = error.message;
+      return;
+    }
+
+    const preview = event => {
+      if (picker.finishing || state.elementPicker !== picker) return;
+      const target = preferredPickerTarget(event.target);
+      if (!target) return;
+      highlightElementPickerTarget(target, picker);
+      ui.elementPickerHint.textContent = `選択候補: ${pickerTargetLabel(target)}`;
+    };
+    const choose = event => {
+      suppressElementPickerEvent(event);
+      if (picker.finishing || state.elementPicker !== picker) return;
+      const target = preferredPickerTarget(event.target);
+      if (!target) {
+        ui.elementPickerHint.textContent = 'HTML要素を選択できませんでした。別の位置をタップしてください。';
+        return;
+      }
+      try {
+        const selector = uniqueElementSelector(target, doc);
+        const matches = doc.querySelectorAll(selector);
+        if (matches.length !== 1 || matches[0] !== target) {
+          throw new FlowError('選択した要素を一意に識別できませんでした', 'PICKER_SELECTOR_NOT_UNIQUE');
+        }
+        const location = findBlockLocation(picker.blockId);
+        if (!location || location.block.type !== 'iframeTapElement') {
+          throw new FlowError('設定対象のブロックが見つかりません', 'PICKER_BLOCK_MISSING');
+        }
+        const label = pickerTargetLabel(target);
+        picker.finishing = true;
+        updateBlockConfig(location.block, config => {
+          config.selector = selector;
+          config.targetLabel = label;
+        });
+        renderWorkflowEditor();
+        ui.elementPickerHint.textContent = `${label} を保存しました`;
+        picker.finishTimer = setTimeout(() => {
+          stopElementPicker({ message: `「${label}」を選択しました` });
+        }, 350);
+      } catch (error) {
+        ui.elementPickerHint.textContent = error.message;
+        toast(error.message);
+      }
+    };
+    const suppress = event => suppressElementPickerEvent(event);
+    const listeners = [
+      ['pointerover', preview, { capture: true, passive: true }],
+      ['pointerdown', choose, { capture: true, passive: false }],
+      ['touchstart', choose, { capture: true, passive: false }],
+      ['mousedown', choose, { capture: true, passive: false }],
+      ['click', suppress, { capture: true, passive: false }],
+      ['contextmenu', suppress, { capture: true, passive: false }]
+    ];
+    for (const [type, listener, options] of listeners) doc.addEventListener(type, listener, options);
+    picker.cleanupDocument = () => {
+      for (const [type, listener, options] of listeners) doc.removeEventListener(type, listener, options);
+    };
+  }
+
+  function startElementPicker(blockId) {
+    if (state.running || state.legacyRunning || state.recording) {
+      return toast('実行中または記録中はHTML要素を選択できません');
+    }
+    const location = findBlockLocation(blockId);
+    if (!location || location.block.type !== 'iframeTapElement') {
+      return toast('設定対象のブロックが見つかりません');
+    }
+    try {
+      frameDocument();
+    } catch (error) {
+      return toast(error.message);
+    }
+    if (state.elementPicker) stopElementPicker({ restoreFocus: false });
+    const picker = {
+      blockId,
+      frame: iframe,
+      highlighted: null,
+      cleanupDocument: null,
+      finishing: false,
+      finishTimer: null,
+      onFrameLoad: null,
+      onKeyDown: null
+    };
+    picker.onFrameLoad = () => {
+      if (state.elementPicker === picker) bindElementPickerDocument(picker);
+    };
+    picker.onKeyDown = event => {
+      if (event.key !== 'Escape' || state.elementPicker !== picker) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      stopElementPicker({ message: '要素選択をキャンセルしました' });
+    };
+    state.elementPicker = picker;
+    root.classList.add('element-picking');
+    ui.elementPickerHint.textContent = 'iframe内のHTML要素をタップしてください。実際のゲーム操作は発火しません。';
+    ui.elementPickerToolbar.hidden = false;
+    picker.frame.addEventListener('load', picker.onFrameLoad);
+    window.addEventListener('keydown', picker.onKeyDown, true);
+    bindElementPickerDocument(picker);
+    announce('押すボタンを画面から選択します');
+    requestAnimationFrame(() => ui.elementPickerCancel.focus({ preventScroll: true }));
   }
 
   function stopRuntimeTelemetry(win) {
@@ -4709,6 +5060,54 @@
         activeTapTargets.delete(target);
       }
     });
+  }
+
+  function configuredElementState(config) {
+    const selector = String(config.selector || '').trim();
+    if (!selector) throw new FlowError('押すボタンのセレクタが空です', 'TARGET_SELECTOR_EMPTY');
+    const doc = frameDocument();
+    let matches;
+    try {
+      matches = [...doc.querySelectorAll(selector)];
+    } catch {
+      throw new FlowError('押すボタンのセレクタ書式が不正です', 'INVALID_SELECTOR');
+    }
+    if (matches.length > 1) {
+      throw new FlowError(`押すボタンが${matches.length}件一致しました。画面から選び直してください`, 'TARGET_AMBIGUOUS');
+    }
+    const target = matches[0] || null;
+    if (!target || !computedVisible(target)) return false;
+    const disabled = Boolean(
+      ('disabled' in target && target.disabled)
+      || target.getAttribute('aria-disabled') === 'true'
+      || target.classList.contains('disabled')
+    );
+    return disabled ? false : { target, selector };
+  }
+
+  async function tapConfiguredElement(config, context) {
+    const selector = String(config.selector || '').trim();
+    const label = String(config.targetLabel || '').trim() || selector || '指定ボタン';
+    const timeoutMs = clamp(finite(config.timeoutSec, 30), 1, 600) * 1000;
+    const deadline = performance.now() + timeoutMs;
+    while (true) {
+      throwIfAborted(context.signal);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new FlowError(`${label}待ちがタイムアウトしました`, 'TIMEOUT');
+      const found = await monitorFrame(() => configuredElementState(config), {
+        signal: context.signal,
+        timeoutMs: remaining,
+        stableMs: 0,
+        description: `${label}待ち`,
+        observeCharacterData: false
+      });
+      try {
+        await jqTapStrict(found.target, { signal: context.signal, label });
+        return { selector, label };
+      } catch (error) {
+        if (error?.code !== 'STALE_TARGET') throw error;
+      }
+    }
   }
 
   function randomUniform(min, max, random = Math.random) {
@@ -6526,6 +6925,9 @@
         case 'watch':
           await waitForWorkflowCondition(block.config.condition, blockContext, { timeoutSec: block.config.timeoutSec, stableMs: block.config.stableMs });
           break;
+        case 'iframeTapElement':
+          await tapConfiguredElement(block.config, blockContext);
+          break;
         case 'iframeReload':
           {
             const before = captureFrameState({ includeDocument: false });
@@ -6591,7 +6993,7 @@
   }
 
   async function startWorkflow(resumeHandoff = null) {
-    if (state.running || state.legacyRunning) return;
+    if (state.running || state.legacyRunning || state.elementPicker) return;
     const restoreRunFocus = !resumeHandoff && (shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement));
     let workflow;
     let resumeRuntime = null;
@@ -7464,7 +7866,7 @@
   }
 
   async function startLegacy() {
-    if (state.legacyRunning || state.running || state.recording || !state.legacy.actions.length) return;
+    if (state.legacyRunning || state.running || state.recording || state.elementPicker || !state.legacy.actions.length) return;
     const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-legacy').contains(shadow.activeElement);
     commitActiveEditorInput();
     saveLegacyState();
@@ -8415,6 +8817,7 @@
     state.frameNavigationId += 1;
     stopEverything('終了');
     if (state.recording) finishLegacyRecording({ apply: false });
+    stopElementPicker({ restoreFocus: false });
     clearTimeout(state.toastTimer);
     clearTimeout(state.autosaveTimer);
     for (const timer of state.telemetryTimers) clearTimeout(timer);
@@ -8562,6 +8965,7 @@
   byId('legacyRecord').addEventListener('click', () => state.recording ? finishLegacyRecording({ apply: true }) : startLegacyRecording());
   byId('recordFinish').addEventListener('click', () => finishLegacyRecording({ apply: true }));
   byId('recordCancel').addEventListener('click', () => finishLegacyRecording({ apply: false }));
+  ui.elementPickerCancel.addEventListener('click', () => stopElementPicker({ message: '要素選択をキャンセルしました' }));
   ui.legacyRun.addEventListener('click', startLegacy);
   ui.legacyStop.addEventListener('click', () => stopLegacy());
   for (const input of [ui.legacyCount, ui.legacyJitter, ui.legacyPositionJitter]) input.addEventListener('change', () => {
@@ -8745,6 +9149,9 @@
     waitForFrameReady,
     performFrameOperation,
     jqTapStrict,
+    uniqueElementSelector,
+    configuredElementState,
+    tapConfiguredElement,
     ensureFullAuto,
     waitForAutoAttack,
     confirmAllUnclaimed,
