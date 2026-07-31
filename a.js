@@ -27,6 +27,8 @@
     let destroyed = false;
     let style = null;
     let pollTimer = null;
+    let pollDeadline = 0;
+    let battleRuntime = false;
     let soundFlagSnapshot = null;
     let createjsMuteSnapshot = null;
     let soundModulesRequested = false;
@@ -37,7 +39,12 @@
     const STAGE_RENDER_MARKER = '__autoFlowBattlePerformanceStageRender__';
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
-    const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
+    const refreshBattleRuntime = () => {
+      battleRuntime = isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
+      return battleRuntime;
+    };
+    const isBattleRuntime = () => battleRuntime;
+    refreshBattleRuntime();
     const shouldReplaceAsset = value => {
       if (!enabled || !isBattleRuntime()) return false;
       const url = String(value ?? '');
@@ -276,6 +283,7 @@
     }
 
     function patchNow() {
+      refreshBattleRuntime();
       ensureStyle();
       try { patchLoadQueue(); } catch {}
       if (isBattleRuntime()) {
@@ -288,16 +296,23 @@
     }
 
     function stopPoll() {
-      if (pollTimer == null) return;
-      window.clearInterval(pollTimer);
+      if (pollTimer != null) window.clearInterval(pollTimer);
       pollTimer = null;
+      pollDeadline = 0;
     }
 
-    function startPoll() {
+    function startPoll(durationMs = 30_000) {
+      if (!enabled || destroyed) return;
+      pollDeadline = Math.max(pollDeadline, performance.now() + durationMs);
       if (pollTimer != null) return;
       pollTimer = window.setInterval(() => {
+        if (!enabled || destroyed) {
+          stopPoll();
+          return;
+        }
         try { patchNow(); } catch {}
-      }, 100);
+        if (performance.now() >= pollDeadline) stopPoll();
+      }, 250);
     }
 
     function setEnabled(next) {
@@ -323,6 +338,16 @@
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
       setEnabled(readBattlePerformanceSetting());
     };
+    const onRouteChange = () => {
+      refreshBattleRuntime();
+      if (enabled) {
+        patchNow();
+        startPoll();
+      } else {
+        restoreStageRendering();
+        restoreSoundRuntime();
+      }
+    };
     const destroy = () => {
       if (destroyed) return;
       destroyed = true;
@@ -332,6 +357,10 @@
       restoreSoundRuntime();
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener('hashchange', onRouteChange);
+      window.removeEventListener('popstate', onRouteChange);
+      window.removeEventListener('pageshow', onRouteChange);
+      window.removeEventListener('load', onRouteChange);
       window.removeEventListener('pagehide', destroy);
       try { style?.remove(); } catch {}
       style = null;
@@ -350,6 +379,10 @@
     }
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
+    window.addEventListener('hashchange', onRouteChange);
+    window.addEventListener('popstate', onRouteChange);
+    window.addEventListener('pageshow', onRouteChange);
+    window.addEventListener('load', onRouteChange);
     window.addEventListener('pagehide', destroy, { once: true });
 
     window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {

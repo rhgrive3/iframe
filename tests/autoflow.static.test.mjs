@@ -375,14 +375,17 @@ test('battle performance hooks are isolated and restore audio outside battle rou
 });
 
 
-test('battle performance polling only runs while the persistent setting is enabled', () => {
+test('battle performance setup polling is bounded, route-aware, and disabled cleanly', () => {
   const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
-  assert.ok(child.includes('function startPoll()'));
+  assert.ok(child.includes('function startPoll(durationMs = 30_000)'));
   assert.ok(child.includes('function stopPoll()'));
-  assert.ok(child.includes('if (pollTimer != null) return;'));
+  assert.ok(child.includes('performance.now() >= pollDeadline'));
+  assert.ok(child.includes('}, 250);'));
+  assert.ok(!child.includes('}, 100);'));
+  assert.ok(child.includes('window.addEventListener(\'hashchange\', onRouteChange)'));
+  assert.ok(child.includes('window.removeEventListener(\'hashchange\', onRouteChange)'));
   assert.ok(child.includes('window.addEventListener(\'pagehide\', destroy, { once: true })'));
   assert.ok(child.includes('window.removeEventListener(\'message\', onMessage)'));
-  assert.ok(child.includes('destroy'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
   assert.ok(enabled.includes('startPoll();'));
   assert.ok(enabled.includes('stopPoll();'));
