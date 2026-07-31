@@ -17,6 +17,21 @@ test('selected button workflow block captures and taps one unique iframe element
   assert.ok(source.includes("if (block.type === 'iframeTapElement')"));
 });
 
+test('CSS identifier fallback preserves leading hyphen-digit identifiers', () => {
+  const helperStart = source.indexOf('function cssIdentifier');
+  const helperEnd = source.indexOf('function cssAttributeValue', helperStart);
+  const helperSource = source.slice(helperStart, helperEnd);
+  const cssIdentifier = new Function(
+    'window',
+    'document',
+    `${helperSource}; return cssIdentifier;`
+  )({ CSS: null }, { defaultView: { CSS: null } });
+  assert.equal(
+    cssIdentifier('-1tab', { defaultView: { CSS: null } }),
+    '\\2d \\31 tab'
+  );
+});
+
 test('top-level installation is guarded and replaces stale instances', () => {
   assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
   assert.ok(source.includes('if (window.top !== window) {'));
@@ -339,7 +354,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 64'));
+  assert.ok(source.includes('const APP_VERSION = 65'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -626,8 +641,8 @@ test('parent-page restart handoff persists ownership and safe fallbacks', () => 
   assert.ok(handoff.includes('if (window.name !== handoff.targetName) return null'));
   assert.ok(handoff.includes('handoff.claimedBy && handoff.claimedBy !== instanceId'));
   assert.ok(handoff.includes('window.open(handoff.parentUrl, handoff.targetName)'));
-  assert.ok(handoff.includes("phase: 'committed', mode: 'same-tab'"));
-  assert.ok(handoff.includes('location.replace(handoff.parentUrl)'));
+  assert.ok(handoff.includes("phase: 'committed',\n      mode: 'same-tab'"));
+  assert.ok(handoff.includes('location.replace(fallback.parentUrl)'));
   assert.ok(handoff.includes("location.replace('about:blank')"));
   assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
 });

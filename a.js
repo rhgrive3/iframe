@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 64;
+  const APP_VERSION = 65;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -3496,7 +3496,7 @@
     const escape = doc.defaultView?.CSS?.escape || window.CSS?.escape;
     if (escape) return escape(String(value));
     return String(value).replace(/(^-?\d)|[^a-zA-Z0-9_-]/g, match =>
-      `\\${match.codePointAt(0).toString(16)} `
+      [...match].map(char => `\\${char.codePointAt(0).toString(16)} `).join('')
     );
   }
 
