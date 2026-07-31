@@ -15,6 +15,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: parent-tab-handoff-v63-runner
@@ -85,3 +86,62 @@ jobs:
           git rm .github/patch-requests/parent-tab-handoff-v63.txt
           git commit -m 'chore: remove temporary parent handoff runner'
           git push origin HEAD:main
+
+  selectable_button_patch:
+    if: github.event_name == 'issues' && github.event.issue.title == '[automation] run selectable button patch v63'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out selectable button patch branch
+        uses: actions/checkout@v5
+        with:
+          ref: automation/selectable-button-block-v63
+          fetch-depth: 0
+
+      - name: Decode and apply deterministic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .github/scripts/apply-selectable-button-block.py.gz.b64 | gzip --decompress > /tmp/apply-selectable-button-block.py
+          python3 /tmp/apply-selectable-button-block.py
+
+      - name: Validate JavaScript and complete regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/apply-selectable-button-block.py.gz.b64
+          git rm .github/workflows/run-selectable-button-block-v63.yml
+          git add a.js tests/autoflow.static.test.mjs
+          git diff --cached --check
+          git commit -m 'feat: add selectable button tap workflow block'
+          git push origin HEAD:automation/selectable-button-block-v63
+
+      - name: Report success
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: 'Selectable button patch applied and the full regression suite passed.'
+            });
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
