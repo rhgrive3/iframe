@@ -163,7 +163,7 @@ jobs:
           ref: automation/selectable-button-block-v63
           fetch-depth: 0
 
-      - name: Merge latest main and validate
+      - name: Merge latest main, resolve known conflicts, and validate
         id: merge
         continue-on-error: true
         shell: bash
@@ -173,14 +173,55 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch --no-tags origin main
-          if ! git merge --no-edit origin/main; then
-            echo '--- unresolved files ---'
-            git diff --name-only --diff-filter=U
-            echo '--- a.js conflict markers ---'
-            grep -n -B 80 -A 140 -E '^(<<<<<<<|=======|>>>>>>>)' a.js || true
-            echo '--- test conflict markers ---'
-            grep -n -B 40 -A 80 -E '^(<<<<<<<|=======|>>>>>>>)' tests/autoflow.static.test.mjs || true
-            exit 1
+          merge_failed=0
+          git merge --no-edit origin/main || merge_failed=1
+          if (( merge_failed )); then
+            python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('a.js')
+          text = path.read_text()
+          resolved = []
+          cursor = 0
+          while True:
+              start = text.find('<<<<<<< HEAD\n', cursor)
+              if start < 0:
+                  break
+              middle = text.find('=======\n', start)
+              end = text.find('>>>>>>> origin/main\n', middle)
+              if middle < 0 or end < 0:
+                  raise SystemExit('malformed merge conflict markers')
+              ours = text[start + len('<<<<<<< HEAD\n'):middle]
+              theirs = text[middle + len('=======\n'):end]
+              if 'iframeTapElement' in ours and 'parentTabRestart' in theirs and 'blockListGuaranteesYield' not in ours:
+                  replacement = "      if (['fixedWait', 'randomWait', 'watch', 'iframeTapElement', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady', 'parentTabRestart'].includes(block.type)) return true;\n"
+              elif 'async function startWorkflow()' in ours and 'async function startWorkflow(resumeHandoff = null)' in theirs:
+                  replacement = theirs.replace(
+                      'if (state.running || state.legacyRunning) return;',
+                      'if (state.running || state.legacyRunning || state.elementPicker) return;',
+                      1
+                  )
+              else:
+                  raise SystemExit(f'unexpected a.js conflict:\nOURS:\n{ours}\nTHEIRS:\n{theirs}')
+              text = text[:start] + replacement + text[end + len('>>>>>>> origin/main\n'):]
+              resolved.append(replacement.splitlines()[0])
+              cursor = start + len(replacement)
+          if not resolved:
+              raise SystemExit('no expected a.js conflicts were resolved')
+          if any(marker in text for marker in ('<<<<<<<', '=======', '>>>>>>>')):
+              raise SystemExit('unresolved conflict marker remains in a.js')
+          path.write_text(text)
+          print('Resolved conflicts:')
+          for item in resolved:
+              print('-', item)
+          PY
+            if git diff --name-only --diff-filter=U | grep -q .; then
+              echo 'unresolved files remain:'
+              git diff --name-only --diff-filter=U
+              exit 1
+            fi
+            git add -A
+            git commit --no-edit
           fi
           node --check a.js
           node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
