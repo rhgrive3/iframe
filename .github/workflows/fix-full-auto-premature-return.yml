@@ -1,0 +1,46 @@
+name: Fix full-auto premature return
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/patch-requests/fix-full-auto-premature-return.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-full-auto-premature-return
+  cancel-in-progress: false
+
+jobs:
+  patch-main:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply guarded full-auto startup patch
+        run: python3 .github/scripts/fix_full_auto_premature_return.py
+
+      - name: Validate JavaScript and all regressions
+        run: |
+          node --check a.js
+          for test_file in tests/*.test.mjs; do
+            node --test "$test_file"
+          done
+
+      - name: Commit hotfix directly to main
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/fix-full-auto-premature-return.yml
+          git rm .github/scripts/fix_full_auto_premature_return.py
+          git add a.js tests/autoflow.static.test.mjs
+          git commit -m "fix: gate battle end until full-auto startup is live"
+          git push origin HEAD:main
