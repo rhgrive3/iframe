@@ -32,8 +32,9 @@
     let soundModulesRequested = false;
     const soundRestorers = [];
     const patchedSoundObjects = new WeakSet();
+    const patchedStages = new Map();
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
-    const RENDER_MARKER = '__autoFlowBattlePerformanceRender__';
+    const STAGE_RENDER_MARKER = '__autoFlowBattlePerformanceStageRender__';
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
     const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
@@ -45,13 +46,6 @@
         || /\/sp\/assets\/enemy\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url);
     };
     const rewriteAsset = value => shouldReplaceAsset(value) ? BATTLE_PERFORMANCE_TRANSPARENT_IMAGE : value;
-    const battleCanvas = canvas => Boolean(
-      enabled
-      && isBattleRuntime()
-      && canvas
-      && canvas.ownerDocument === document
-      && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
-    );
 
     function ensureStyle() {
       if (!style || !style.isConnected) {
@@ -119,25 +113,64 @@
       }
     }
 
-    function patchRenderMethod(prototype, name) {
-      const original = prototype?.[name];
-      if (typeof original !== 'function' || original[RENDER_MARKER]) return;
-      const wrapped = function (...args) {
-        if (battleCanvas(this?.canvas)) return undefined;
-        return original.apply(this, args);
-      };
-      try { Object.defineProperty(wrapped, RENDER_MARKER, { value: true }); } catch {}
-      try { prototype[name] = wrapped; } catch {}
+    function battleStage(stage) {
+      try {
+        const canvas = stage?.canvas;
+        return Boolean(
+          stage
+          && canvas
+          && canvas.ownerDocument === document
+          && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
+        );
+      } catch {
+        return false;
+      }
     }
 
-    function patchRendering() {
-      for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
-        patchRenderMethod(constructor?.prototype, 'drawArrays');
-        patchRenderMethod(constructor?.prototype, 'drawElements');
-        patchRenderMethod(constructor?.prototype, 'drawArraysInstanced');
-        patchRenderMethod(constructor?.prototype, 'drawElementsInstanced');
+    function restoreStageRendering() {
+      for (const [stage, snapshot] of patchedStages) {
+        try {
+          if (stage[snapshot.name] !== snapshot.wrapper) continue;
+          if (snapshot.hadOwn) stage[snapshot.name] = snapshot.original;
+          else delete stage[snapshot.name];
+        } catch {}
       }
-      patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage');
+      patchedStages.clear();
+    }
+
+    function patchStageRendering() {
+      if (!enabled || !isBattleRuntime()) return false;
+      const candidates = new Set([
+        window.stage,
+        window.Game?.view?.stage,
+        window.exportRoot?.stage
+      ].filter(Boolean));
+      let ready = false;
+      for (const stage of candidates) {
+        if (!battleStage(stage)) continue;
+        if (patchedStages.has(stage)) {
+          ready = true;
+          continue;
+        }
+        const name = typeof stage.ra === 'function'
+          ? 'ra'
+          : typeof stage.draw === 'function' ? 'draw' : null;
+        if (!name) continue;
+        const original = stage[name];
+        const wrapper = function () { return true; };
+        try { Object.defineProperty(wrapper, STAGE_RENDER_MARKER, { value: true }); } catch {}
+        try {
+          stage[name] = wrapper;
+          patchedStages.set(stage, {
+            name,
+            original,
+            wrapper,
+            hadOwn: Object.prototype.hasOwnProperty.call(stage, name)
+          });
+          ready = true;
+        } catch {}
+      }
+      return ready;
     }
 
     function resolvedLoad() {
@@ -245,11 +278,12 @@
     function patchNow() {
       ensureStyle();
       try { patchLoadQueue(); } catch {}
-      try { patchRendering(); } catch {}
       if (isBattleRuntime()) {
+        try { patchStageRendering(); } catch {}
         try { patchSoundRuntime(); } catch {}
       } else {
         restoreSoundRuntime();
+        restoreStageRendering();
       }
     }
 
@@ -275,6 +309,7 @@
         startPoll();
       } else {
         stopPoll();
+        restoreStageRendering();
         restoreSoundRuntime();
       }
     }
@@ -293,6 +328,7 @@
       destroyed = true;
       enabled = false;
       stopPoll();
+      restoreStageRendering();
       restoreSoundRuntime();
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
@@ -307,7 +343,6 @@
     };
 
     patchImageSources();
-    patchRendering();
     ensureStyle();
     if (enabled) {
       patchNow();
