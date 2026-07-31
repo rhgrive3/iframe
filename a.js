@@ -480,6 +480,11 @@
   const WORKFLOW_STORAGE_KEY = '__fullscreen_iframe_autoclicker_workflows_v1__';
   const WORKFLOW_AUTOSAVE_KEY = '__fullscreen_iframe_autoclicker_workflow_autosave_v1__';
   const WORKFLOW_CHECKPOINT_KEY = '__fullscreen_iframe_autoclicker_workflow_checkpoint_v1__';
+  const WORKFLOW_HANDOFF_KEY = '__fullscreen_iframe_autoclicker_workflow_handoff_v1__';
+  const WORKFLOW_HANDOFF_SCHEMA_VERSION = 1;
+  const WORKFLOW_HANDOFF_TTL_MS = 5 * 60_000;
+  const WORKFLOW_HANDOFF_READY_TIMEOUT_MS = 45_000;
+  const WORKFLOW_HANDOFF_POLL_MS = 100;
   const MAX_REPEAT_COUNT = 10_000;
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
@@ -1796,6 +1801,7 @@
     gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
     gbfMyPage: { category: 'gbf', label: 'MyPageボタンを押す', description: '即座にゲーム標準の完全再読込でMyPageへ戻る' },
     gbfReleaseResources: { category: 'gbf', label: 'Safariメモリを解放して戻る', description: '即座にMyPageを経由し、Canvas・音声・旧Viewを解放して指定画面へ戻る' },
+    parentTabRestart: { category: 'frame', label: '親ページを完全再起動して続行', description: '進行位置を保存し、新しい親タブへ移譲。新規タブが拒否された場合は同じタブを完全再起動' },
     repeat: { category: 'control', label: '指定回数繰り返す', description: '子ブロックを指定回数実行', container: true },
     repeatUntil: { category: 'control', label: '条件成立まで繰り返す', description: '前判定型。成立済みなら0回', container: true },
     if: { category: 'control', label: '条件分岐', description: '成立時と不成立時の子ブロックを分岐', container: true, elseBranch: true },
@@ -3182,7 +3188,7 @@
     visit(workflow.blocks);
     const blockListGuaranteesYield = blocks => blocks.some(block => {
       if (block.type === 'stop') return true;
-      if (['fixedWait', 'randomWait', 'watch', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady'].includes(block.type)) return true;
+      if (['fixedWait', 'randomWait', 'watch', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady', 'parentTabRestart'].includes(block.type)) return true;
       if (BLOCK_DEFINITIONS[block.type]?.category === 'gbf') return true;
       if (block.type === 'repeat' && int(block.config.count) > 0) return blockListGuaranteesYield(block.children || []);
       if (block.type === 'if') {
@@ -6134,14 +6140,270 @@
     if (badge.textContent !== text) badge.textContent = text;
   }
 
-  async function runBlockList(blocks, context) {
-    for (const block of blocks) {
-      throwIfAborted(context.signal);
-      await executeWorkflowBlock(block, context);
+  function createWorkflowExecutionState(value = null) {
+    const stateValue = value && typeof value === 'object' ? value : {};
+    const listFrames = Object.create(null);
+    const controlFrames = Object.create(null);
+    for (const [key, frame] of Object.entries(stateValue.listFrames || {})) {
+      if (!key || !frame || typeof frame !== 'object') continue;
+      listFrames[key] = { index: Math.max(0, int(frame.index, 0)) };
+    }
+    for (const [key, frame] of Object.entries(stateValue.controlFrames || {})) {
+      if (!key || !frame || typeof frame !== 'object') continue;
+      controlFrames[key] = deepClone(frame);
+    }
+    return { listFrames, controlFrames };
+  }
+
+  function executionListFrame(context, key) {
+    const frames = context.executionState.listFrames;
+    if (!frames[key]) frames[key] = { index: 0 };
+    return frames[key];
+  }
+
+  function executionControlFrame(context, key, factory) {
+    const frames = context.executionState.controlFrames;
+    if (!frames[key]) frames[key] = factory();
+    return frames[key];
+  }
+
+  function removeExecutionControlFrame(context, key) {
+    delete context.executionState.controlFrames[key];
+  }
+
+  function workflowParentUrl() {
+    const url = new URL('/', location.origin);
+    url.hash = 'mypage';
+    return url.href;
+  }
+
+  function readWorkflowHandoff() {
+    try {
+      const value = JSON.parse(localStorage.getItem(WORKFLOW_HANDOFF_KEY) || 'null');
+      return value && typeof value === 'object' ? value : null;
+    } catch {
+      return null;
     }
   }
 
-  async function executeWorkflowBlock(block, context) {
+  function writeWorkflowHandoff(value) {
+    try {
+      localStorage.setItem(WORKFLOW_HANDOFF_KEY, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function clearWorkflowHandoff(id = null) {
+    try {
+      const current = readWorkflowHandoff();
+      if (!id || current?.id === id) localStorage.removeItem(WORKFLOW_HANDOFF_KEY);
+    } catch {}
+  }
+
+  function validWorkflowHandoff(value) {
+    if (!value || value.schemaVersion !== WORKFLOW_HANDOFF_SCHEMA_VERSION || value.appVersion !== APP_VERSION) return false;
+    if (!value.id || !value.targetName || !value.workflow || !value.runtime) return false;
+    if (!Number.isFinite(value.createdAt) || !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now()) return false;
+    try {
+      if (JSON.stringify(value).length > MAX_IMPORT_BYTES) return false;
+      const workflow = normalizeWorkflow(value.workflow);
+      return !validateWorkflowDefinition(workflow).some(issue => issue.severity === 'error');
+    } catch {
+      return false;
+    }
+  }
+
+  function claimPendingWorkflowHandoff() {
+    const handoff = readWorkflowHandoff();
+    if (!handoff) return null;
+    if (!validWorkflowHandoff(handoff)) {
+      clearWorkflowHandoff(handoff.id);
+      return null;
+    }
+    if (window.name !== handoff.targetName) return null;
+    if (handoff.claimedBy && handoff.claimedBy !== instanceId) return null;
+    const claimed = {
+      ...handoff,
+      phase: handoff.phase === 'committed' ? 'committed' : 'claimed',
+      claimedBy: instanceId,
+      claimedAt: Date.now()
+    };
+    if (!writeWorkflowHandoff(claimed)) return null;
+    const confirmed = readWorkflowHandoff();
+    return confirmed?.id === claimed.id && confirmed.claimedBy === instanceId ? confirmed : null;
+  }
+
+  function handoffFrameUrl() {
+    const candidate = currentFrameUrl();
+    try {
+      const url = new URL(candidate, location.href);
+      if (/^https?:$/.test(url.protocol) && url.origin === location.origin) return url.href;
+    } catch {}
+    return normalizeInitialUrl();
+  }
+
+  function createWorkflowHandoff(context) {
+    const id = nowId('handoff');
+    const createdAt = Date.now();
+    return {
+      schemaVersion: WORKFLOW_HANDOFF_SCHEMA_VERSION,
+      appVersion: APP_VERSION,
+      id,
+      targetName: `autoflow-handoff-${id}`,
+      phase: 'offered',
+      ownerInstanceId: instanceId,
+      createdAt,
+      expiresAt: createdAt + WORKFLOW_HANDOFF_TTL_MS,
+      parentUrl: workflowParentUrl(),
+      iframeUrl: handoffFrameUrl(),
+      workflow: deepClone(context.workflow),
+      runtime: {
+        cycle: context.cycle,
+        totalCycles: context.totalCycles,
+        restartCount: context.restartCount,
+        completedBattles: context.completedBattles,
+        recentRaidIds: Array.from(context.recentRaidIds || []),
+        battleRecoveryConfig: context.battleRecoveryConfig ? deepClone(context.battleRecoveryConfig) : null,
+        executionState: deepClone(context.executionState)
+      }
+    };
+  }
+
+  async function beginWorkflowParentRestart(context) {
+    throwIfAborted(context.signal);
+    commitActiveEditorInput();
+    flushWorkflowStore();
+    saveLegacyState();
+    clearPendingAutoAttack('親ページの引継ぎを開始します');
+    const handoff = createWorkflowHandoff(context);
+    if (!writeWorkflowHandoff(handoff)) {
+      throw new FlowError('進行内容を保存できないため、親ページを再起動しませんでした', 'HANDOFF_SAVE_FAILED');
+    }
+
+    let opened = null;
+    try { opened = window.open(handoff.parentUrl, handoff.targetName); } catch {}
+    if (!opened) {
+      const committed = { ...handoff, phase: 'committed', mode: 'same-tab', committedAt: Date.now() };
+      if (!writeWorkflowHandoff(committed)) {
+        clearWorkflowHandoff(handoff.id);
+        throw new FlowError('新規タブが拒否され、同一タブ用の進行保存にも失敗しました', 'HANDOFF_FALLBACK_SAVE_FAILED');
+      }
+      window.name = handoff.targetName;
+      appendLog('新規タブが拒否されたため、同じタブを完全再起動します', 'warn', '親ページ再起動');
+      setStatus('進行を保存して親ページを再起動');
+      try { location.replace(handoff.parentUrl); }
+      catch (error) {
+        clearWorkflowHandoff(handoff.id);
+        throw new FlowError(`親ページを再起動できませんでした: ${error.message}`, 'HANDOFF_NAVIGATION_FAILED');
+      }
+      return new Promise(() => {});
+    }
+
+    appendLog('新しい親タブへ進行内容を移譲しています', '', '親ページ再起動');
+    setStatus('新しい親タブの準備待ち');
+    const deadline = Date.now() + WORKFLOW_HANDOFF_READY_TIMEOUT_MS;
+    try {
+      while (Date.now() < deadline) {
+        throwIfAborted(context.signal);
+        let closed = false;
+        try { closed = opened.closed; } catch {}
+        if (closed) throw new FlowError('新しい親タブが準備完了前に閉じられました', 'HANDOFF_TARGET_CLOSED');
+        const current = readWorkflowHandoff();
+        if (current?.id !== handoff.id) {
+          throw new FlowError('進行引継ぎデータが別の処理に置き換えられました', 'HANDOFF_REPLACED');
+        }
+        if (current.phase === 'failed') {
+          throw new FlowError(current.error || '新しい親タブの初期化に失敗しました', 'HANDOFF_TARGET_FAILED');
+        }
+        if (current.phase === 'ready' && current.claimedBy && current.claimedBy !== instanceId) {
+          const committed = { ...current, phase: 'committed', committedAt: Date.now() };
+          if (!writeWorkflowHandoff(committed)) {
+            throw new FlowError('引継ぎ確定状態を保存できませんでした', 'HANDOFF_COMMIT_FAILED');
+          }
+          appendLog('進行内容の移譲が完了しました', 'success', '親ページ再起動');
+          setStatus('新しい親タブへ移行しました');
+          try { window.close(); } catch {}
+          setTimeout(() => {
+            try {
+              if (!window.closed) location.replace('about:blank');
+            } catch {}
+          }, 80);
+          return new Promise(() => {});
+        }
+        await new Promise(resolve => setTimeout(resolve, WORKFLOW_HANDOFF_POLL_MS));
+      }
+      throw new FlowError('新しい親タブの準備がタイムアウトしました', 'HANDOFF_READY_TIMEOUT');
+    } catch (error) {
+      try { opened.close(); } catch {}
+      clearWorkflowHandoff(handoff.id);
+      throw error;
+    }
+  }
+
+  async function resumeClaimedWorkflowHandoff(handoff) {
+    try {
+      setStatus('保存した画面を復元中');
+      await waitForFrameReady({
+        timeoutMs: WORKFLOW_HANDOFF_READY_TIMEOUT_MS,
+        expectedScreen: 'auto',
+        requireChange: false
+      });
+      let current = readWorkflowHandoff();
+      if (current?.id !== handoff.id || current.claimedBy !== instanceId) {
+        throw new FlowError('進行引継ぎの所有権を確認できませんでした', 'HANDOFF_CLAIM_LOST');
+      }
+      if (current.phase !== 'committed') {
+        current = { ...current, phase: 'ready', readyAt: Date.now() };
+        if (!writeWorkflowHandoff(current)) throw new FlowError('準備完了状態を保存できませんでした', 'HANDOFF_READY_SAVE_FAILED');
+        setStatus('旧タブの終了待ち');
+        while (Date.now() < current.expiresAt) {
+          await new Promise(resolve => setTimeout(resolve, WORKFLOW_HANDOFF_POLL_MS));
+          const next = readWorkflowHandoff();
+          if (next?.id !== handoff.id || next.claimedBy !== instanceId) {
+            throw new FlowError('進行引継ぎデータが失われました', 'HANDOFF_LOST');
+          }
+          if (next.phase === 'committed') {
+            current = next;
+            break;
+          }
+          if (next.phase === 'failed') throw new FlowError(next.error || '進行引継ぎに失敗しました', 'HANDOFF_FAILED');
+        }
+      }
+      if (current.phase !== 'committed') throw new FlowError('旧タブから引継ぎ確定を受信できませんでした', 'HANDOFF_COMMIT_TIMEOUT');
+      window.name = '';
+      const runPromise = startWorkflow(current);
+      await Promise.resolve();
+      if (state.running) clearWorkflowHandoff(current.id);
+      await runPromise;
+    } catch (error) {
+      const current = readWorkflowHandoff();
+      if (current?.id === handoff.id && current.claimedBy === instanceId && current.phase !== 'committed') {
+        writeWorkflowHandoff({ ...current, phase: 'failed', error: error.message, failedAt: Date.now() });
+      }
+      window.name = '';
+      showWorkflowError(error, null);
+      setStatus('進行復元に失敗');
+    }
+  }
+
+  async function runBlockList(blocks, context, listKey = 'root') {
+    const frame = executionListFrame(context, listKey);
+    while (frame.index < blocks.length) {
+      throwIfAborted(context.signal);
+      const index = frame.index;
+      const block = blocks[index];
+      const definition = BLOCK_DEFINITIONS[block.type];
+      const execution = { listKey, blockKey: `${listKey}/${index}:${block.id}` };
+      if (!definition?.container) frame.index = index + 1;
+      await executeWorkflowBlock(block, context, execution);
+      if (definition?.container) frame.index = index + 1;
+    }
+    if (listKey !== 'root') delete context.executionState.listFrames[listKey];
+  }
+
+  async function executeWorkflowBlock(block, context, execution = { listKey: 'root', blockKey: `root/${block.id}` }) {
     const definition = BLOCK_DEFINITIONS[block.type];
     if (!definition) throw new FlowError(`未対応ブロックです: ${block.type}`, 'UNKNOWN_BLOCK');
     setRunningBlock(context, block);
@@ -6196,37 +6458,63 @@
         case 'gbfReleaseResources':
           await releaseGranblueResources(block.config, blockContext);
           break;
+        case 'parentTabRestart':
+          await beginWorkflowParentRestart(context);
+          break;
         case 'repeat': {
           const count = clamp(int(block.config.count, 0), 0, MAX_REPEAT_COUNT);
-          for (let index = 0; index < count; index++) {
+          const controlKey = `${execution.blockKey}/repeat`;
+          const childKey = `${execution.blockKey}/children`;
+          const control = executionControlFrame(context, controlKey, () => ({ kind: 'repeat', iteration: 0 }));
+          while (control.iteration < count) {
             throwIfAborted(context.signal);
-            updateBlockProgress(context, block, `${index + 1} / ${count}回目`);
-            await runBlockList(block.children, context);
-            if ((index + 1) % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
+            updateBlockProgress(context, block, `${control.iteration + 1} / ${count}回目`);
+            await runBlockList(block.children, context, childKey);
+            control.iteration += 1;
+            if (control.iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
           }
+          removeExecutionControlFrame(context, controlKey);
           break;
         }
         case 'repeatUntil': {
-          const startedAt = performance.now();
           const maxIterations = clamp(int(block.config.maxIterations, MAX_CONDITION_ITERATIONS), 1, 100000);
           const maxDurationMs = clamp(finite(block.config.maxDurationSec, 600), 1, 86400) * 1000;
-          let iteration = 0;
-          while (!evaluateWorkflowCondition(block.config.condition)) {
+          const controlKey = `${execution.blockKey}/repeatUntil`;
+          const childKey = `${execution.blockKey}/children`;
+          const control = executionControlFrame(context, controlKey, () => ({
+            kind: 'repeatUntil',
+            iteration: 0,
+            startedAt: Date.now(),
+            inIteration: false
+          }));
+          while (true) {
             throwIfAborted(context.signal);
-            if (iteration >= maxIterations) throw new FlowError('条件ループの最大反復回数に達しました', 'LOOP_ITERATION_LIMIT');
-            if (performance.now() - startedAt >= maxDurationMs) throw new FlowError('条件ループの最大実行時間に達しました', 'LOOP_DURATION_LIMIT');
-            iteration += 1;
-            updateBlockProgress(context, block, `${iteration}回目`);
-            await runBlockList(block.children, context);
-            if (iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
-            if (evaluateWorkflowCondition(block.config.condition)) break;
+            if (!control.inIteration) {
+              if (evaluateWorkflowCondition(block.config.condition)) break;
+              if (control.iteration >= maxIterations) throw new FlowError('条件ループの最大反復回数に達しました', 'LOOP_ITERATION_LIMIT');
+              if (Date.now() - finite(control.startedAt, Date.now()) >= maxDurationMs) throw new FlowError('条件ループの最大実行時間に達しました', 'LOOP_DURATION_LIMIT');
+              control.iteration += 1;
+              control.inIteration = true;
+            }
+            updateBlockProgress(context, block, `${control.iteration}回目`);
+            await runBlockList(block.children, context, childKey);
+            control.inIteration = false;
+            if (control.iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
           }
+          removeExecutionControlFrame(context, controlKey);
           break;
         }
-        case 'if':
-          if (evaluateWorkflowCondition(block.config.condition)) await runBlockList(block.children, context);
-          else await runBlockList(block.elseChildren, context);
+        case 'if': {
+          const controlKey = `${execution.blockKey}/if`;
+          const control = executionControlFrame(context, controlKey, () => ({
+            kind: 'if',
+            branch: evaluateWorkflowCondition(block.config.condition) ? 'children' : 'elseChildren'
+          }));
+          const branch = control.branch === 'elseChildren' ? 'elseChildren' : 'children';
+          await runBlockList(block[branch], context, `${execution.blockKey}/${branch}`);
+          removeExecutionControlFrame(context, controlKey);
           break;
+        }
         case 'stop':
           throw new FlowStop(block.config.reason);
         case 'fixedWait':
@@ -6302,11 +6590,30 @@
     }
   }
 
-  async function startWorkflow() {
+  async function startWorkflow(resumeHandoff = null) {
     if (state.running || state.legacyRunning) return;
-    const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement);
-    const workflow = prepareWorkflowRun();
-    if (!workflow) return;
+    const restoreRunFocus = !resumeHandoff && (shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement));
+    let workflow;
+    let resumeRuntime = null;
+    if (resumeHandoff) {
+      try {
+        if (!validWorkflowHandoff(resumeHandoff) || resumeHandoff.phase !== 'committed') {
+          throw new FlowError('保存された進行内容が無効または期限切れです', 'HANDOFF_INVALID');
+        }
+        workflow = normalizeWorkflow(deepClone(resumeHandoff.workflow));
+        const errors = validateWorkflowDefinition(workflow).filter(issue => issue.severity === 'error');
+        if (errors.length) throw new FlowError(errors[0].message, 'HANDOFF_WORKFLOW_INVALID');
+        resumeRuntime = resumeHandoff.runtime;
+      } catch (error) {
+        clearWorkflowHandoff(resumeHandoff?.id);
+        showWorkflowError(error, null);
+        setStatus('進行復元に失敗');
+        return;
+      }
+    } else {
+      workflow = prepareWorkflowRun();
+      if (!workflow) return;
+    }
     clearWorkflowError();
     const controller = new AbortController();
     const context = {
@@ -6315,13 +6622,19 @@
       workflow,
       currentBlockId: null,
       startedAt: performance.now(),
-      cycle: 0,
-      totalCycles: null,
-      restartCount: 0,
-      completedBattles: 0,
+      cycle: resumeRuntime ? Math.max(1, int(resumeRuntime.cycle, 1)) : 0,
+      totalCycles: resumeRuntime?.totalCycles ?? null,
+      restartCount: Math.max(0, int(resumeRuntime?.restartCount, 0)),
+      completedBattles: Math.max(0, int(resumeRuntime?.completedBattles, 0)),
       recentRaidIds: new Set(),
-      battleRecoveryConfig: null
+      battleRecoveryConfig: resumeRuntime?.battleRecoveryConfig && typeof resumeRuntime.battleRecoveryConfig === 'object'
+        ? deepClone(resumeRuntime.battleRecoveryConfig)
+        : null,
+      executionState: createWorkflowExecutionState(resumeRuntime?.executionState)
     };
+    if (Array.isArray(resumeRuntime?.recentRaidIds)) {
+      for (const raidId of resumeRuntime.recentRaidIds) context.recentRaidIds.add(String(raidId));
+    }
     state.running = context;
     resetBattleEndDetection();
     const restoreExpandedDock = enterRuntimeCompactMode();
@@ -6331,23 +6644,37 @@
       renderWorkflowEditor();
     }
     if (restoreRunFocus) requestAnimationFrame(() => (lightweightMode ? byId('compactRun') : ui.stopWorkflow).focus({ preventScroll: true }));
-    appendLog(`ワークフロー「${workflow.name}」を開始`);
+    appendLog(resumeHandoff
+      ? `ワークフロー「${workflow.name}」を保存位置から再開`
+      : `ワークフロー「${workflow.name}」を開始`);
     try {
       const loopCount = clamp(int(workflow.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
       const loopInfinite = Boolean(workflow.loopInfinite);
-      let cycle = 0;
-      while (!controller.signal.aborted && (loopInfinite || cycle < loopCount)) {
+      let cycle = resumeRuntime ? Math.max(1, int(resumeRuntime.cycle, 1)) : 0;
+      if (!loopInfinite) cycle = Math.min(cycle, loopCount);
+      let resumeCurrentCycle = Boolean(resumeRuntime);
+      while (!controller.signal.aborted && (resumeCurrentCycle || loopInfinite || cycle < loopCount)) {
         clearPendingAutoAttack('次のワークフロー周回を開始します');
-        cycle += 1;
-        context.cycle = cycle;
-        context.totalCycles = loopInfinite ? null : loopCount;
-        const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
-        appendLog(`${cycleLabel}を開始`, '', workflow.name);
-        setStatus(`${workflow.name} · ${cycleLabel}`);
+        if (resumeCurrentCycle) {
+          resumeCurrentCycle = false;
+          context.cycle = cycle;
+          context.totalCycles = loopInfinite ? null : loopCount;
+          const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
+          appendLog(`${cycleLabel}を保存位置から再開`, '', workflow.name);
+          setStatus(`${workflow.name} · ${cycleLabel}を再開`);
+        } else {
+          cycle += 1;
+          context.cycle = cycle;
+          context.totalCycles = loopInfinite ? null : loopCount;
+          context.executionState = createWorkflowExecutionState();
+          const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
+          appendLog(`${cycleLabel}を開始`, '', workflow.name);
+          setStatus(`${workflow.name} · ${cycleLabel}`);
+        }
 
         while (!controller.signal.aborted) {
           try {
-            await runBlockList(workflow.blocks, context);
+            await runBlockList(workflow.blocks, context, 'root');
             break;
           } catch (error) {
             if (!(error instanceof FlowRestart)) throw error;
@@ -6355,12 +6682,14 @@
             if (context.restartCount > MAX_WORKFLOW_RESTARTS) {
               throw new FlowError('敵撃破後の自動再開回数が安全上限に達しました', 'WORKFLOW_RESTART_LIMIT');
             }
+            context.executionState = createWorkflowExecutionState();
             clearPendingAutoAttack('ワークフロー先頭から再開します');
             setRunningBlock(context, null);
             appendLog(error.message, 'warn', '自動復帰');
             setStatus(`${workflow.name} · 先頭から再開`);
           }
         }
+        context.executionState = createWorkflowExecutionState();
       }
       appendLog(`ワークフロー「${workflow.name}」が${cycle}周完了`, 'success');
       setStatus('ワークフロー完了');
@@ -8375,12 +8704,16 @@
     positionDock();
     (dock.classList.contains('compact') ? byId('compactGrip') : byId('tab-workflow')).focus({ preventScroll: true });
   });
+  const pendingWorkflowHandoff = claimPendingWorkflowHandoff();
   const initialUrl = normalizeInitialUrl();
-  urlInput.value = initialUrl;
+  const requestedInitialUrl = pendingWorkflowHandoff?.iframeUrl || initialUrl;
+  urlInput.value = requestedInitialUrl;
   try {
-    if (new URL(initialUrl, location.href).origin === location.origin) releaseHostRuntimeOnce();
+    if (new URL(requestedInitialUrl, location.href).origin === location.origin) releaseHostRuntimeOnce();
   } catch {}
-  iframe.src = initialUrl;
+  if (pendingWorkflowHandoff) iframe.src = pendingWorkflowHandoff.iframeUrl;
+  else iframe.src = initialUrl;
+  if (pendingWorkflowHandoff) void resumeClaimedWorkflowHandoff(pendingWorkflowHandoff);
 
   window.__AUTO_TEST__ = {
     APP_VERSION,
@@ -8417,6 +8750,9 @@
     refreshAssistList,
     navigateToGranblueMyPage,
     releaseGranblueResources,
+    beginWorkflowParentRestart,
+    claimPendingWorkflowHandoff,
+    createWorkflowExecutionState,
     visibleMyPageButton,
     replaceFrame,
     restartWorkflowAfterBattleEnd,
