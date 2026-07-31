@@ -6698,7 +6698,7 @@
   }
 
   async function startWorkflow() {
-    if (state.running || state.legacyRunning) return;
+    if (state.running || state.legacyRunning || state.elementPicker) return;
     const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement);
     const workflow = prepareWorkflowRun();
     if (!workflow) return;
@@ -7529,7 +7529,7 @@
   }
 
   async function startLegacy() {
-    if (state.legacyRunning || state.running || state.recording || !state.legacy.actions.length) return;
+    if (state.legacyRunning || state.running || state.recording || state.elementPicker || !state.legacy.actions.length) return;
     const restoreRunFocus = shadow.activeElement === byId('compactRun') || byId('page-legacy').contains(shadow.activeElement);
     commitActiveEditorInput();
     saveLegacyState();
@@ -8480,6 +8480,7 @@
     state.frameNavigationId += 1;
     stopEverything('終了');
     if (state.recording) finishLegacyRecording({ apply: false });
+    stopElementPicker({ restoreFocus: false });
     clearTimeout(state.toastTimer);
     clearTimeout(state.autosaveTimer);
     for (const timer of state.telemetryTimers) clearTimeout(timer);
@@ -8627,6 +8628,7 @@
   byId('legacyRecord').addEventListener('click', () => state.recording ? finishLegacyRecording({ apply: true }) : startLegacyRecording());
   byId('recordFinish').addEventListener('click', () => finishLegacyRecording({ apply: true }));
   byId('recordCancel').addEventListener('click', () => finishLegacyRecording({ apply: false }));
+  ui.elementPickerCancel.addEventListener('click', () => stopElementPicker({ message: '要素選択をキャンセルしました' }));
   ui.legacyRun.addEventListener('click', startLegacy);
   ui.legacyStop.addEventListener('click', () => stopLegacy());
   for (const input of [ui.legacyCount, ui.legacyJitter, ui.legacyPositionJitter]) input.addEventListener('change', () => {
@@ -8806,6 +8808,9 @@
     waitForFrameReady,
     performFrameOperation,
     jqTapStrict,
+    uniqueElementSelector,
+    configuredElementState,
+    tapConfiguredElement,
     ensureFullAuto,
     waitForAutoAttack,
     confirmAllUnclaimed,
