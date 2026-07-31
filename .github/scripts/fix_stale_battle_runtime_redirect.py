@@ -141,6 +141,13 @@ tests = replace_once(
     'version assertion'
 )
 
+tests = replace_once(
+    tests,
+    "  assert.ok(runtime.includes('win.stage?.gGameStatus'));",
+    "  assert.ok(runtime.includes('stage = win.stage || null'));\n  assert.ok(runtime.includes('status = stage?.gGameStatus || null'));",
+    'runtime structure assertion'
+)
+
 new_test = r'''
 
 test('full-auto startup rejects stale finished state from the previous rescue battle', () => {
