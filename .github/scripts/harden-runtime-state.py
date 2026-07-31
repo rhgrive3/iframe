@@ -162,13 +162,6 @@ source = replace_once(
     'full auto actionable state gate',
 )
 
-source = replace_once(
-    source,
-    'await refreshAssistList(refreshConfig, context, { waitForCompletion: false });',
-    'await refreshAssistList(refreshConfig, context, { waitForCompletion: true });',
-    'single-slot assist refresh completion',
-)
-
 path.write_text(source, encoding='utf-8')
 
 test_path = Path('tests/autoflow.static.test.mjs')
@@ -178,12 +171,6 @@ tests = replace_once(
     "assert.ok(source.includes('const APP_VERSION = 49'));",
     "assert.ok(source.includes('const APP_VERSION = 50'));",
     'test APP_VERSION assertion',
-)
-tests = replace_once(
-    tests,
-    "assert.ok(source.includes('await refreshAssistList(refreshConfig, context, { waitForCompletion: false })'));",
-    "assert.ok(source.includes('await refreshAssistList(refreshConfig, context, { waitForCompletion: true })'));",
-    'assist refresh completion assertion',
 )
 
 marker = "test('Granblue runtime flags are authoritative for full auto, attacks, and battle end'"
