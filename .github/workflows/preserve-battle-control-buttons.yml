@@ -1,0 +1,55 @@
+name: Preserve battle control buttons
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - '.github/patch-requests/preserve-battle-control-buttons.txt'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: preserve-battle-control-buttons-patch
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'automation/preserve-battle-control-buttons'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Preserve attack and full-auto controls
+        run: python3 .github/scripts/preserve-battle-control-buttons.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Commit generated patch
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/preserve-battle-control-buttons.yml
+          git rm .github/scripts/preserve-battle-control-buttons.py
+          git add a.js tests/autoflow.static.test.mjs
+          git commit -m 'fix: keep attack and full-auto controls visible'
+          git push origin HEAD:main
