@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 58;
+  const APP_VERSION = 59;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1379,6 +1379,9 @@
     recordReturnFocus: null,
     activeRecordPointers: new Map(),
     pendingAutoAttack: null,
+    battleEndArmed: false,
+    battleEndArmedAt: 0,
+    activeBattleDocument: null,
     activeBattleStatus: null,
     expectedBattleRaidId: '',
     runningCard: null,
@@ -4779,8 +4782,7 @@
 
       try {
         await jqTapStrict(target, { signal, label, fast });
-        state.activeBattleStatus = null;
-        state.expectedBattleRaidId = raidId;
+        resetBattleEndDetection({ expectedRaidId: raidId });
         return true;
       } catch (error) {
         if (error?.code !== 'STALE_TARGET') throw error;
@@ -5125,14 +5127,51 @@
     };
   }
 
-  function trustLiveBattleRuntime(runtime) {
-    if (!runtime?.available || runtime.finished) return runtime;
-    const live = runtime.autoButtonEnabled
-      || runtime.autoAttack
-      || runtime.attacking
-      || runtime.attackButtonPushed;
-    if (live && runtime.status) state.activeBattleStatus = runtime.status;
-    return runtime;
+  function resetBattleEndDetection({ expectedRaidId = '' } = {}) {
+    state.battleEndArmed = false;
+    state.battleEndArmedAt = 0;
+    state.activeBattleDocument = null;
+    state.activeBattleStatus = null;
+    state.expectedBattleRaidId = String(expectedRaidId || '');
+  }
+
+  function battleControlReady(doc, runtime = battleRuntimeState(doc)) {
+    if (runtime?.expectedRaidId && !runtime.matchesExpectedBattle) return false;
+    if (runtime?.status) {
+      if (runtime.finished) return false;
+      return Boolean(
+        runtime.autoButtonEnabled
+        || runtime.autoAttack
+        || runtime.attacking
+        || runtime.attackButtonPushed
+      );
+    }
+    if (!pageBaseReady(doc) || !doc.querySelector(SELECTORS.battleScreen)) return false;
+    return computedVisible(doc.querySelector(SELECTORS.fullAuto))
+      || computedVisible(doc.querySelector(SELECTORS.attackStart));
+  }
+
+  function armBattleEndDetection(doc = frameDocument(), runtime = battleRuntimeState(doc)) {
+    if (!battleControlReady(doc, runtime)) return false;
+    const sameSession = state.battleEndArmed
+      && state.activeBattleDocument === doc
+      && (!state.activeBattleStatus || !runtime.status || state.activeBattleStatus === runtime.status)
+      && (!state.expectedBattleRaidId || !runtime.raidId || state.expectedBattleRaidId === runtime.raidId);
+    if (!sameSession) {
+      state.battleEndArmed = true;
+      state.battleEndArmedAt = performance.now();
+      state.activeBattleDocument = doc;
+    }
+    if (runtime.status) state.activeBattleStatus = runtime.status;
+    if (!state.expectedBattleRaidId && runtime.raidId) state.expectedBattleRaidId = runtime.raidId;
+    return true;
+  }
+
+  function battleEndDetectionMatches(runtime) {
+    if (!state.battleEndArmed) return false;
+    if (state.expectedBattleRaidId && runtime?.raidId && runtime.raidId !== state.expectedBattleRaidId) return false;
+    if (state.activeBattleStatus && runtime?.status && runtime.status !== state.activeBattleStatus) return false;
+    return true;
   }
 
   function fullAutoState(doc = frameDocument()) {
@@ -5171,22 +5210,48 @@
   }
 
   function detectBattleEndState(doc = frameDocument()) {
+    const runtime = battleRuntimeState(doc);
+    armBattleEndDetection(doc, runtime);
+    if (!battleEndDetectionMatches(runtime)) return null;
+
     const url = currentFrameUrl();
     if (url.includes('result_multi/')) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
-    const runtime = trustLiveBattleRuntime(battleRuntimeState(doc));
-    if (runtime.finished && runtime.status && runtime.status === state.activeBattleStatus) {
-      return { type: 'RUNTIME_FINISHED', reason: '現戦闘で確認済みのゲーム内部終了状態を検出', runtime };
+
+    if (
+      runtime.finished
+      && runtime.status
+      && (!state.activeBattleStatus || runtime.status === state.activeBattleStatus)
+    ) {
+      return { type: 'RUNTIME_FINISHED', reason: '起動確認済みの現戦闘終了状態を検出', runtime };
     }
+
+    if (doc !== state.activeBattleDocument) return null;
+    if (performance.now() - state.battleEndArmedAt < DEFAULT_STABLE_MS) return null;
+
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
-    if (notice && elementDisplayOn(notice)) {
+    const noticeContainer = notice?.closest?.('#pop, #pop-force');
+    const noticeVisible = Boolean(
+      notice
+      && computedVisible(notice)
+      && (!noticeContainer || computedVisible(noticeContainer))
+    );
+    if (noticeVisible) {
       const text = normalizePopupText(notice.textContent || '');
-      if (!text || text.includes(BATTLE_END_MESSAGE)) {
-        return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE };
+      const expectedText = normalizePopupText(BATTLE_END_MESSAGE);
+      if (text.includes(expectedText)) {
+        return { type: 'REMATCH_FAIL', reason: text };
       }
     }
+
     const resultButton = doc.querySelector(SELECTORS.battleResult);
-    if (resultButton && elementDisplayOn(resultButton)) {
-      return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出' };
+    const resultContainer = resultButton?.closest?.('.prt-command-end');
+    const resultVisible = Boolean(
+      resultButton
+      && computedVisible(resultButton)
+      && (!resultContainer || computedVisible(resultContainer))
+    );
+    if (resultVisible) {
+      return { type: 'RESULT_BUTTON', reason: '起動確認済みの現戦闘で終了ボタンを検出' };
     }
     return null;
   }
@@ -5323,8 +5388,7 @@
 
   async function restartWorkflowAfterBattleEnd(config, context, endState) {
     clearPendingAutoAttack('敵撃破を検出しました');
-    state.activeBattleStatus = null;
-    state.expectedBattleRaidId = '';
+    resetBattleEndDetection();
     const route = String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0';
     const expectedScreen = normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist');
     const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
@@ -5373,20 +5437,19 @@
   async function ensureFullAuto(config, context, { allowReloadProbe = true } = {}) {
     const { signal } = context;
     try {
-      const initialEnd = safeBattleEndState();
-      if (initialEnd) return restartWorkflowAfterBattleEnd(config, context, initialEnd);
-
       await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
       const found = await monitorFrame(() => {
         const doc = frameDocument();
+        const observed = fullAutoState(doc);
+        const attack = attackSnapshot(doc);
+        armBattleEndDetection(doc, observed.runtime);
+
         const battleEnd = detectBattleEndState(doc);
         if (battleEnd) return { battleEnd };
 
-        const observed = fullAutoState(doc);
         if (observed.on) return observed;
         if (!observed.exists || !observed.visible || !observed.enabled) return false;
 
-        const attack = attackSnapshot(doc);
         const attackReady = Boolean(
           attack.start
           && attack.start.classList.contains('display-on')
@@ -5571,10 +5634,12 @@
     const { signal } = context;
     const timeoutMs = config.timeoutSec * 1000;
     try {
+      await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
+      const startupDoc = frameDocument();
+      const startupRuntime = battleRuntimeState(startupDoc);
+      armBattleEndDetection(startupDoc, startupRuntime);
       const initialEnd = safeBattleEndState();
       if (initialEnd) return restartWorkflowAfterBattleEnd(config, context, initialEnd);
-
-      await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
 
       const pendingAttack = await consumePendingAutoAttack(timeoutMs);
       if (pendingAttack?.battleEnd) return restartWorkflowAfterBattleEnd(config, context, pendingAttack.battleEnd);
@@ -6112,6 +6177,7 @@
       completedBattles: 0
     };
     state.running = context;
+    resetBattleEndDetection();
     const restoreExpandedDock = enterRuntimeCompactMode();
     syncRunControls();
     if (!lightweightMode) {
@@ -6165,6 +6231,7 @@
       }
     } finally {
       clearPendingAutoAttack('ワークフローを終了しました');
+      resetBattleEndDetection();
       if (state.running === context) state.running = null;
       leaveRuntimeCompactMode(restoreExpandedDock);
       state.blockProgress.clear();

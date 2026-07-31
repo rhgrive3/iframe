@@ -263,7 +263,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 58'));
+  assert.ok(source.includes('const APP_VERSION = 59'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -300,7 +300,8 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   assert.ok(attack.includes('const useDomFallback = !runtime.available'));
   assert.ok(attack.includes("progress: useDomFallback ? battleProgressSignature(doc, turn) : ''"));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
-  assert.ok(end.includes('const runtime = trustLiveBattleRuntime(battleRuntimeState(doc))'));
+  assert.ok(end.includes('armBattleEndDetection(doc, runtime)'));
+  assert.ok(end.includes('battleEndDetectionMatches(runtime)'));
   assert.ok(end.includes('runtime.status === state.activeBattleStatus'));
 });
 
@@ -453,29 +454,64 @@ test('standalone Safari relief also rebuilds the MyPage browsing context', () =>
   assert.ok(relief.includes("hardNavigateAfterRelief(gameRouteUrl('#mypage'), 'mypage', config, context)"));
 });
 
-test('full-auto startup rejects stale finished state from the previous rescue battle', () => {
-  const runtime = source.slice(
-    source.indexOf('function runtimeFlagEnabled'),
-    source.indexOf('function visibleMyPageButton')
+test('full-auto startup cannot return to assist before the current battle is armed', () => {
+  const ensure = source.slice(
+    source.indexOf('async function ensureFullAuto'),
+    source.indexOf('function elementDisplayOn')
+  );
+  const readyIndex = ensure.indexOf("await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' })");
+  const monitorIndex = ensure.indexOf('const found = await monitorFrame');
+  assert.ok(readyIndex >= 0);
+  assert.ok(monitorIndex > readyIndex);
+  assert.ok(!ensure.slice(0, readyIndex).includes('safeBattleEndState'));
+  assert.ok(ensure.includes('armBattleEndDetection(doc, observed.runtime)'));
+  assert.ok(ensure.indexOf('armBattleEndDetection(doc, observed.runtime)') < ensure.indexOf('const battleEnd = detectBattleEndState(doc)'));
+});
+
+test('every battle-end surface is gated by an armed live battle session', () => {
+  const stateBlock = source.slice(source.indexOf('const state = {'), source.indexOf('const cleanup = new Set()'));
+  const lifecycle = source.slice(
+    source.indexOf('function resetBattleEndDetection'),
+    source.indexOf('function fullAutoState')
+  );
+  const detector = source.slice(
+    source.indexOf('function detectBattleEndState'),
+    source.indexOf('function safeBattleEndState')
   );
   const assistTap = source.slice(
     source.indexOf('async function tapCurrentAssistRow'),
     source.indexOf('function assistListSignature')
   );
+  assert.ok(stateBlock.includes('battleEndArmed: false'));
+  assert.ok(stateBlock.includes('activeBattleDocument: null'));
+  assert.ok(lifecycle.includes('function resetBattleEndDetection'));
+  assert.ok(lifecycle.includes('function armBattleEndDetection'));
+  assert.ok(lifecycle.includes('if (runtime?.expectedRaidId && !runtime.matchesExpectedBattle) return false'));
+  assert.ok(lifecycle.includes('if (runtime.finished) return false'));
+  assert.ok(lifecycle.includes('function battleEndDetectionMatches'));
+  assert.ok(assistTap.includes('resetBattleEndDetection({ expectedRaidId: raidId })'));
+  const gateIndex = detector.indexOf('if (!battleEndDetectionMatches(runtime)) return null;');
+  assert.ok(gateIndex >= 0);
+  assert.ok(gateIndex < detector.indexOf("url.includes('result_multi/')"));
+  assert.ok(gateIndex < detector.indexOf('runtime.finished'));
+  assert.ok(gateIndex < detector.indexOf('const notice ='));
+  assert.ok(gateIndex < detector.indexOf('const resultButton ='));
+  assert.ok(detector.includes('computedVisible(notice)'));
+  assert.ok(detector.includes('computedVisible(noticeContainer)'));
+  assert.ok(detector.includes('computedVisible(resultButton)'));
+  assert.ok(detector.includes('computedVisible(resultContainer)'));
+  assert.ok(detector.includes('text.includes(expectedText)'));
+  assert.ok(!detector.includes("if (!text || text.includes(BATTLE_END_MESSAGE))"));
+});
+
+test('workflow lifecycle releases the armed battle document reference', () => {
+  const start = source.slice(source.indexOf('async function startWorkflow'), source.indexOf('function stopWorkflow'));
+  assert.ok(start.includes('state.running = context;\n    resetBattleEndDetection();'));
+  assert.ok(start.includes("clearPendingAutoAttack('ワークフローを終了しました');\n      resetBattleEndDetection();"));
   const restart = source.slice(
     source.indexOf('async function restartWorkflowAfterBattleEnd'),
     source.indexOf('async function ensureFullAuto')
   );
-  assert.ok(source.includes('activeBattleStatus: null'));
-  assert.ok(source.includes("expectedBattleRaidId: ''"));
-  assert.ok(assistTap.includes('state.activeBattleStatus = null'));
-  assert.ok(assistTap.includes('state.expectedBattleRaidId = raidId'));
-  assert.ok(runtime.includes('stage?.pJsnData?.raid_id'));
-  assert.ok(runtime.includes('raidId === expectedRaidId'));
-  assert.ok(runtime.includes('function trustLiveBattleRuntime'));
-  assert.ok(runtime.includes('runtime.status === state.activeBattleStatus'));
-  assert.ok(!runtime.includes("if (runtime.finished) {\n      return { type: 'RUNTIME_FINISHED'"));
-  assert.ok(restart.includes('state.activeBattleStatus = null'));
-  assert.ok(restart.includes("state.expectedBattleRaidId = ''"));
+  assert.ok(restart.includes('resetBattleEndDetection();'));
 });
 
