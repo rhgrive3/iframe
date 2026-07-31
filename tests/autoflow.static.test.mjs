@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 50'));
+  assert.ok(source.includes('const APP_VERSION = 51'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -385,4 +385,19 @@ test('battle performance setting rolls back its UI state when persistence fails'
   assert.ok(setter.includes('const previous = state.battlePerformanceEnabled;'));
   assert.ok(setter.includes('state.battlePerformanceEnabled = previous;'));
   assert.ok(setter.includes('ui.battlePerformanceToggle.checked = previous;'));
+});
+
+
+test('battle performance keeps attack and full-auto controls visible', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  assert.ok(child.includes('BATTLE_CONTROL_ASSET_PATTERN'));
+  assert.ok(child.includes('raid_parts_(?:attack|auto|full_auto|auto_guard|full_auto_guard)'));
+  assert.ok(child.includes('if (isBattleControlAsset(url)) return false;'));
+  assert.ok(child.includes('function patchWebGLTracking(prototype)'));
+  assert.ok(child.includes('protectedBattleTextures'));
+  assert.ok(child.includes("if (name === 'drawImage') return isBattleControlAsset(args[0]);"));
+  assert.ok(child.includes('return hasProtectedBattleTexture(context);'));
+  assert.ok(child.includes('.cnt-raid-stage canvas#canvas { visibility:visible!important; }'));
+  assert.ok(child.includes('.cnt-raid-stage .btn-auto,'));
+  assert.ok(child.includes('.btn-attack-start'));
 });
