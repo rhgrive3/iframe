@@ -6658,7 +6658,8 @@
       return null;
     }
     if (window.name !== handoff.targetName) return null;
-    if (handoff.claimedBy && handoff.claimedBy !== instanceId) return null;
+    const sameTabCommitted = handoff.phase === 'committed' && handoff.mode === 'same-tab';
+    if (handoff.claimedBy && handoff.claimedBy !== instanceId && !sameTabCommitted) return null;
     const claimed = {
       ...handoff,
       phase: handoff.phase === 'committed' ? 'committed' : 'claimed',
@@ -6706,6 +6707,31 @@
     };
   }
 
+  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null) {
+    const fallback = {
+      ...handoff,
+      targetName: `${handoff.targetName}-same-${nowId('tab')}`,
+      phase: 'committed',
+      mode: 'same-tab',
+      committedAt: Date.now()
+    };
+    if (!writeWorkflowHandoff(fallback)) {
+      clearWorkflowHandoff(handoff.id);
+      const detail = sourceError?.message ? `: ${sourceError.message}` : '';
+      throw new FlowError(`同一タブ用の進行内容を保存できませんでした${detail}`, 'HANDOFF_FALLBACK_SAVE_FAILED');
+    }
+    window.name = fallback.targetName;
+    appendLog(reason, 'warn', '親ページ再起動');
+    setStatus('進行を保存して親ページを再起動');
+    try { location.replace(fallback.parentUrl); }
+    catch (error) {
+      clearWorkflowHandoff(handoff.id);
+      window.name = '';
+      throw new FlowError(`親ページを再起動できませんでした: ${error.message}`, 'HANDOFF_NAVIGATION_FAILED');
+    }
+    return new Promise(() => {});
+  }
+
   async function beginWorkflowParentRestart(context) {
     throwIfAborted(context.signal);
     commitActiveEditorInput();
@@ -6720,20 +6746,10 @@
     let opened = null;
     try { opened = window.open(handoff.parentUrl, handoff.targetName); } catch {}
     if (!opened) {
-      const committed = { ...handoff, phase: 'committed', mode: 'same-tab', committedAt: Date.now() };
-      if (!writeWorkflowHandoff(committed)) {
-        clearWorkflowHandoff(handoff.id);
-        throw new FlowError('新規タブが拒否され、同一タブ用の進行保存にも失敗しました', 'HANDOFF_FALLBACK_SAVE_FAILED');
-      }
-      window.name = handoff.targetName;
-      appendLog('新規タブが拒否されたため、同じタブを完全再起動します', 'warn', '親ページ再起動');
-      setStatus('進行を保存して親ページを再起動');
-      try { location.replace(handoff.parentUrl); }
-      catch (error) {
-        clearWorkflowHandoff(handoff.id);
-        throw new FlowError(`親ページを再起動できませんでした: ${error.message}`, 'HANDOFF_NAVIGATION_FAILED');
-      }
-      return new Promise(() => {});
+      return continueWorkflowInCurrentTab(
+        handoff,
+        '新規タブが拒否されたため、同じタブを完全再起動します'
+      );
     }
 
     appendLog('新しい親タブへ進行内容を移譲しています', '', '親ページ再起動');
@@ -6772,8 +6788,17 @@
       throw new FlowError('新しい親タブの準備がタイムアウトしました', 'HANDOFF_READY_TIMEOUT');
     } catch (error) {
       try { opened.close(); } catch {}
-      clearWorkflowHandoff(handoff.id);
-      throw error;
+      if (error?.name === 'AbortError') {
+        clearWorkflowHandoff(handoff.id);
+        throw error;
+      }
+      const current = readWorkflowHandoff();
+      if (current && current.id !== handoff.id) throw error;
+      return continueWorkflowInCurrentTab(
+        handoff,
+        `新しい親タブへの移譲に失敗したため、同じタブを完全再起動します（${error.message}）`,
+        error
+      );
     }
   }
 
@@ -6809,7 +6834,6 @@
       if (current.phase !== 'committed') throw new FlowError('旧タブから引継ぎ確定を受信できませんでした', 'HANDOFF_COMMIT_TIMEOUT');
       window.name = '';
       const runPromise = startWorkflow(current);
-      await Promise.resolve();
       if (state.running) clearWorkflowHandoff(current.id);
       await runPromise;
     } catch (error) {
