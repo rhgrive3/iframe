@@ -31,6 +31,18 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Record runner start
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir -p .github/patch-diagnostics
+          printf 'started for %s\n' '${{ github.event.pull_request.head.sha }}' > .github/patch-diagnostics/runtime-state-started.txt
+          git add .github/patch-diagnostics/runtime-state-started.txt
+          git commit -m 'chore: record runtime state patch runner start'
+          git push origin HEAD:main
+
       - name: Patch runtime-backed Granblue state handling
         run: python3 .github/scripts/harden-runtime-state.py
 
@@ -52,6 +64,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/harden-runtime-state.yml
           git rm .github/scripts/harden-runtime-state.py
+          git rm .github/patch-diagnostics/runtime-state-started.txt
           git add a.js tests/autoflow.static.test.mjs
           git diff --cached --check
           git commit -m 'fix: use Granblue runtime state for battle automation'
