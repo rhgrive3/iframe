@@ -960,6 +960,24 @@
       .recordStatus strong{display:inline-flex;min-width:36px;justify-content:center;padding:3px 6px;border-radius:999px;background:var(--red-soft);color:#ffc0c6;font-size:9px}
       .recordPulse{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 0 4px rgba(255,107,120,.12);animation:statusPulse 1.3s ease-in-out infinite}
 
+      :host(.element-picking) #dock,
+      :host(.element-picking) #browserBar,
+      :host(.element-picking) #browserHandle,
+      :host(.element-picking) #markerLayer{visibility:hidden;pointer-events:none}
+      #elementPickerToolbar{
+        position:fixed;z-index:250;top:max(16px,calc(env(safe-area-inset-top) + 8px));left:50%;transform:translateX(-50%);
+        width:min(620px,calc(100dvw - 24px));display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;
+        gap:8px;padding:9px;border:1px solid rgba(102,184,255,.42);border-radius:15px;background:rgba(18,20,27,.98);
+        box-shadow:0 16px 44px rgba(0,0,0,.45)
+      }
+      #elementPickerToolbar[hidden]{display:none}
+      #elementPickerToolbar button{min-height:40px;height:40px}
+      .pickerStatus{display:grid;grid-template-columns:auto minmax(0,1fr);gap:9px;align-items:center;min-width:0;padding-left:5px}
+      .pickerStatus strong,.pickerStatus small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .pickerStatus strong{font-size:11px;color:var(--text-soft)}
+      .pickerStatus small{margin-top:2px;font-size:9.5px;color:var(--muted)}
+      .pickerPulse{width:9px;height:9px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 4px rgba(102,184,255,.13);animation:statusPulse 1.3s ease-in-out infinite}
+
       #toast{
         position:fixed;z-index:260;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translate(-50%,12px);
         visibility:hidden;max-width:calc(100vw - 24px);padding:11px 15px;border:1px solid var(--line-strong);border-radius:12px;
@@ -1099,6 +1117,10 @@
       <div class="recordStatus"><span class="recordPulse" aria-hidden="true"></span><span id="recordToolbarTitle">タッチを記録中</span><strong id="recordCount" role="status" aria-live="polite">0件</strong></div>
       <button id="recordCancel" class="ghost">キャンセル</button>
       <button id="recordFinish" class="primary">記録を完了</button>
+    </div>
+    <div id="elementPickerToolbar" role="dialog" aria-modal="true" aria-labelledby="elementPickerTitle" hidden>
+      <div class="pickerStatus"><span class="pickerPulse" aria-hidden="true"></span><span><strong id="elementPickerTitle">押すボタンを選択</strong><small id="elementPickerHint">iframe内のHTML要素をタップしてください。実際のゲーム操作は発火しません。</small></span></div>
+      <button id="elementPickerCancel" class="ghost">キャンセル</button>
     </div>
     <div id="browserBar" role="navigation" aria-label="対象ページのナビゲーション">
       <button id="backFrame" class="navButton" aria-label="戻る" title="戻る">‹</button>
@@ -1339,6 +1361,7 @@
     legacyJitter: byId('legacyJitter'), legacyPositionJitter: byId('legacyPositionJitter'), legacyRun: byId('legacyRun'), legacyStop: byId('legacyStop'),
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
+    elementPickerToolbar: byId('elementPickerToolbar'), elementPickerHint: byId('elementPickerHint'), elementPickerCancel: byId('elementPickerCancel'),
     undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
     validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
     validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle')
@@ -1378,6 +1401,7 @@
     recordStartedAt: 0,
     recordReturnFocus: null,
     activeRecordPointers: new Map(),
+    elementPicker: null,
     pendingAutoAttack: null,
     battleEndArmed: false,
     battleEndArmedAt: 0,
@@ -1803,6 +1827,7 @@
     fixedWait: { category: 'wait', label: '固定時間待機', description: '停止可能な固定待機' },
     randomWait: { category: 'wait', label: '指定区間をランダム待機', description: '最小〜最大の一様乱数' },
     watch: { category: 'wait', label: '要素または状態を監視する', description: 'MutationObserver中心で条件成立を待機' },
+    iframeTapElement: { category: 'frame', label: '指定ボタンを押す', description: '画面上で選択したHTML要素をタップ' },
     iframeReload: { category: 'frame', label: 'iframeを再読み込みする', description: '操作前からloadとDOM変化を監視' },
     iframeBack: { category: 'frame', label: 'iframeの履歴を1つ戻る', description: 'リロードせず履歴を戻る' },
     iframeRoute: { category: 'frame', label: '指定したゲーム内ルートへ移動する', description: 'hash/ゲーム内ルートへ移動して完了待機' },
@@ -1872,6 +1897,8 @@
         return { minSeconds: 0.5, maxSeconds: 0.8 };
       case 'watch':
         return { condition: { type: 'selectorVisible', selector: '', value: '' }, timeoutSec: 30, stableMs: 100 };
+      case 'iframeTapElement':
+        return { selector: '', targetLabel: '', timeoutSec: 30 };
       case 'iframeReload':
       case 'iframeBack':
         return { timeoutSec: 30, expectedScreen: 'auto' };
@@ -2027,6 +2054,13 @@
           condition: normalizeConditionConfig(config.condition),
           timeoutSec: clamp(finite(config.timeoutSec, 30), 0, 86400),
           stableMs: clamp(int(config.stableMs, 100), 0, 5000)
+        };
+        break;
+      case 'iframeTapElement':
+        block.config = {
+          selector: String(config.selector || '').trim().slice(0, 1000),
+          targetLabel: String(config.targetLabel || '').trim().slice(0, 120),
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600)
         };
         break;
       case 'iframeReload':
