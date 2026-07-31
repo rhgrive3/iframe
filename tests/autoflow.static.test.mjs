@@ -294,6 +294,8 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   const attack = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function attackTransitionFromBaseline'));
   assert.ok(attack.includes('runtimeAttacking: runtime.attacking'));
   assert.ok(attack.includes('attackButtonPushed: runtime.attackButtonPushed'));
+  assert.ok(attack.includes('const useDomFallback = !runtime.available'));
+  assert.ok(attack.includes("progress: useDomFallback ? battleProgressSignature(doc, turn) : ''"));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
   assert.ok(end.includes('const runtime = battleRuntimeState(doc)'));
   assert.ok(end.includes('if (runtime.finished)'));

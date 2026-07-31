@@ -5101,8 +5101,8 @@
 
   function fullAutoState(doc = frameDocument()) {
     const button = doc.querySelector(SELECTORS.fullAuto);
-    const visible = computedVisible(button);
     const runtime = battleRuntimeState(doc);
+    const visible = runtime.available ? elementDisplayOn(button) : computedVisible(button);
     return {
       button,
       exists: Boolean(button),
@@ -5142,14 +5142,14 @@
       return { type: 'RUNTIME_FINISHED', reason: 'ゲーム内部の戦闘終了状態を検出', runtime };
     }
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
-    if (notice && computedVisible(notice)) {
+    if (notice && elementDisplayOn(notice)) {
       const text = normalizePopupText(notice.textContent || '');
       if (!text || text.includes(BATTLE_END_MESSAGE)) {
         return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE };
       }
     }
     const resultButton = doc.querySelector(SELECTORS.battleResult);
-    if (resultButton && computedVisible(resultButton)) {
+    if (resultButton && elementDisplayOn(resultButton)) {
       return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出' };
     }
     return null;
@@ -5353,7 +5353,7 @@
           attack.start
           && attack.start.classList.contains('display-on')
           && !attack.start.classList.contains('display-off')
-          && computedVisible(attack.start)
+          && attack.startVisible
           && !attack.dummyVisible
           && !attack.cancelVisible
           && !attack.actorAttacking
@@ -5393,11 +5393,14 @@
   }
 
   function elementDisplayOn(element) {
-    return Boolean(
-      element
-      && !element.classList.contains('display-off')
-      && (element.classList.contains('display-on') || computedVisible(element))
-    );
+    if (!element || !element.isConnected || element.hidden) return false;
+    if (element.classList.contains('display-off')) return false;
+    if (element.classList.contains('display-on')) return true;
+    const style = element.style;
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && style.visibility !== 'collapse'
+      && (style.opacity === '' || Number(style.opacity) !== 0);
   }
 
   function turnSignature(doc = frameDocument()) {
@@ -5431,12 +5434,13 @@
   }
 
   function attackSnapshot(doc = frameDocument()) {
+    const runtime = battleRuntimeState(doc);
+    const useDomFallback = !runtime.available;
     const start = doc.querySelector(SELECTORS.attackStart);
     const dummy = doc.querySelector(SELECTORS.attackDummy);
     const cancel = doc.querySelector(SELECTORS.attackCancel);
-    const turn = turnSignature(doc);
-    const runtime = battleRuntimeState(doc);
-    const domActorAttacking = Boolean(doc.querySelector(SELECTORS.attackActor));
+    const turn = useDomFallback ? turnSignature(doc) : '';
+    const domActorAttacking = useDomFallback && Boolean(doc.querySelector(SELECTORS.attackActor));
     return {
       start,
       dummy,
@@ -5449,7 +5453,7 @@
       attackButtonPushed: runtime.attackButtonPushed,
       actorAttacking: runtime.attacking || runtime.attackButtonPushed || domActorAttacking,
       turn,
-      progress: battleProgressSignature(doc, turn)
+      progress: useDomFallback ? battleProgressSignature(doc, turn) : ''
     };
   }
 
@@ -5500,9 +5504,9 @@
       stableMs: 0,
       description: 'フルオート押下後の攻撃開始待ち',
       observeRoots: battleObservationRoots,
-      observeOnLightweight: true,
-      observeCharacterData: true,
-      intervalMs: 120
+      observeOnLightweight: false,
+      observeCharacterData: false,
+      intervalMs: 160
     }).then(
       result => ({ ok: true, result }),
       error => ({ ok: false, error })
@@ -5565,9 +5569,9 @@
         stableMs: 0,
         description: 'フルオート攻撃受付待ち',
         observeRoots: battleObservationRoots,
-        observeOnLightweight: true,
-        observeCharacterData: true,
-        intervalMs: 120
+        observeOnLightweight: false,
+        observeCharacterData: false,
+        intervalMs: 160
       });
       if (armed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, armed.battleEnd);
       if (armed.alreadyAttacking) return armed;
@@ -5584,9 +5588,9 @@
         stableMs: 0,
         description: 'フルオート攻撃開始待ち',
         observeRoots: battleObservationRoots,
-        observeOnLightweight: true,
-        observeCharacterData: true,
-        intervalMs: 120
+        observeOnLightweight: false,
+        observeCharacterData: false,
+        intervalMs: 160
       });
       if (transition.battleEnd) return restartWorkflowAfterBattleEnd(config, context, transition.battleEnd);
       return transition;

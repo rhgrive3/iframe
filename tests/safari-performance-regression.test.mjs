@@ -30,3 +30,15 @@ test('running block UI is updated without rebuilding editor', () => {
   assert.match(body, /state\.runningCard = card/);
   assert.match(body, /card\?\.classList\.add\('running'\)/);
 });
+
+test('mobile battle waits use runtime polling without animation observers', () => {
+  const body = source.slice(source.indexOf('function armPendingAutoAttack'), source.indexOf('async function recoverKnownPopup'));
+  assert.equal((body.match(/observeOnLightweight: false/g) || []).length, 3);
+  assert.equal((body.match(/observeCharacterData: false/g) || []).length, 3);
+  assert.equal((body.match(/intervalMs: 160/g) || []).length, 3);
+  assert.doesNotMatch(body, /observeOnLightweight: true/);
+  assert.doesNotMatch(body, /observeCharacterData: true/);
+  const snapshot = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function isAttackInProgress'));
+  assert.match(snapshot, /const useDomFallback = !runtime\.available/);
+  assert.match(snapshot, /progress: useDomFallback \? battleProgressSignature/);
+});
