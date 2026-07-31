@@ -1,1 +1,0 @@
-Restrict lightweight battle rendering to draw calls whose most recently bound texture is an attack/AUTO/full-auto control asset. Prevent stale protected textures on unrelated texture units from allowing enemy rendering.
