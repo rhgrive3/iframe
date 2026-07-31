@@ -13,7 +13,8 @@ test('all internally sampled interaction delays use rejection-sampled truncated 
   assert.match(source, /TRUNCATED_NORMAL_MAX_ATTEMPTS = 10_000/);
   assert.match(source, /if \(sample >= minValue && sample <= maxValue\) return sample/);
   assert.match(source, /sampleTruncatedNormalMs\(visibleLatency\)/);
-  assert.match(source, /sampleTruncatedNormalMs\(TOUCH_HOLD_LATENCY_MS\)/);
+  assert.match(source, /const holdLatency = fast \? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS/);
+  assert.match(source, /sampleTruncatedNormalMs\(holdLatency\)/);
   assert.match(source, /sampleTruncatedNormalMs\(TOUCH_SCROLL_SETTLE_LATENCY_MS\)/);
   assert.doesNotMatch(source, /sampleClampedNormalMs/);
 });

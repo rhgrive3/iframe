@@ -243,13 +243,21 @@ test('assist HP threshold blocks use inclusive above and below comparisons', () 
   assert.ok(execute.includes("assistSelectFullFlow(block.config, blockContext, 'atMost')"));
 });
 
-test('assist flow uses reduced reaction latency only after a raid is selected', () => {
+test('assist flow accelerates refresh through battle handoff without removing state checks', () => {
   assert.ok(source.includes('const TOUCH_FAST_VISIBLE_LATENCY_MS'));
+  assert.ok(source.includes('const TOUCH_FAST_HOLD_LATENCY_MS'));
   const tap = source.slice(source.indexOf('async function jqTapStrict'), source.indexOf('function randomUniform'));
   assert.ok(tap.includes('fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS'));
+  assert.ok(tap.includes('fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS'));
+  const refresh = source.slice(source.indexOf('async function refreshAssistList'), source.indexOf('async function switchAssistSlot'));
+  assert.ok(refresh.includes("jqTapStrict(refresh, { signal, label: '救援一覧更新', fast: true })"));
+  const slot = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
+  assert.ok(slot.includes('fast: true'));
   const supporter = source.slice(source.indexOf('async function waitForSupporterRows'), source.indexOf('async function selectSupporterAuto'));
   assert.ok(supporter.includes('stableMs: config.fastTap ? 0 : 80'));
   assert.ok(supporter.includes('fast: Boolean(config.fastTap)'));
+  const deck = source.slice(source.indexOf('async function pressDeckConfirm'), source.indexOf('async function assistSelectFullFlow'));
+  assert.ok(deck.includes('stableMs: 0'));
   const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
   assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true })'));
   assert.ok(flow.includes('fastTap: true'));
@@ -316,7 +324,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 62'));
+  assert.ok(source.includes('const APP_VERSION = 63'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));

@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 62;
+  const APP_VERSION = 63;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4030,8 +4030,9 @@
   }
 
   const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
-  const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 36, stdDev: 8, min: 20, max: 60 });
+  const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 24, stdDev: 6, min: 12, max: 42 });
   const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
+  const TOUCH_FAST_HOLD_LATENCY_MS = Object.freeze({ mean: 55, stdDev: 9, min: 32, max: 85 });
   const TOUCH_SCROLL_SETTLE_LATENCY_MS = Object.freeze({ mean: 72, stdDev: 16, min: 36, max: 130 });
   const TOUCH_SCROLL_INERTIA_LATENCY_MS = Object.freeze({ mean: 180, stdDev: 34, min: 110, max: 290 });
   const TOUCH_START_STDDEV_RATIO = Object.freeze({ mean: 0.135, stdDev: 0.008, min: 0.12, max: 0.15 });
@@ -4669,7 +4670,8 @@
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
         touchActive = true;
-        const holdDuration = sampleTruncatedNormalMs(TOUCH_HOLD_LATENCY_MS);
+        const holdLatency = fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS;
+        const holdDuration = sampleTruncatedNormalMs(holdLatency);
         const endPoint = sampleTouchEndPoint(start, start.rect);
         const movement = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
         const moveCount = determineTouchMoveCount(holdDuration, movement);
@@ -4938,14 +4940,14 @@
     if (!refresh || !computedVisible(refresh)) throw new FlowError('救援一覧の更新ボタンが表示されていません', 'REFRESH_MISSING');
     if (!beforeList) throw new FlowError('救援一覧コンテナが見つかりません', 'ASSIST_LIST_MISSING');
     if (!waitForCompletion) {
-      await jqTapStrict(refresh, { signal, label: '救援一覧更新' });
+      await jqTapStrict(refresh, { signal, label: '救援一覧更新', fast: true });
       return { tapped: true, waitedForCompletion: false };
     }
     const completion = await runAssistListTransition(
       beforeList,
       config,
       signal,
-      () => jqTapStrict(refresh, { signal, label: '救援一覧更新' }),
+      () => jqTapStrict(refresh, { signal, label: '救援一覧更新', fast: true }),
       {
         description: '救援一覧更新完了待ち',
         cancelMessage: '救援一覧更新監視を解除しました'
@@ -4975,7 +4977,7 @@
       beforeList,
       config,
       signal,
-      () => jqTapStrict(button, { signal, label: `救援番号${normalized}` }),
+      () => jqTapStrict(button, { signal, label: `救援番号${normalized}`, fast: true }),
       {
         expectedSlot: normalized,
         description: `救援番号${normalized}切替完了待ち`,
@@ -5874,7 +5876,12 @@
       { signal, cancelMessage: '編成確認後監視を解除しました' }
     );
     if (next.type === 'BATTLE') {
-      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+      await waitForFrameReady({
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        expectedScreen: 'battle',
+        stableMs: 0
+      });
       return { battle: true };
     }
     return recoverKnownPopup(next, {
