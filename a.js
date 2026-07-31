@@ -1112,6 +1112,18 @@
         #runBar button{min-height:40px;height:40px}
         #validationBar button{min-height:32px;height:32px}
       }
+      #dock.narrowViewport.androidCompact{
+        width:var(--dock-width,72vw);width:var(--dock-width,72dvw);
+        height:var(--dock-height,38vh);height:var(--dock-height,38dvh);
+        max-width:82vw;max-width:82dvw;max-height:48vh;max-height:48dvh;border-radius:14px
+      }
+      #dock.androidCompact{font-size:12.3px}
+      #dock.androidCompact #dockHeader{gap:5px;min-height:41px;padding:6px 8px}
+      #dock.androidCompact .title strong{font-size:11.7px}
+      #dock.androidCompact .title small{font-size:9.2px}
+      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:29px;height:29px;min-height:29px;font-size:14.5px}
+      #dock.androidCompact #mainTabs{gap:3px;padding:6px 8px}
+      #dock.androidCompact .tabIcon{width:15px;height:15px;font-size:12px}
       @media(forced-colors:active){
         #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
         .blockCard::before,.paletteButton::after{width:5px}
@@ -1461,6 +1473,7 @@
   }
   let narrowScreen = isNarrowViewport();
   dock.classList.toggle('narrowViewport', narrowScreen);
+  dock.classList.toggle('androidCompact', isAndroidPhone());
   const dragLock = { active: false, pointerId: null, owner: null, restore: null, cancel: null };
 
 
@@ -8524,6 +8537,9 @@
     const viewport = window.visualViewport;
     const viewportWidth = finite(viewport?.width, window.innerWidth);
     const viewportHeight = finite(viewport?.height, window.innerHeight);
+    if (isAndroidPhone()) {
+      return { width: viewportWidth * 0.72, height: viewportHeight * 0.38 };
+    }
     return {
       width: Math.max(260, Math.min(380, viewportWidth * 0.82)),
       height: Math.max(260, Math.min(500, viewportHeight * 0.46))
