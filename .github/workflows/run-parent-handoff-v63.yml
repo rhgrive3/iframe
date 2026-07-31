@@ -1,11 +1,13 @@
 name: Run parent tab handoff v63 patch
 
 on:
-  push:
+  pull_request_target:
     branches:
       - main
-    paths:
-      - '.github/patch-requests/parent-tab-handoff-v63.txt'
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
@@ -16,6 +18,7 @@ concurrency:
 
 jobs:
   patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'automation/parent-tab-handoff-v63'
     runs-on: ubuntu-latest
     steps:
       - name: Check out patch branch
