@@ -2867,6 +2867,34 @@
         addNumber('タイムアウト（秒、0=無制限）', 'timeoutSec', 0, 86400, 1);
         addNumber('成立安定時間（ms）', 'stableMs', 0, 5000, 10);
         break;
+      case 'iframeTapElement': {
+        const selector = textInput(
+          config.selector,
+          input => updateBlockConfig(block, next => { next.selector = input.value; }),
+          '#id または .class',
+          () => block.config.selector
+        );
+        selector.spellcheck = false;
+        const targetLabel = textInput(
+          config.targetLabel,
+          input => updateBlockConfig(block, next => { next.targetLabel = input.value; }),
+          '表示名',
+          () => block.config.targetLabel
+        );
+        grid.append(field('CSSセレクタ', selector), field('表示名', targetLabel));
+        addNumber('対象待ちタイムアウト（秒）', 'timeoutSec', 1, 600, 1);
+        container.append(grid);
+        const pick = element('button', {
+          className: 'primary',
+          text: config.selector ? '画面から選び直す' : '画面から選択'
+        });
+        pick.addEventListener('click', () => startElementPicker(block.id));
+        container.append(
+          element('div', { className: 'toolbar compactActions' }, [pick]),
+          element('div', { className: 'hint', text: '選択中はゲーム側のタップ処理を止め、選んだ要素の一意なCSSセレクタだけを保存します。' })
+        );
+        return;
+      }
       case 'iframeReload':
       case 'iframeBack':
       case 'iframeReady': {
@@ -3208,6 +3236,13 @@
           validateCondition(block, block.config.condition);
           if (finite(block.config.timeoutSec) === 0) add('warning', block, 'タイムアウトが無制限です');
         }
+        if (block.type === 'iframeTapElement') {
+          if (!String(block.config.selector || '').trim()) add('error', block, '押すボタンが選択されていません');
+          else {
+            const syntaxError = selectorSyntaxError(block.config.selector);
+            if (syntaxError) add('error', block, syntaxError);
+          }
+        }
         if (block.type === 'stop') stopped = true;
         if (Array.isArray(block.children)) visit(block.children, depth + 1);
         if (Array.isArray(block.elseChildren)) visit(block.elseChildren, depth + 1);
@@ -3216,7 +3251,7 @@
     visit(workflow.blocks);
     const blockListGuaranteesYield = blocks => blocks.some(block => {
       if (block.type === 'stop') return true;
-      if (['fixedWait', 'randomWait', 'watch', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady'].includes(block.type)) return true;
+      if (['fixedWait', 'randomWait', 'watch', 'iframeTapElement', 'iframeReload', 'iframeBack', 'iframeRoute', 'iframeReady'].includes(block.type)) return true;
       if (BLOCK_DEFINITIONS[block.type]?.category === 'gbf') return true;
       if (block.type === 'repeat' && int(block.config.count) > 0) return blockListGuaranteesYield(block.children || []);
       if (block.type === 'if') {
@@ -5019,6 +5054,54 @@
     });
   }
 
+  function configuredElementState(config) {
+    const selector = String(config.selector || '').trim();
+    if (!selector) throw new FlowError('押すボタンのセレクタが空です', 'TARGET_SELECTOR_EMPTY');
+    const doc = frameDocument();
+    let matches;
+    try {
+      matches = [...doc.querySelectorAll(selector)];
+    } catch {
+      throw new FlowError('押すボタンのセレクタ書式が不正です', 'INVALID_SELECTOR');
+    }
+    if (matches.length > 1) {
+      throw new FlowError(`押すボタンが${matches.length}件一致しました。画面から選び直してください`, 'TARGET_AMBIGUOUS');
+    }
+    const target = matches[0] || null;
+    if (!target || !computedVisible(target)) return false;
+    const disabled = Boolean(
+      ('disabled' in target && target.disabled)
+      || target.getAttribute('aria-disabled') === 'true'
+      || target.classList.contains('disabled')
+    );
+    return disabled ? false : { target, selector };
+  }
+
+  async function tapConfiguredElement(config, context) {
+    const selector = String(config.selector || '').trim();
+    const label = String(config.targetLabel || '').trim() || selector || '指定ボタン';
+    const timeoutMs = clamp(finite(config.timeoutSec, 30), 1, 600) * 1000;
+    const deadline = performance.now() + timeoutMs;
+    while (true) {
+      throwIfAborted(context.signal);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new FlowError(`${label}待ちがタイムアウトしました`, 'TIMEOUT');
+      const found = await monitorFrame(() => configuredElementState(config), {
+        signal: context.signal,
+        timeoutMs: remaining,
+        stableMs: 0,
+        description: `${label}待ち`,
+        observeCharacterData: false
+      });
+      try {
+        await jqTapStrict(found.target, { signal: context.signal, label });
+        return { selector, label };
+      } catch (error) {
+        if (error?.code !== 'STALE_TARGET') throw error;
+      }
+    }
+  }
+
   function randomUniform(min, max, random = Math.random) {
     const a = finite(min, 0);
     const b = finite(max, 0);
@@ -6546,6 +6629,9 @@
           break;
         case 'watch':
           await waitForWorkflowCondition(block.config.condition, blockContext, { timeoutSec: block.config.timeoutSec, stableMs: block.config.stableMs });
+          break;
+        case 'iframeTapElement':
+          await tapConfiguredElement(block.config, blockContext);
           break;
         case 'iframeReload':
           {
