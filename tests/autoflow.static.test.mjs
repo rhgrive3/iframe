@@ -253,13 +253,21 @@ test('assist HP threshold blocks use inclusive above and below comparisons', () 
   assert.ok(execute.includes("assistSelectFullFlow(block.config, blockContext, 'atMost')"));
 });
 
-test('assist flow uses reduced reaction latency only after a raid is selected', () => {
+test('assist flow accelerates refresh through battle handoff without removing state checks', () => {
   assert.ok(source.includes('const TOUCH_FAST_VISIBLE_LATENCY_MS'));
+  assert.ok(source.includes('const TOUCH_FAST_HOLD_LATENCY_MS'));
   const tap = source.slice(source.indexOf('async function jqTapStrict'), source.indexOf('function randomUniform'));
   assert.ok(tap.includes('fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS'));
+  assert.ok(tap.includes('fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS'));
+  const refresh = source.slice(source.indexOf('async function refreshAssistList'), source.indexOf('async function switchAssistSlot'));
+  assert.ok(refresh.includes("jqTapStrict(refresh, { signal, label: '救援一覧更新', fast: true })"));
+  const slot = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
+  assert.ok(slot.includes('fast: true'));
   const supporter = source.slice(source.indexOf('async function waitForSupporterRows'), source.indexOf('async function selectSupporterAuto'));
   assert.ok(supporter.includes('stableMs: config.fastTap ? 0 : 80'));
   assert.ok(supporter.includes('fast: Boolean(config.fastTap)'));
+  const deck = source.slice(source.indexOf('async function pressDeckConfirm'), source.indexOf('async function assistSelectFullFlow'));
+  assert.ok(deck.includes('stableMs: 0'));
   const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
   assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true })'));
   assert.ok(flow.includes('fastTap: true'));
@@ -326,7 +334,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 62'));
+  assert.ok(source.includes('const APP_VERSION = 63'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -604,5 +612,38 @@ test('initial install releases the parent runtime before loading the child game'
   const install = source.slice(source.lastIndexOf('const initialUrl = normalizeInitialUrl()'));
   assert.ok(install.includes('releaseHostRuntimeOnce()'));
   assert.ok(install.indexOf('releaseHostRuntimeOnce()') < install.indexOf('iframe.src = initialUrl'));
+});
+
+test('parent-page restart handoff persists ownership and safe fallbacks', () => {
+  const handoff = source.slice(source.indexOf('function createWorkflowExecutionState'), source.indexOf('async function runBlockList'));
+  assert.ok(source.includes('const WORKFLOW_HANDOFF_SCHEMA_VERSION = 1'));
+  assert.ok(source.includes('const WORKFLOW_HANDOFF_TTL_MS = 5 * 60_000'));
+  assert.ok(handoff.includes('if (window.name !== handoff.targetName) return null'));
+  assert.ok(handoff.includes('handoff.claimedBy && handoff.claimedBy !== instanceId'));
+  assert.ok(handoff.includes('window.open(handoff.parentUrl, handoff.targetName)'));
+  assert.ok(handoff.includes("phase: 'committed', mode: 'same-tab'"));
+  assert.ok(handoff.includes('location.replace(handoff.parentUrl)'));
+  assert.ok(handoff.includes("location.replace('about:blank')"));
+  assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
+});
+
+test('workflow cursor resumes after the restart block without replaying it', () => {
+  const runner = source.slice(source.indexOf('async function runBlockList'), source.indexOf('async function executeWorkflowBlock'));
+  assert.ok(runner.includes('const frame = executionListFrame(context, listKey)'));
+  assert.ok(runner.includes('if (!definition?.container) frame.index = index + 1'));
+  assert.ok(runner.indexOf('if (!definition?.container) frame.index = index + 1') < runner.indexOf('await executeWorkflowBlock(block, context, execution)'));
+  assert.ok(runner.includes('if (definition?.container) frame.index = index + 1'));
+  assert.ok(source.includes('executionState: deepClone(context.executionState)'));
+  assert.ok(source.includes('executionState: createWorkflowExecutionState(resumeRuntime?.executionState)'));
+  assert.ok(source.includes("case 'parentTabRestart'"));
+});
+
+test('nested repeat and conditional frames retain exact in-progress state', () => {
+  assert.ok(source.includes("kind: 'repeat', iteration: 0"));
+  assert.ok(source.includes("kind: 'repeatUntil'"));
+  assert.ok(source.includes('inIteration: false'));
+  assert.ok(source.includes("kind: 'if'"));
+  assert.ok(source.includes("branch: evaluateWorkflowCondition(block.config.condition) ? 'children' : 'elseChildren'"));
+  assert.ok(source.includes('context.executionState = createWorkflowExecutionState()'));
 });
 
