@@ -1,0 +1,1 @@
+Preserve attack and full-auto CJS controls while battle performance mode suppresses all other heavy rendering.
