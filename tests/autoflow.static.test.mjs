@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 49'));
+  assert.ok(source.includes('const APP_VERSION = 50'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -273,6 +273,35 @@ test('professional UX exposes truthful runtime and accessible recovery state', (
   assert.ok(source.includes("if (mode === 'replace' && workflow.blocks.length"));
   const blockList = source.slice(source.indexOf('function renderBlockList'), source.indexOf('function renderWorkflowEditor'));
   assert.equal((blockList.match(/lastElementChild\.disabled = Boolean\(state\.running\)/g) || []).length, 2);
+});
+
+
+test('Granblue runtime flags are authoritative for full auto, attacks, and battle end', () => {
+  const runtime = source.slice(source.indexOf('function runtimeFlagEnabled'), source.indexOf('function battleObservationRoots'));
+  assert.ok(runtime.includes('win.stage?.gGameStatus'));
+  assert.ok(runtime.includes('runtimeFlagEnabled(status.auto_attack)'));
+  assert.ok(runtime.includes('runtimeFlagEnabled(status.enable_auto_button)'));
+  assert.ok(runtime.includes('Number(status.attacking) > 0'));
+  assert.ok(runtime.includes('status.attackQueue?.attackButtonPushed'));
+  assert.ok(runtime.includes('runtimeFlagEnabled(status.finish)'));
+  assert.ok(runtime.includes('runtimeFlagEnabled(status.battle_end)'));
+  assert.ok(runtime.includes('runtimeFlagEnabled(status.already_finish)'));
+  const fullAuto = source.slice(source.indexOf('function fullAutoState'), source.indexOf('function battleObservationRoots'));
+  assert.ok(fullAuto.includes('runtime.available ? runtime.autoAttack'));
+  assert.ok(fullAuto.includes('runtime.available ? runtime.autoButtonEnabled : visible'));
+  const attack = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function attackTransitionFromBaseline'));
+  assert.ok(attack.includes('runtimeAttacking: runtime.attacking'));
+  assert.ok(attack.includes('attackButtonPushed: runtime.attackButtonPushed'));
+  const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
+  assert.ok(end.includes('const runtime = battleRuntimeState(doc)'));
+  assert.ok(end.includes('if (runtime.finished)'));
+});
+
+test('full auto waits for the game runtime to expose an actionable button', () => {
+  const body = source.slice(source.indexOf('async function ensureFullAuto'), source.indexOf('function elementDisplayOn'));
+  assert.ok(body.includes('if (observed.on) return observed;'));
+  assert.ok(body.includes('!observed.exists || !observed.visible || !observed.enabled'));
+  assert.ok(body.indexOf('if (observed.on) return observed;') < body.indexOf('!observed.exists || !observed.visible || !observed.enabled'));
 });
 
 test('battle ended is available as a workflow condition without HP inference', () => {

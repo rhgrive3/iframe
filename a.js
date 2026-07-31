@@ -305,7 +305,7 @@
     return;
   }
 
-  const APP_VERSION = 49;
+  const APP_VERSION = 50;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4843,13 +4843,50 @@
     return { processed };
   }
 
+  function runtimeFlagEnabled(value) {
+    return value === true || value === 1 || value === '1';
+  }
+
+  function battleRuntimeState(doc = frameDocument()) {
+    let status = null;
+    try {
+      const win = doc.defaultView || frameWindow();
+      status = win.stage?.gGameStatus || null;
+    } catch {}
+    if (!status) {
+      return {
+        available: false,
+        autoAttack: false,
+        autoButtonEnabled: false,
+        attacking: false,
+        attackButtonPushed: false,
+        finished: false
+      };
+    }
+    const attackButtonPushed = runtimeFlagEnabled(status.attackQueue?.attackButtonPushed);
+    return {
+      available: true,
+      autoAttack: runtimeFlagEnabled(status.auto_attack),
+      autoButtonEnabled: runtimeFlagEnabled(status.enable_auto_button),
+      attacking: Number(status.attacking) > 0,
+      attackButtonPushed,
+      finished: runtimeFlagEnabled(status.finish)
+        || runtimeFlagEnabled(status.battle_end)
+        || runtimeFlagEnabled(status.already_finish)
+    };
+  }
+
   function fullAutoState(doc = frameDocument()) {
     const button = doc.querySelector(SELECTORS.fullAuto);
+    const visible = computedVisible(button);
+    const runtime = battleRuntimeState(doc);
     return {
       button,
       exists: Boolean(button),
-      visible: computedVisible(button),
-      on: Boolean(button?.classList.contains('on'))
+      visible,
+      enabled: runtime.available ? runtime.autoButtonEnabled : visible,
+      on: runtime.available ? runtime.autoAttack : Boolean(button?.classList.contains('on')),
+      runtime
     };
   }
 
@@ -4877,6 +4914,10 @@
   function detectBattleEndState(doc = frameDocument()) {
     const url = currentFrameUrl();
     if (url.includes('result_multi/')) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
+    const runtime = battleRuntimeState(doc);
+    if (runtime.finished) {
+      return { type: 'RUNTIME_FINISHED', reason: 'ゲーム内部の戦闘終了状態を検出', runtime };
+    }
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
     if (notice && computedVisible(notice)) {
       const text = normalizePopupText(notice.textContent || '');
@@ -5079,8 +5120,8 @@
         if (battleEnd) return { battleEnd };
 
         const observed = fullAutoState(doc);
-        if (!observed.exists || !observed.visible) return false;
         if (observed.on) return observed;
+        if (!observed.exists || !observed.visible || !observed.enabled) return false;
 
         const attack = attackSnapshot(doc);
         const attackReady = Boolean(
@@ -5169,6 +5210,8 @@
     const dummy = doc.querySelector(SELECTORS.attackDummy);
     const cancel = doc.querySelector(SELECTORS.attackCancel);
     const turn = turnSignature(doc);
+    const runtime = battleRuntimeState(doc);
+    const domActorAttacking = Boolean(doc.querySelector(SELECTORS.attackActor));
     return {
       start,
       dummy,
@@ -5176,14 +5219,23 @@
       startVisible: elementDisplayOn(start),
       dummyVisible: elementDisplayOn(dummy),
       cancelVisible: elementDisplayOn(cancel),
-      actorAttacking: Boolean(doc.querySelector(SELECTORS.attackActor)),
+      runtime,
+      runtimeAttacking: runtime.attacking,
+      attackButtonPushed: runtime.attackButtonPushed,
+      actorAttacking: runtime.attacking || runtime.attackButtonPushed || domActorAttacking,
       turn,
       progress: battleProgressSignature(doc, turn)
     };
   }
 
   function isAttackInProgress(snapshot) {
-    return Boolean(snapshot.cancelVisible || snapshot.dummyVisible || snapshot.actorAttacking);
+    return Boolean(
+      snapshot.runtimeAttacking
+      || snapshot.attackButtonPushed
+      || snapshot.cancelVisible
+      || snapshot.dummyVisible
+      || snapshot.actorAttacking
+    );
   }
 
   function attackTransitionFromBaseline(baseline, current) {
