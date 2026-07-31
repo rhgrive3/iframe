@@ -151,3 +151,66 @@ jobs:
       - name: Fail workflow when patch failed
         if: steps.request.outcome != 'success' || steps.execute.outcome != 'success'
         run: exit 1
+
+  rebase_selectable_button:
+    if: github.actor == github.repository_owner && github.event.issue.title == '[automation] rebase selectable button branch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v5
+        with:
+          ref: automation/selectable-button-block-v63
+          fetch-depth: 0
+
+      - name: Merge latest main and validate
+        id: merge
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          exec > >(tee /tmp/selectable-rebase.log) 2>&1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch --no-tags origin main
+          git merge --no-edit origin/main
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+          git push origin HEAD:automation/selectable-button-block-v63
+          echo "new_head=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Report selectable rebase
+        if: always()
+        uses: actions/github-script@v8
+        env:
+          OUTCOME: ${{ steps.merge.outcome }}
+          NEW_HEAD: ${{ steps.merge.outputs.new_head }}
+        with:
+          script: |
+            const fs = require('fs');
+            let log = '';
+            try { log = fs.readFileSync('/tmp/selectable-rebase.log', 'utf8'); } catch {}
+            if (log.length > 45000) log = log.slice(-45000);
+            const success = process.env.OUTCOME === 'success';
+            const summary = success
+              ? `Selectable button branch rebased successfully. New head: \`${process.env.NEW_HEAD}\``
+              : 'Selectable button branch rebase failed.';
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `${summary}\n\n<details><summary>Execution log</summary>\n\n\`\`\`text\n${log}\n\`\`\`\n</details>`
+            });
+            if (success) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                state: 'closed',
+                state_reason: 'completed'
+              });
+            }
+
+      - name: Fail when rebase failed
+        if: steps.merge.outcome != 'success'
+        run: exit 1
