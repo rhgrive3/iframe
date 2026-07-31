@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 63;
+  const APP_VERSION = 64;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4388,8 +4388,10 @@
 
   const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
   const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 24, stdDev: 6, min: 12, max: 42 });
+  const TOUCH_HANDOFF_VISIBLE_LATENCY_MS = Object.freeze({ mean: 8, stdDev: 3, min: 2, max: 16 });
   const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
   const TOUCH_FAST_HOLD_LATENCY_MS = Object.freeze({ mean: 55, stdDev: 9, min: 32, max: 85 });
+  const TOUCH_HANDOFF_HOLD_LATENCY_MS = Object.freeze({ mean: 42, stdDev: 7, min: 28, max: 65 });
   const TOUCH_SCROLL_SETTLE_LATENCY_MS = Object.freeze({ mean: 72, stdDev: 16, min: 36, max: 130 });
   const TOUCH_SCROLL_INERTIA_LATENCY_MS = Object.freeze({ mean: 180, stdDev: 34, min: 110, max: 290 });
   const TOUCH_START_STDDEV_RATIO = Object.freeze({ mean: 0.135, stdDev: 0.008, min: 0.12, max: 0.15 });
@@ -4983,7 +4985,7 @@
     }
   }
 
-  async function jqTapStrict(target, { signal, label: targetLabel = '対象', fast = false } = {}) {
+  async function jqTapStrict(target, { signal, label: targetLabel = '対象', fast = false, handoff = false } = {}) {
     if (!target || !target.isConnected) throw new FlowError(`${targetLabel}が見つかりません`, 'TARGET_MISSING');
     return queueExclusive(async () => {
       throwIfAborted(signal);
@@ -5001,7 +5003,9 @@
         for (let attempt = 0; attempt < 8; attempt++) {
           const fractions = sampleTouchStartFractions();
           await ensureTargetPointVisible(target, fractions, { signal });
-          const visibleLatency = fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS;
+          const visibleLatency = handoff
+            ? TOUCH_HANDOFF_VISIBLE_LATENCY_MS
+            : fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS;
           await abortableDelay(sampleTruncatedNormalMs(visibleLatency), signal);
           if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
             throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
@@ -5027,7 +5031,9 @@
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
         touchActive = true;
-        const holdLatency = fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS;
+        const holdLatency = handoff
+          ? TOUCH_HANDOFF_HOLD_LATENCY_MS
+          : fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS;
         const holdDuration = sampleTruncatedNormalMs(holdLatency);
         const endPoint = sampleTouchEndPoint(start, start.rect);
         const movement = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
@@ -5130,13 +5136,26 @@
     ].filter(Boolean);
   }
 
-  function waitForGbfState(accepted, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, stableMs = 0, description = '画面状態待ち' } = {}) {
+  function waitForGbfState(accepted, {
+    signal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    stableMs = 0,
+    description = '画面状態待ち',
+    intervalMs = null
+  } = {}) {
     const acceptedSet = new Set(accepted);
     return monitorFrame(() => {
       const stateInfo = detectScreenState();
       if (stateInfo.type === 'UNKNOWN_ERROR') return stateInfo;
       return acceptedSet.has(stateInfo.type) ? stateInfo : false;
-    }, { signal, timeoutMs, stableMs, description, observeRoots: gbfStateObservationRoots });
+    }, {
+      signal,
+      timeoutMs,
+      stableMs,
+      description,
+      observeRoots: gbfStateObservationRoots,
+      intervalMs
+    });
   }
 
   function assertNoUnknownPopup(doc = frameDocument()) {
@@ -5201,6 +5220,7 @@
   }
 
   const MAX_RECENT_RAID_IDS = 128;
+  const ASSIST_HANDOFF_POLL_MS = 50;
 
   function recentRaidIdSet(context = state.running) {
     const target = context || state.running;
@@ -5237,7 +5257,7 @@
     ) || null;
   }
 
-  async function tapCurrentAssistRow(selected, context, { maxRebinds = 20, fast = false } = {}) {
+  async function tapCurrentAssistRow(selected, context, { maxRebinds = 20, fast = false, handoff = false } = {}) {
     const { signal } = context;
     const raidId = String(selected?.raidId || '');
     const label = `救援 ${raidId || selected?.index + 1 || ''}`.trim();
@@ -5250,7 +5270,7 @@
       if (!target || !target.isConnected) return false;
 
       try {
-        await jqTapStrict(target, { signal, label, fast });
+        await jqTapStrict(target, { signal, label, fast, handoff });
         resetBattleEndDetection({ expectedRaidId: raidId });
         return true;
       } catch (error) {
@@ -5442,7 +5462,8 @@
       signal: context.signal,
       timeoutMs: config.timeoutSec * 1000,
       stableMs: config.fastTap ? 0 : 80,
-      description: 'サポーター候補待ち'
+      description: 'サポーター候補待ち',
+      intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null
     });
   }
 
@@ -5460,9 +5481,15 @@
       waitSignal => waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
         signal: waitSignal,
         timeoutMs: config.timeoutSec * 1000,
-        description: 'サポーター選択後待ち'
+        description: 'サポーター選択後待ち',
+        intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null
       }),
-      () => jqTapStrict(selected.row, { signal, label: `サポーター ${selected.name}`, fast: Boolean(config.fastTap) }),
+      () => jqTapStrict(selected.row, {
+        signal,
+        label: `サポーター ${selected.name}`,
+        fast: Boolean(config.fastTap),
+        handoff: Boolean(config.fastTap)
+      }),
       { signal, cancelMessage: 'サポーター選択監視を解除しました' }
     );
     if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
@@ -5481,9 +5508,15 @@
       waitSignal => waitForGbfState(['DECK_CONFIRM', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
         signal: waitSignal,
         timeoutMs: config.timeoutSec * 1000,
-        description: 'サポーター自動選択後待ち'
+        description: 'サポーター自動選択後待ち',
+        intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null
       }),
-      () => jqTapStrict(auto, { signal, label: 'サポーター自動選択' }),
+      () => jqTapStrict(auto, {
+        signal,
+        label: 'サポーター自動選択',
+        fast: Boolean(config.fastTap),
+        handoff: Boolean(config.fastTap)
+      }),
       { signal, cancelMessage: 'サポーター自動選択監視を解除しました' }
     );
   }
@@ -6275,20 +6308,18 @@
       waitSignal => waitForGbfState(['BATTLE', 'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'], {
         signal: waitSignal,
         timeoutMs: config.timeoutSec * 1000,
-        description: '編成確認後待ち'
+        description: '編成確認後待ち',
+        intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null
       }),
-      () => jqTapStrict(button, { signal, label: '編成確認OK', fast: Boolean(config.fastTap) }),
+      () => jqTapStrict(button, {
+        signal,
+        label: '編成確認OK',
+        fast: Boolean(config.fastTap),
+        handoff: Boolean(config.fastTap)
+      }),
       { signal, cancelMessage: '編成確認後監視を解除しました' }
     );
-    if (next.type === 'BATTLE') {
-      await waitForFrameReady({
-        signal,
-        timeoutMs: config.timeoutSec * 1000,
-        expectedScreen: 'battle',
-        stableMs: 0
-      });
-      return { battle: true };
-    }
+    if (next.type === 'BATTLE') return { battle: true };
     return recoverKnownPopup(next, {
       baseDelaySec: config.refreshBaseDelaySec ?? 0.6,
       jitterSec: config.refreshJitterSec ?? 0,
@@ -6357,13 +6388,18 @@
       const selected = cyclesAssistSlots
         ? [...ranked].sort((a, b) => a.index - b.index)[0]
         : ranked[0];
-      const tapped = await tapCurrentAssistRow(selected, context, { fast: true });
+      const tapped = await tapCurrentAssistRow(selected, context, { fast: true, handoff: true });
       if (!tapped) continue;
 
       let next = await waitForGbfState([
         'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR',
         'DECK_CONFIRM', 'SUPPORTER', 'UNCLAIMED_LIST', 'BATTLE'
-      ], { signal, timeoutMs: config.timeoutSec * 1000, description: '救援選択後待ち' });
+      ], {
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        description: '救援選択後待ち',
+        intervalMs: ASSIST_HANDOFF_POLL_MS
+      });
       if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
       if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
         await recoverKnownPopup(next, refreshConfig, context);

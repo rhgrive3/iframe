@@ -253,23 +253,28 @@ test('assist HP threshold blocks use inclusive above and below comparisons', () 
   assert.ok(execute.includes("assistSelectFullFlow(block.config, blockContext, 'atMost')"));
 });
 
-test('assist flow accelerates refresh through battle handoff without removing state checks', () => {
-  assert.ok(source.includes('const TOUCH_FAST_VISIBLE_LATENCY_MS'));
-  assert.ok(source.includes('const TOUCH_FAST_HOLD_LATENCY_MS'));
+test('assist success handoff uses 50ms polling and dedicated rapid taps', () => {
+  assert.ok(source.includes('const ASSIST_HANDOFF_POLL_MS = 50'));
+  assert.ok(source.includes('const TOUCH_HANDOFF_VISIBLE_LATENCY_MS'));
+  assert.ok(source.includes('const TOUCH_HANDOFF_HOLD_LATENCY_MS'));
   const tap = source.slice(source.indexOf('async function jqTapStrict'), source.indexOf('function randomUniform'));
-  assert.ok(tap.includes('fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS'));
-  assert.ok(tap.includes('fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS'));
+  assert.ok(tap.includes('handoff = false'));
+  assert.ok(tap.includes('TOUCH_HANDOFF_VISIBLE_LATENCY_MS'));
+  assert.ok(tap.includes('TOUCH_HANDOFF_HOLD_LATENCY_MS'));
   const refresh = source.slice(source.indexOf('async function refreshAssistList'), source.indexOf('async function switchAssistSlot'));
   assert.ok(refresh.includes("jqTapStrict(refresh, { signal, label: '救援一覧更新', fast: true })"));
-  const slot = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
-  assert.ok(slot.includes('fast: true'));
   const supporter = source.slice(source.indexOf('async function waitForSupporterRows'), source.indexOf('async function selectSupporterAuto'));
-  assert.ok(supporter.includes('stableMs: config.fastTap ? 0 : 80'));
-  assert.ok(supporter.includes('fast: Boolean(config.fastTap)'));
+  assert.ok(supporter.includes('intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null'));
+  assert.ok(supporter.includes('handoff: Boolean(config.fastTap)'));
   const deck = source.slice(source.indexOf('async function pressDeckConfirm'), source.indexOf('async function assistSelectFullFlow'));
-  assert.ok(deck.includes('stableMs: 0'));
+  assert.ok(deck.includes('intervalMs: config.fastTap ? ASSIST_HANDOFF_POLL_MS : null'));
+  assert.ok(deck.includes('handoff: Boolean(config.fastTap)'));
+  assert.ok(deck.includes("if (next.type === 'BATTLE') return { battle: true };"));
+  assert.ok(!deck.includes('await waitForFrameReady'));
   const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
-  assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true })'));
+  assert.ok(flow.includes('tapCurrentAssistRow(selected, context, { fast: true, handoff: true })'));
+  const selectionWait = flow.slice(flow.indexOf('let next = await waitForGbfState'), flow.indexOf("if (next.type === 'UNKNOWN_ERROR')"));
+  assert.ok(selectionWait.includes('intervalMs: ASSIST_HANDOFF_POLL_MS'));
   assert.ok(flow.includes('fastTap: true'));
 });
 
@@ -334,7 +339,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 63'));
+  assert.ok(source.includes('const APP_VERSION = 64'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
