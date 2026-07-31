@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 52'));
+  assert.ok(source.includes('const APP_VERSION = 53'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -400,4 +400,16 @@ test('battle performance keeps attack and full-auto controls visible', () => {
   assert.ok(child.includes('.cnt-raid-stage canvas#canvas { visibility:visible!important; }'));
   assert.ok(child.includes('.cnt-raid-stage .btn-auto,'));
   assert.ok(child.includes('.btn-attack-start'));
+});
+
+
+
+test('battle performance does not leak enemy rendering through stale button textures', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const protectedCheck = child.slice(child.indexOf('function hasProtectedBattleTexture'), child.indexOf('function patchWebGLTracking'));
+  assert.ok(child.includes('lastBoundTexture: null'));
+  assert.ok(child.includes('state.lastBoundTexture = texture;'));
+  assert.ok(protectedCheck.includes('protectedBattleTextures.has(state.lastBoundTexture)'));
+  assert.ok(!protectedCheck.includes('texturesByUnit.values()'));
+  assert.ok(child.includes('if (state.lastBoundTexture === texture) state.lastBoundTexture = null;'));
 });

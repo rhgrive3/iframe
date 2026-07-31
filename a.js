@@ -128,7 +128,7 @@
     function webglState(context) {
       let state = webglBindings.get(context);
       if (!state) {
-        state = { activeUnit: context?.TEXTURE0 ?? 0, texturesByUnit: new Map() };
+        state = { activeUnit: context?.TEXTURE0 ?? 0, texturesByUnit: new Map(), lastBoundTexture: null };
         webglBindings.set(context, state);
       }
       return state;
@@ -136,11 +136,7 @@
 
     function hasProtectedBattleTexture(context) {
       const state = webglBindings.get(context);
-      if (!state) return false;
-      for (const texture of state.texturesByUnit.values()) {
-        if (texture && protectedBattleTextures.has(texture)) return true;
-      }
-      return false;
+      return Boolean(state?.lastBoundTexture && protectedBattleTextures.has(state.lastBoundTexture));
     }
 
     function patchWebGLTracking(prototype) {
@@ -161,7 +157,12 @@
       });
       wrap('bindTexture', function (original, args) {
         const result = original.apply(this, args);
-        if (args[0] === this.TEXTURE_2D) webglState(this).texturesByUnit.set(webglState(this).activeUnit, args[1] || null);
+        if (args[0] === this.TEXTURE_2D) {
+          const state = webglState(this);
+          const texture = args[1] || null;
+          state.texturesByUnit.set(state.activeUnit, texture);
+          state.lastBoundTexture = texture;
+        }
         return result;
       });
       for (const name of ['texImage2D', 'texSubImage2D']) {
@@ -181,6 +182,7 @@
         const texture = args[0];
         if (texture) protectedBattleTextures.delete(texture);
         const state = webglState(this);
+        if (state.lastBoundTexture === texture) state.lastBoundTexture = null;
         for (const [unit, bound] of state.texturesByUnit) {
           if (bound === texture) state.texturesByUnit.delete(unit);
         }
@@ -387,7 +389,7 @@
     return;
   }
 
-  const APP_VERSION = 52;
+  const APP_VERSION = 53;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
