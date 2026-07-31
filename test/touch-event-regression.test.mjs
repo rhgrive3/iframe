@@ -28,6 +28,21 @@ test('tap start is a session-consistent offset 2D truncated normal without edge 
   assert.doesNotMatch(source, /y: clamp\(0\.5/);
 });
 
+test('occluded tap coordinates are resampled before the gesture fails', () => {
+  const start = source.indexOf('async function jqTapStrict');
+  const end = source.indexOf('function randomUniform', start);
+  const block = source.slice(start, end);
+  const loopStart = block.indexOf('for (let attempt = 0; attempt < 8; attempt++)');
+  const sample = block.indexOf('const fractions = sampleTouchStartFractions()', loopStart);
+  const hitTest = block.indexOf('const hit = target.ownerDocument.elementFromPoint(checked.x, checked.y)', sample);
+  const retry = block.indexOf("if (!hit || (hit !== target && !target.contains(hit))) continue", hitTest);
+  assert.ok(loopStart >= 0);
+  assert.ok(sample > loopStart);
+  assert.ok(hitTest > sample);
+  assert.ok(retry > hitTest);
+  assert.match(block, /const code = sawStablePoint \? 'TARGET_OCCLUDED' : 'TARGET_UNSTABLE'/);
+});
+
 test('optional Touch physical attributes are omitted', () => {
   const start = source.indexOf('function createSyntheticTouch');
   const end = source.indexOf('function dispatchSyntheticTouch', start);

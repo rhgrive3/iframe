@@ -387,7 +387,7 @@
     return;
   }
 
-  const APP_VERSION = 51;
+  const APP_VERSION = 52;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4455,9 +4455,10 @@
       let activePoint = null;
       let touchActive = false;
       try {
-        const fractions = sampleTouchStartFractions();
         let start = null;
-        for (let attempt = 0; attempt < 4; attempt++) {
+        let sawStablePoint = false;
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const fractions = sampleTouchStartFractions();
           await ensureTargetPointVisible(target, fractions, { signal });
           const visibleLatency = fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS;
           await abortableDelay(sampleTruncatedNormalMs(visibleLatency), signal);
@@ -4465,17 +4466,21 @@
             throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
           }
           const checked = await ensureTargetPointVisible(target, fractions, { signal });
-          if (!checked.scrolled) {
-            start = checked;
-            break;
-          }
+          if (checked.scrolled) continue;
+          sawStablePoint = true;
+          const hit = target.ownerDocument.elementFromPoint(checked.x, checked.y);
+          if (!hit || (hit !== target && !target.contains(hit))) continue;
+          start = checked;
+          dispatchTarget = hit;
+          break;
         }
-        if (!start) throw new FlowError(`${targetLabel}の表示位置が安定しません`, 'TARGET_UNSTABLE');
-        const hit = target.ownerDocument.elementFromPoint(start.x, start.y);
-        if (!hit || (hit !== target && !target.contains(hit))) {
-          throw new FlowError(`${targetLabel}のガウス座標が他要素に遮られています`, 'TARGET_OCCLUDED');
+        if (!start) {
+          const code = sawStablePoint ? 'TARGET_OCCLUDED' : 'TARGET_UNSTABLE';
+          const reason = sawStablePoint
+            ? `${targetLabel}のガウス座標が他要素に遮られています`
+            : `${targetLabel}の表示位置が安定しません`;
+          throw new FlowError(reason, code);
         }
-        dispatchTarget = hit;
         identifier = Math.floor(randomUniform(1, 2_147_483_647));
         activePoint = start;
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
