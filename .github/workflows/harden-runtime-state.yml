@@ -43,20 +43,40 @@ jobs:
           git commit -m 'chore: record runtime state patch runner start'
           git push origin HEAD:main
 
-      - name: Patch runtime-backed Granblue state handling
-        run: python3 .github/scripts/harden-runtime-state.py
-
-      - name: Validate
+      - name: Patch and validate
+        id: patch
+        continue-on-error: true
         shell: bash
         run: |
+          set +e
+          bash -o pipefail <<'RUN' > /tmp/runtime-state-patch.log 2>&1
           set -euo pipefail
+          python3 .github/scripts/harden-runtime-state.py
           node --check a.js
           mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
           if ((${#test_files[@]})); then
             node --test "${test_files[@]}"
           fi
+          RUN
+          status=$?
+          cat /tmp/runtime-state-patch.log
+          exit "$status"
+
+      - name: Record patch failure
+        if: steps.patch.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          cp /tmp/runtime-state-patch.log .github/patch-diagnostics/runtime-state-error.txt
+          git add .github/patch-diagnostics/runtime-state-error.txt
+          git commit -m 'chore: record runtime state patch failure'
+          git push origin HEAD:main
+          exit 1
 
       - name: Commit generated patch
+        if: steps.patch.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -65,7 +85,8 @@ jobs:
           git rm .github/workflows/harden-runtime-state.yml
           git rm .github/scripts/harden-runtime-state.py
           git rm .github/patch-diagnostics/runtime-state-started.txt
-          git add a.js tests/autoflow.static.test.mjs
+          rm -f .github/patch-diagnostics/runtime-state-error.txt
+          git add -A a.js tests/autoflow.static.test.mjs .github/patch-diagnostics
           git diff --cached --check
           git commit -m 'fix: use Granblue runtime state for battle automation'
           git push origin HEAD:main
