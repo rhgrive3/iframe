@@ -153,11 +153,14 @@ test('tap-backed state waits share immediate cancellation cleanup', () => {
   assert.ok(!unclaimed.includes('querySelectorAll(SELECTORS.unclaimedRows)'));
 });
 
-test('game-route navigation tears down and recreates the iframe browsing context', () => {
+test('game-route navigation drops the old document before reusing the iframe shell', () => {
   const helper = source.slice(source.indexOf('function stopRuntimeTelemetry'), source.indexOf('function computedVisible'));
   assert.ok(helper.includes('async function replaceFrame'));
-  assert.ok(helper.includes('releaseFrameRuntime(previousFrame)'));
-  assert.ok(helper.includes('await blankFrame(previousFrame)'));
+  assert.ok(helper.includes("notifyFrameLifecycle(previousFrame, null, 'detach')"));
+  assert.ok(helper.includes('releaseFrameParentReferences(previousFrame)'));
+  assert.ok(helper.indexOf("notifyFrameLifecycle(previousFrame, null, 'detach')") < helper.indexOf('releaseFrameRuntime(previousFrame)'));
+  assert.ok(helper.includes('const blanked = await blankFrame(previousFrame)'));
+  assert.ok(helper.includes('const replaceElement = forceNewElement || !blanked'));
   assert.ok(helper.includes("location.replace('about:blank')"));
   assert.ok(helper.includes('const nextFrame = previousFrame.cloneNode(false)'));
   assert.ok(helper.includes('previousFrame.replaceWith(nextFrame)'));
@@ -313,7 +316,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 60'));
+  assert.ok(source.includes('const APP_VERSION = 61'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -486,8 +489,10 @@ test('iframe recycling destroys child runtimes and releases parent references im
 
   const lifecycle = source.slice(source.indexOf('const cleanup = new Set()'), source.indexOf('function computedVisible'));
   assert.ok(lifecycle.includes('const frameLifecycleSubscribers = new Set()'));
-  assert.ok(lifecycle.includes('notifyFrameLifecycle(previousFrame, nextFrame)'));
-  assert.ok(lifecycle.includes("replaceFrame(destination, { forceNewElement = true }"));
+  assert.ok(lifecycle.includes("notifyFrameLifecycle(previousFrame, null, 'detach')"));
+  assert.ok(lifecycle.includes("notifyFrameLifecycle(previousFrame, nextFrame, 'attach')"));
+  assert.ok(lifecycle.includes("replaceFrame(destination, { forceNewElement = false }"));
+  assert.ok(lifecycle.includes('releaseFrameParentReferences(previousFrame)'));
   assert.ok(lifecycle.includes("clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました')"));
   assert.ok(lifecycle.includes('previousFrame = null'));
   assert.ok(lifecycle.includes('state.frameGeneration === loadedGeneration'));
@@ -497,6 +502,7 @@ test('iframe recycling destroys child runtimes and releases parent references im
   assert.ok(monitor.includes('frameLifecycleSubscribers.add(onFrameLifecycle)'));
   assert.ok(monitor.includes('frameLifecycleSubscribers.delete(onFrameLifecycle)'));
   assert.ok(monitor.includes("listenedFrame?.removeEventListener('load', onFrameLoad)"));
+  assert.ok(monitor.includes("if (phase === 'detach') return"));
 });
 
 test('standalone Safari relief also rebuilds the MyPage browsing context', () => {
@@ -563,5 +569,25 @@ test('workflow lifecycle releases the armed battle document reference', () => {
     source.indexOf('async function ensureFullAuto')
   );
   assert.ok(restart.includes('resetBattleEndDetection();'));
+});
+
+
+test('host shutdown neutralizes top-level reload paths before Granblue cleanup', () => {
+  const helper = source.slice(source.indexOf('function detachHostRuntimeEvents'), source.indexOf('function blankFrame'));
+  assert.ok(helper.includes("jq(doc).off('ajaxStop ajaxError')"));
+  assert.ok(helper.includes("jq(win).off('resize hashchange popstate error')"));
+  assert.ok(helper.includes('win.onresize = null'));
+  assert.ok(helper.includes('win.requirejs.onError = () => {}'));
+  assert.ok(helper.includes('if (hostShell) detachHostRuntimeEvents(win, doc)'));
+  assert.ok(helper.includes('win.Game.loading.loadStart = () => {}'));
+  assert.ok(helper.includes('releaseWindowRuntime(window, document, { stopWindow: false, hostShell: true })'));
+  const discard = helper.slice(helper.indexOf('function discardHostRuntimeShell'), helper.indexOf('function releaseHostRuntimeOnce'));
+  assert.ok(!discard.includes("      '_',"));
+});
+
+test('initial install releases the parent runtime before loading the child game', () => {
+  const install = source.slice(source.lastIndexOf('const initialUrl = normalizeInitialUrl()'));
+  assert.ok(install.includes('releaseHostRuntimeOnce()'));
+  assert.ok(install.indexOf('releaseHostRuntimeOnce()') < install.indexOf('iframe.src = initialUrl'));
 });
 

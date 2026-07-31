@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 60;
+  const APP_VERSION = 61;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1400,9 +1400,9 @@
   const cleanup = new Set();
   const frameLifecycleSubscribers = new Set();
   const addCleanup = fn => (cleanup.add(fn), fn);
-  const notifyFrameLifecycle = (previousFrame, nextFrame) => {
+  const notifyFrameLifecycle = (previousFrame, nextFrame, phase = 'attach') => {
     for (const subscriber of [...frameLifecycleSubscribers]) {
-      try { subscriber({ previousFrame, nextFrame }); } catch {}
+      try { subscriber({ previousFrame, nextFrame, phase }); } catch {}
     }
   };
   const deepClone = value => JSON.parse(JSON.stringify(value));
@@ -3459,9 +3459,23 @@
     } catch {}
   }
 
-  function releaseWindowRuntime(win, doc, { stopWindow = true } = {}) {
+  function detachHostRuntimeEvents(win, doc) {
+    const jq = win?.jQuery || win?.$;
+    if (typeof jq === 'function') {
+      try { jq(doc).off('ajaxStop ajaxError'); } catch {}
+      try { jq(win).off('resize hashchange popstate error'); } catch {}
+    }
+    try { win.onresize = null; } catch {}
+    try { win.onhashchange = null; } catch {}
+    try { win.onpopstate = null; } catch {}
+    try { win.onerror = null; } catch {}
+    try { if (win?.requirejs) win.requirejs.onError = () => {}; } catch {}
+  }
+
+  function releaseWindowRuntime(win, doc, { stopWindow = true, hostShell = false } = {}) {
     if (!win || !doc) return;
     try {
+      if (hostShell) detachHostRuntimeEvents(win, doc);
       try { win[BATTLE_PERFORMANCE_RUNTIME_KEY]?.destroy?.(); } catch {}
       stopRuntimeTelemetry(win);
       try { releaseKnownGraphicsContexts(win); } catch {}
@@ -3469,6 +3483,11 @@
       let routerCleaned = false;
       try {
         if (typeof win?.Game?.router?.move === 'function') {
+          if (hostShell) {
+            try {
+              if (typeof win.Game?.loading?.loadStart === 'function') win.Game.loading.loadStart = () => {};
+            } catch {}
+          }
           win.Game.router.move();
           routerCleaned = true;
         }
@@ -3518,6 +3537,15 @@
     } catch {}
   }
 
+  function releaseFrameParentReferences(frame) {
+    if (!frame) return;
+    let frameDoc = null;
+    try { frameDoc = frame.contentDocument; } catch {}
+    try { if (frameDoc) battleProgressCache.delete(frameDoc); } catch {}
+    state.activeBattleDocument = null;
+    state.activeBattleStatus = null;
+  }
+
   function hideBackgroundRendering() {
     if (!backgroundBody) return;
     backgroundBody.style.visibility = 'hidden';
@@ -3538,7 +3566,6 @@
       'define',
       'jQuery',
       '$',
-      '_',
       'stage',
       'exportRoot',
       'cjs',
@@ -3560,7 +3587,7 @@
     if (state.hostRuntimeReleased) return;
     state.hostRuntimeReleased = true;
     window[HOST_RUNTIME_RELEASED_KEY] = true;
-    releaseWindowRuntime(window, document, { stopWindow: false });
+    releaseWindowRuntime(window, document, { stopWindow: false, hostShell: true });
     discardHostRuntimeShell();
   }
 
@@ -3568,19 +3595,20 @@
     return new Promise(resolve => {
       let settled = false;
       let timer = null;
-      const finish = () => {
+      const finish = loaded => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        frame.removeEventListener('load', finish);
-        resolve();
+        frame.removeEventListener('load', onLoad);
+        resolve(Boolean(loaded));
       };
-      frame.addEventListener('load', finish);
-      timer = setTimeout(finish, 1200);
+      const onLoad = () => finish(true);
+      frame.addEventListener('load', onLoad);
+      timer = setTimeout(() => finish(false), 3000);
       try { frame.contentWindow.location.replace('about:blank'); }
       catch {
         try { frame.src = 'about:blank'; }
-        catch { finish(); }
+        catch { finish(false); }
       }
     });
   }
@@ -3616,7 +3644,7 @@
     frame.addEventListener('load', handleFrameLoad);
   }
 
-  async function replaceFrame(destination, { forceNewElement = true } = {}) {
+  async function replaceFrame(destination, { forceNewElement = false } = {}) {
     const targetUrl = String(destination || '').trim();
     if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
     if (state.destroyed) throw new DOMException('AutoFlowは終了しています', 'AbortError');
@@ -3629,14 +3657,18 @@
     clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました');
     let previousFrame = iframe;
     previousFrame.removeEventListener('load', handleFrameLoad);
+    notifyFrameLifecycle(previousFrame, null, 'detach');
+    releaseFrameParentReferences(previousFrame);
     releaseFrameRuntime(previousFrame);
-    await blankFrame(previousFrame);
+    const blanked = await blankFrame(previousFrame);
     assertCurrentNavigation();
     await new Promise(resolve => setTimeout(resolve, 0));
     assertCurrentNavigation();
-    if (!forceNewElement) {
+    const replaceElement = forceNewElement || !blanked;
+    if (!replaceElement) {
+      iframe = previousFrame;
       bindFrameLoad(previousFrame);
-      notifyFrameLifecycle(previousFrame, previousFrame);
+      notifyFrameLifecycle(previousFrame, previousFrame, 'attach');
       try { previousFrame.contentWindow.location.replace(targetUrl); }
       catch { previousFrame.src = targetUrl; }
       if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = previousFrame;
@@ -3647,7 +3679,7 @@
     bindFrameLoad(nextFrame);
     previousFrame.replaceWith(nextFrame);
     iframe = nextFrame;
-    notifyFrameLifecycle(previousFrame, nextFrame);
+    notifyFrameLifecycle(previousFrame, nextFrame, 'attach');
     previousFrame = null;
     await new Promise(resolve => setTimeout(resolve, 0));
     assertCurrentNavigation();
@@ -3911,7 +3943,7 @@
         }
         finish(resolve, result === true ? {} : result);
       };
-      const onFrameLifecycle = () => {
+      const onFrameLifecycle = ({ phase } = {}) => {
         if (settled) return;
         observer?.disconnect();
         observer = null;
@@ -3921,6 +3953,7 @@
         lastMutation = performance.now();
         listenedFrame?.removeEventListener('load', onFrameLoad);
         listenedFrame = null;
+        if (phase === 'detach') return;
         bindObserver();
         evaluate();
       };
@@ -8330,6 +8363,9 @@
   });
   const initialUrl = normalizeInitialUrl();
   urlInput.value = initialUrl;
+  try {
+    if (new URL(initialUrl, location.href).origin === location.origin) releaseHostRuntimeOnce();
+  } catch {}
   iframe.src = initialUrl;
 
   window.__AUTO_TEST__ = {
