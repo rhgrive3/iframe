@@ -263,7 +263,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 57'));
+  assert.ok(source.includes('const APP_VERSION = 58'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -282,7 +282,8 @@ test('professional UX exposes truthful runtime and accessible recovery state', (
 
 test('Granblue runtime flags are authoritative for full auto, attacks, and battle end', () => {
   const runtime = source.slice(source.indexOf('function runtimeFlagEnabled'), source.indexOf('function battleObservationRoots'));
-  assert.ok(runtime.includes('win.stage?.gGameStatus'));
+  assert.ok(runtime.includes('stage = win.stage || null'));
+  assert.ok(runtime.includes('status = stage?.gGameStatus || null'));
   assert.ok(runtime.includes('runtimeFlagEnabled(status.auto_attack)'));
   assert.ok(runtime.includes('runtimeFlagEnabled(status.enable_auto_button)'));
   assert.ok(runtime.includes('Number(status.attacking) > 0'));
@@ -299,8 +300,8 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   assert.ok(attack.includes('const useDomFallback = !runtime.available'));
   assert.ok(attack.includes("progress: useDomFallback ? battleProgressSignature(doc, turn) : ''"));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
-  assert.ok(end.includes('const runtime = battleRuntimeState(doc)'));
-  assert.ok(end.includes('if (runtime.finished)'));
+  assert.ok(end.includes('const runtime = trustLiveBattleRuntime(battleRuntimeState(doc))'));
+  assert.ok(end.includes('runtime.status === state.activeBattleStatus'));
 });
 
 test('full auto waits for the game runtime to expose an actionable button', () => {
@@ -450,5 +451,31 @@ test('iframe recycling destroys child runtimes and releases parent references im
 test('standalone Safari relief also rebuilds the MyPage browsing context', () => {
   const relief = source.slice(source.indexOf('async function releaseGranblueResources'), source.indexOf('async function reloadForBattleEndProbe'));
   assert.ok(relief.includes("hardNavigateAfterRelief(gameRouteUrl('#mypage'), 'mypage', config, context)"));
+});
+
+test('full-auto startup rejects stale finished state from the previous rescue battle', () => {
+  const runtime = source.slice(
+    source.indexOf('function runtimeFlagEnabled'),
+    source.indexOf('function visibleMyPageButton')
+  );
+  const assistTap = source.slice(
+    source.indexOf('async function tapCurrentAssistRow'),
+    source.indexOf('function assistListSignature')
+  );
+  const restart = source.slice(
+    source.indexOf('async function restartWorkflowAfterBattleEnd'),
+    source.indexOf('async function ensureFullAuto')
+  );
+  assert.ok(source.includes('activeBattleStatus: null'));
+  assert.ok(source.includes("expectedBattleRaidId: ''"));
+  assert.ok(assistTap.includes('state.activeBattleStatus = null'));
+  assert.ok(assistTap.includes('state.expectedBattleRaidId = raidId'));
+  assert.ok(runtime.includes('stage?.pJsnData?.raid_id'));
+  assert.ok(runtime.includes('raidId === expectedRaidId'));
+  assert.ok(runtime.includes('function trustLiveBattleRuntime'));
+  assert.ok(runtime.includes('runtime.status === state.activeBattleStatus'));
+  assert.ok(!runtime.includes("if (runtime.finished) {\n      return { type: 'RUNTIME_FINISHED'"));
+  assert.ok(restart.includes('state.activeBattleStatus = null'));
+  assert.ok(restart.includes("state.expectedBattleRaidId = ''"));
 });
 

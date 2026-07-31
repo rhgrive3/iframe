@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 57;
+  const APP_VERSION = 58;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1379,6 +1379,8 @@
     recordReturnFocus: null,
     activeRecordPointers: new Map(),
     pendingAutoAttack: null,
+    activeBattleStatus: null,
+    expectedBattleRaidId: '',
     runningCard: null,
     runningBadge: null,
     dockX: null,
@@ -4777,6 +4779,8 @@
 
       try {
         await jqTapStrict(target, { signal, label, fast });
+        state.activeBattleStatus = null;
+        state.expectedBattleRaidId = raidId;
         return true;
       } catch (error) {
         if (error?.code !== 'STALE_TARGET') throw error;
@@ -5080,14 +5084,23 @@
   }
 
   function battleRuntimeState(doc = frameDocument()) {
+    let stage = null;
     let status = null;
     try {
       const win = doc.defaultView || frameWindow();
-      status = win.stage?.gGameStatus || null;
+      stage = win.stage || null;
+      status = stage?.gGameStatus || null;
     } catch {}
-    if (!status) {
+    const raidId = String(stage?.pJsnData?.raid_id || '');
+    const expectedRaidId = String(state.expectedBattleRaidId || '');
+    const matchesExpectedBattle = !expectedRaidId || (Boolean(raidId) && raidId === expectedRaidId);
+    if (!status || !matchesExpectedBattle) {
       return {
         available: false,
+        status,
+        raidId,
+        expectedRaidId,
+        matchesExpectedBattle,
         autoAttack: false,
         autoButtonEnabled: false,
         attacking: false,
@@ -5098,6 +5111,10 @@
     const attackButtonPushed = runtimeFlagEnabled(status.attackQueue?.attackButtonPushed);
     return {
       available: true,
+      status,
+      raidId,
+      expectedRaidId,
+      matchesExpectedBattle: true,
       autoAttack: runtimeFlagEnabled(status.auto_attack),
       autoButtonEnabled: runtimeFlagEnabled(status.enable_auto_button),
       attacking: Number(status.attacking) > 0,
@@ -5106,6 +5123,16 @@
         || runtimeFlagEnabled(status.battle_end)
         || runtimeFlagEnabled(status.already_finish)
     };
+  }
+
+  function trustLiveBattleRuntime(runtime) {
+    if (!runtime?.available || runtime.finished) return runtime;
+    const live = runtime.autoButtonEnabled
+      || runtime.autoAttack
+      || runtime.attacking
+      || runtime.attackButtonPushed;
+    if (live && runtime.status) state.activeBattleStatus = runtime.status;
+    return runtime;
   }
 
   function fullAutoState(doc = frameDocument()) {
@@ -5146,9 +5173,9 @@
   function detectBattleEndState(doc = frameDocument()) {
     const url = currentFrameUrl();
     if (url.includes('result_multi/')) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
-    const runtime = battleRuntimeState(doc);
-    if (runtime.finished) {
-      return { type: 'RUNTIME_FINISHED', reason: 'ゲーム内部の戦闘終了状態を検出', runtime };
+    const runtime = trustLiveBattleRuntime(battleRuntimeState(doc));
+    if (runtime.finished && runtime.status && runtime.status === state.activeBattleStatus) {
+      return { type: 'RUNTIME_FINISHED', reason: '現戦闘で確認済みのゲーム内部終了状態を検出', runtime };
     }
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
     if (notice && elementDisplayOn(notice)) {
@@ -5296,6 +5323,8 @@
 
   async function restartWorkflowAfterBattleEnd(config, context, endState) {
     clearPendingAutoAttack('敵撃破を検出しました');
+    state.activeBattleStatus = null;
+    state.expectedBattleRaidId = '';
     const route = String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0';
     const expectedScreen = normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist');
     const timeoutMs = Math.max(1000, finite(config.timeoutSec, 15) * 1000);
