@@ -1,10 +1,13 @@
 # iOS Safari 逐次重くなる問題 — 調査報告
 
-対象: `a.js` (AutoFlow Studio, `APP_VERSION 55` 時点 / `b81482b`)
+対象: `a.js` (AutoFlow Studio)。調査開始時 `APP_VERSION 55` / `b81482b`、修正後 `APP_VERSION 57`。
 観測事実: iPad Safari で複数戦を回すと徐々に重くなる。**親ページの完全更新でだけ確実に軽くなる。**
 
-この報告は推測ではなく、(1) コードの参照関係の全数確認、(2) 実ブラウザ (Chromium/Blink) 上で
-`a.js` をそのまま動かした計測、の 2 つに基づく。計測スクリプトは `tools/leak-probe.js` として同梱した。
+この報告は推測ではなく、(1) コードの参照関係の全数確認、(2) 実ブラウザ上で `a.js` をそのまま
+動かした計測、(3) iPad 実機での計測、の 3 つに基づく。計測スクリプトは `tools/leak-probe.js` として同梱した。
+
+**要約: 真因は「バトル軽量化ランタイムが `win.Function()` の CSP 拒否で一度も注入されておらず、
+軽量化ゼロのままバトルを回していた」こと。** 親側の参照リークは実機・ローカルとも存在しない (結論 A)。
 
 ---
 
@@ -34,44 +37,81 @@
 **すでに正しく効いている**。つまり「iframe 再生成まわりをもっと綺麗にする」方向の追加修正は
 効果が無い。ここに時間を使ってはいけない。
 
-### 結論 B (確度: 高 / 実測で再現) — 実在する最有力の欠陥は **child realm の復元不能な多重 prototype patch**
+### 結論 B — **実機で否定。真因は「軽量化ランタイムが一度も注入されていなかった」こと**
 
-`installBattlePerformanceChildRuntime()` の `patchImageSources()` (a.js:224-243) には
-**marker も original 保存も復元処理も無い**。`destroy()` (a.js:291-307) も復元しない。
+当初 B として挙げた「child realm の多重 prototype patch」は iPad 実機の計測で否定された。
+実機の `protoReport()` は次を示した。
 
-同一 document へ再注入するたびに `Element.prototype.setAttribute` と
-`HTMLImageElement.prototype.src` の setter が**入れ子で積み上がり、永久に外れない**。
+| 対象 (iframe realm) | 実機の結果 |
+|---|---|
+| `HTMLImageElement.prototype.src` | **native (未 patch)** |
+| `Element.prototype.setAttribute` | **native (未 patch)** |
+| `WebGL(2)RenderingContext.prototype.drawArrays / drawElements` | **native (未 patch)** |
+| `__FULLSCREEN_IFRAME_BATTLE_PERFORMANCE__` | **未インストール (親・子とも)** |
 
-実測 (同一 document へ再注入を繰り返し、`setAttribute` を 20,000 回呼んだ所要時間):
+`patchImageSources()` と `patchRendering()` はトグルの ON/OFF に関係なく install 時に必ず走る。
+それが native のままということは、**そもそも runtime が一度も実行されていない**。
+多重化以前に patch が 1 つも当たっていなかった。
 
-| 注入回数 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
-|---|---|---|---|---|---|---|---|---|---|
-| 所要 ms | 8.1 | 9.2 | 9.8 | 11.2 | 11.4 | 14.0 | 14.1 | 14.9 | **16.0** |
+つまり **バトルの重量級描画・アセット読込・音声を潰す機能が丸ごと無効の状態で、
+フルスペックのグラブルのバトルを iframe で回していた**。3〜6 戦で Safari が落ちるのはこれで説明が付く。
 
-グラブルのバトルは `setAttribute` / `img.src` を毎フレーム大量に呼ぶ。
-層が増えるほど**全描画が線形に遅くなる**。しかも
-「**その realm を捨てる (= 親ページ完全更新 or iframe の document 破棄) 以外に元へ戻す手段が無い**」。
-観測事実 (親更新でだけ軽くなる) と挙動が完全に一致する唯一の実在欠陥。
+実機で非 native だった `CanvasRenderingContext2D.prototype.drawImage` と
+`createjs.LoadQueue.prototype.loadManifest / loadFile` は、親・子で同一の難読化コード
+(`function(e,t,i,o,r,u,d,a,c){if(n.isUndefined(a)...`) であり **グラブル自身の実装**。AutoFlow の patch ではない。
 
-同型の欠陥がもう 1 つある: `patchSoundObject()` (a.js:152-176) のガードは
-runtime インスタンスごとの `patchedSoundObjects = new WeakSet()`。runtime を作り直すと
-WeakSet も新品になるため、**RequireJS のモジュールキャッシュ上で生き残っている同じ
-`model/sound` オブジェクトを二重に上書きし、`originals` には「すでに潰された関数」が入る**。
-`restoreSoundRuntime()` は潰れた関数へ「復元」してしまう。
+#### 原因: `win.Function()` が Content-Security-Policy に弾かれていた
 
-**production での発火経路** (依頼書の「pagehide だけに依存しているため destroy が漏れるケース」に該当):
+旧 `bootstrapBattlePerformanceFrameRuntime()` はランタイムを**ソース文字列として iframe へ運び、
+子 realm の `win.Function()` でコンパイル**していた。`Function` コンストラクタは
+「文字列を JS として評価」する API なので、`script-src` に `'unsafe-eval'` が無い document では
+`EvalError` になる。その例外は `catch { return null; }` に飲まれ、**完全に無音**だった。
 
-```
-window.addEventListener('pagehide', destroy, { once: true })   // a.js:318
-  ↓ iOS Safari: タブ切替 / アプリのバックグラウンド化 / back-forward cache 入りで pagehide が発火
-destroy() → prototype は patch されたまま / window[RUNTIME_KEY] だけ delete
-  ↓ pageshow(persisted=true) で「同じ document」が復帰する
-setBattlePerformanceEnabled() か次の load で syncBattlePerformanceFrame()
-  ↓ win[RUNTIME_KEY] が無いので再注入
-bootstrapBattlePerformanceFrameRuntime() → patchImageSources() が 2 層目を積む
-```
+a.js 本体はブックマークレット / Web Inspector から注入されるため CSP の対象外で普通に動く。
+結果として「本体は動くのに軽量化だけ死ぬ」という気付きにくい形になっていた。
 
-iPad で他アプリへ切り替える運用なら何度でも踏む。踏むたびに層が増え、親更新まで戻らない。
+**ローカルで完全再現した** (`script-src 'self' 'unsafe-inline'` を iframe の document にだけ付与):
+
+| | 旧コード + CSP | iPad 実機 | 新コード + CSP |
+|---|---|---|---|
+| `runtimeKey` | false | **未インストール** | **true** |
+| `HTMLImageElement.prototype.src` | native | **native** | patch 済 |
+| `Element.prototype.setAttribute` | native | **native** | patch 済 |
+| WebGL drawArrays / drawElements | native | **native** | patch 済 |
+| `createjs.LoadQueue.*` | 非 native (ゲーム自身) | **非 native** | 非 native |
+| バトル canvas | **visible** | — | **hidden** |
+| 軽量化スタイル | 入らない | — | 入る |
+
+実機のスクリーンショットと「旧コード + CSP」の結果が完全に一致する。
+
+#### 修正: eval を捨て、同一オリジンのフレームを親から直接駆動する
+
+iframe は同一オリジンなので、親から `win.HTMLImageElement.prototype` /
+`win.CanvasRenderingContext2D.prototype` / `win.createjs` / `win.document.head` を**直接**触れる。
+コンパイル工程が無いので CSP が拒否する対象が存在しない。
+
+* `installBattlePerformanceChildRuntime()` → `installBattlePerformanceRuntime(win)`。
+  内部の `window` / `document` / `location` はすべて `win` / `doc` / `loc` に置換。
+* 親からの注入と `window.top !== window` での自己注入が**同一のコードパス**になった。
+* 失敗は二度と無音にしない。`state.battlePerformanceFailure` に理由を記録し、
+  `appendLog(..., 'error')` でログパネルに 1 回だけ出す。
+  `__AUTO_TEST__.diagnostics()` の `battlePerformanceInstalled` / `battlePerformanceFailure` からも読める。
+
+#### 当初 B として入れた修正の扱い
+
+多重 patch は真因ではなかったが、`destroy()` での完全復元・marker による冪等化・
+bfcache での suspend / resume は、**親が patch を当てる構成になったことでむしろ必須**になった
+(親は生き続けるので、フレーム破棄時に確実に元へ戻す必要がある)。そのまま残す。
+
+<details>
+<summary>参考: 否定された当初の結論 B (多重 prototype patch)</summary>
+
+同一 document へ再注入するたびに wrapper が積み上がり、`setAttribute` 20,000 回の所要が
+8.1 → 16.0 ms (9 層) に増えることをローカルで実測した。機構としては実在するが、
+実機では runtime 自体が注入されていなかったため発火していなかった。
+
+</details>
+
 
 ### 結論 C (確度: 中 / 実機検証が必要) — 残る候補は **WebKit の detached subframe 遅延解放**
 
@@ -165,9 +205,9 @@ signal?.addEventListener('abort', onAbort, { once: true });
 | Shadow DOM | 維持 | 破棄 | 要素数変化なし |
 | 親側 Map / Set | 維持 | 破棄 | すべて有界 or WeakMap/WeakSet |
 | iframe Window / Document | 交換 | 破棄 | **21/21 GC 済み** |
-| **child realm の prototype patch** | **document ごと。ただし同一 document へ再注入されると多重化して永久に残る** | 初期化 | **結論 B** |
+| **child realm の prototype patch** | **旧: CSP で注入自体が失敗し軽量化ゼロ。新: 親から直接 patch し、フレーム破棄時に完全復元** | 初期化 | **結論 B** |
 | **Performance Resource Timing** | **維持・単調増加** | 初期化 | **1 戦 +1** |
-| `history.length` | 変化なし (replace 遷移) | (reload でも維持) | 増えない |
+| `history.length` | **単調増加**。iframe 内のゲーム側遷移が親のセッション履歴を押す | (reload でも維持) | **実機で 4 戦 +20** |
 | RequireJS module cache | child は document 依存 / 親は `discardHostRuntimeShell` で 1 回だけ解放 | 初期化 | 1 回きり |
 | WebGL / GPU リソース | `WEBGL_lose_context` + canvas 0×0 は実施済み。WebKit 側の実解放は GC 依存 | WebProcess 単位で解放されやすい | **結論 C・実機検証** |
 

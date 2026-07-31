@@ -32,7 +32,7 @@ test('running block UI is updated without rebuilding editor', () => {
 });
 
 const childRuntime = source.slice(
-  source.indexOf('function installBattlePerformanceChildRuntime'),
+  source.indexOf('function installBattlePerformanceRuntime'),
   source.indexOf('const APP_VERSION')
 );
 
@@ -70,7 +70,7 @@ test('back-forward cache suspends the child runtime instead of destroying it', (
 });
 
 test('the runtime handle is published before any prototype is patched', () => {
-  const publish = childRuntime.indexOf('window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {');
+  const publish = childRuntime.indexOf('win[BATTLE_PERFORMANCE_RUNTIME_KEY] = {');
   const firstPatchCall = childRuntime.indexOf('\n    patchImageSources();');
   assert.ok(publish > 0 && firstPatchCall > 0);
   assert.ok(publish < firstPatchCall, 'a throwing patcher must not leave a patched realm without a runtime key');
@@ -102,4 +102,42 @@ test('diagnostics exposes the module-local collections the leak probe cannot rea
   assert.match(body, /cleanup: cleanup\.size/);
   assert.match(body, /resourceTimingEntries/);
   assert.match(source, /window\.__AUTO_TEST__ = \{[\s\S]*?\n    diagnostics,/);
+});
+
+test('the battle runtime is installed by direct same-origin access, never by compiling source', () => {
+  // Measured on an iPad: with the old win.Function() bootstrap the framed document kept
+  // native prototypes and no runtime key, because a Content-Security-Policy without
+  // 'unsafe-eval' rejects the Function constructor and the failure was swallowed. Driving
+  // the same-origin frame directly has no compilation step for a CSP to reject.
+  const bootstrap = source.slice(
+    source.indexOf('function bootstrapBattlePerformanceFrameRuntime'),
+    source.indexOf('function reportBattlePerformanceFailure')
+  );
+  assert.doesNotMatch(bootstrap, /win\.Function\(/);
+  assert.doesNotMatch(bootstrap, /\.toString\(\)/);
+  assert.match(bootstrap, /installBattlePerformanceRuntime\(win\)/);
+  // and it must never fail silently again
+  assert.match(bootstrap, /state\.battlePerformanceFailure = /);
+  assert.match(bootstrap, /reportBattlePerformanceFailure\(\)/);
+  const report = source.slice(
+    source.indexOf('function reportBattlePerformanceFailure'),
+    source.indexOf('function syncBattlePerformanceFrame')
+  );
+  assert.match(report, /appendLog\(`バトル軽量化ランタイムを注入できませんでした/);
+  assert.match(report, /'error'/);
+});
+
+test('the runtime takes its realm as a parameter so both entry points share one code path', () => {
+  assert.match(source, /function installBattlePerformanceRuntime\(win\) \{/);
+  assert.match(source, /const doc = win\.document;/);
+  assert.match(source, /const loc = win\.location;/);
+  assert.match(source, /if \(window\.top !== window\) \{\n    installBattlePerformanceRuntime\(window\);/);
+  // no realm-bound global may leak back into the runtime body
+  const body = source.slice(
+    source.indexOf('function installBattlePerformanceRuntime'),
+    source.indexOf('if (window.top !== window) {')
+  );
+  assert.doesNotMatch(body, /(?<![.\w$])window\b/);
+  assert.doesNotMatch(body, /(?<![.\w$])document\b/);
+  assert.doesNotMatch(body, /(?<![.\w$])location\b/);
 });

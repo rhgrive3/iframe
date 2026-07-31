@@ -5,7 +5,7 @@ import test from 'node:test';
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
 test('top-level installation is guarded and replaces stale instances', () => {
-  assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
+  assert.ok(source.includes('installBattlePerformanceRuntime(window);'));
   assert.ok(source.includes('if (window.top !== window) {'));
   assert.match(source, /const previous = window\[GLOBAL_KEY\]/);
   assert.match(source, /previous\?\.destroy/);
@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 56'));
+  assert.ok(source.includes('const APP_VERSION = 57'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -319,9 +319,9 @@ test('battle ended is available as a workflow condition without HP inference', (
 
 test('battle performance mode is persistent and independent from workflow execution', () => {
   assert.ok(source.includes("const BATTLE_PERFORMANCE_STORAGE_KEY = '__fullscreen_iframe_autoclicker_battle_performance_v1__'"));
-  assert.ok(source.includes('function installBattlePerformanceChildRuntime()'));
+  assert.ok(source.includes('function installBattlePerformanceRuntime(win)'));
   assert.ok(source.includes('if (window.top !== window) {'));
-  assert.ok(source.includes('installBattlePerformanceChildRuntime();'));
+  assert.ok(source.includes('installBattlePerformanceRuntime(window);'));
   assert.ok(source.includes('id="tab-settings"'));
   assert.ok(source.includes('id="battlePerformanceToggle"'));
   assert.ok(source.includes("state.page = ['workflow', 'legacy', 'logs', 'settings']"));
@@ -330,12 +330,12 @@ test('battle performance mode is persistent and independent from workflow execut
 });
 
 test('battle performance child runtime preserves logic while suppressing heavy media', () => {
-  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   assert.ok(child.includes("['loadManifest', 'loadFile']"));
   assert.ok(child.includes('BATTLE_PERFORMANCE_TRANSPARENT_IMAGE'));
   assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawArrays')"));
   assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawElements')"));
-  assert.ok(child.includes("patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage')"));
+  assert.ok(child.includes("patchRenderMethod(win.CanvasRenderingContext2D?.prototype, 'drawImage')"));
   assert.ok(child.includes("requireAmd(['model/sound', 'lib/sound']"));
   assert.ok(child.includes('setting.sound_flag = 0'));
   assert.ok(child.includes('animation-duration:.001s!important'));
@@ -347,9 +347,12 @@ test('battle performance child runtime preserves logic while suppressing heavy m
 
 test('battle performance mode bootstraps into a same-origin iframe when only the controller was injected', () => {
   assert.ok(source.includes('function bootstrapBattlePerformanceFrameRuntime(win)'));
-  assert.ok(source.includes('const bootstrap = win.Function('));
-  assert.ok(source.includes('readBattlePerformanceSetting.toString()'));
-  assert.ok(source.includes('installBattlePerformanceChildRuntime.toString()'));
+  // The runtime must never be shipped as source text again: win.Function() is blocked by a
+  // Content-Security-Policy without 'unsafe-eval', which silently disabled the whole feature.
+  assert.ok(!/=\s*win\.Function\(/.test(source));
+  assert.ok(!source.includes('.toString()}'));
+  assert.ok(source.includes('const runtime = installBattlePerformanceRuntime(win);'));
+  assert.ok(source.includes('reportBattlePerformanceFailure()'));
   const sync = source.slice(source.indexOf('function syncBattlePerformanceFrame'), source.indexOf('function setBattlePerformanceEnabled'));
   assert.ok(sync.includes('bootstrapBattlePerformanceFrameRuntime(win);'));
   assert.ok(sync.indexOf('bootstrapBattlePerformanceFrameRuntime(win);') < sync.indexOf('postMessage'));
@@ -357,26 +360,26 @@ test('battle performance mode bootstraps into a same-origin iframe when only the
 
 
 test('battle performance hooks are isolated and restore audio outside battle routes', () => {
-  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   const patchNow = child.slice(child.indexOf('function patchNow'), child.indexOf('function setEnabled'));
   assert.ok(patchNow.includes('try { patchLoadQueue(); } catch {}'));
   assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
   assert.ok(child.includes('try { prototype[name] = wrapped; } catch { return; }'));
-  assert.ok(child.includes('pollTimer = window.setInterval'));
+  assert.ok(child.includes('pollTimer = win.setInterval'));
   assert.ok(child.includes('try { patchNow(); } catch {}'));
 });
 
 
 test('battle performance polling only runs while the persistent setting is enabled', () => {
-  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   assert.ok(child.includes('function startPoll()'));
   assert.ok(child.includes('function stopPoll()'));
   assert.ok(child.includes('if (pollTimer != null) return;'));
-  assert.ok(child.includes("window.addEventListener('pagehide', onPageHide)"));
-  assert.ok(child.includes("window.addEventListener('pageshow', onPageShow)"));
-  assert.ok(child.includes('window.removeEventListener(\'message\', onMessage)'));
+  assert.ok(child.includes("win.addEventListener('pagehide', onPageHide)"));
+  assert.ok(child.includes("win.addEventListener('pageshow', onPageShow)"));
+  assert.ok(child.includes("win.removeEventListener('message', onMessage)"));
   assert.ok(child.includes('destroy'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
   assert.ok(enabled.includes('startPoll();'));
@@ -391,7 +394,7 @@ test('battle performance setting rolls back its UI state when persistence fails'
 });
 
 test('battle performance fully suppresses battle canvas while preserving DOM attack controls', () => {
-  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   const renderer = child.slice(child.indexOf('function patchRenderMethod'), child.indexOf('function patchRendering'));
   const assets = child.slice(child.indexOf('const shouldReplaceAsset'), child.indexOf('const rewriteAsset'));
   assert.ok(child.includes('.cnt-raid-stage canvas#canvas { visibility:hidden!important; }'));
@@ -408,10 +411,10 @@ test('battle performance fully suppresses battle canvas while preserving DOM att
 });
 
 test('iframe recycling destroys child runtimes and releases parent references immediately', () => {
-  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   assert.ok(child.includes('let destroyed = false'));
   assert.ok(child.includes('const destroy = () =>'));
-  assert.ok(child.includes("window.removeEventListener('storage', onStorage)"));
+  assert.ok(child.includes("win.removeEventListener('storage', onStorage)"));
   assert.ok(child.includes('refresh: patchNow,\n      suspend,\n      resume,\n      destroy'));
 
   const lifecycle = source.slice(source.indexOf('const cleanup = new Set()'), source.indexOf('function computedVisible'));

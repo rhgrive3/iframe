@@ -7,24 +7,26 @@
   const BATTLE_PERFORMANCE_STYLE_ID = '__fullscreen_iframe_battle_performance_style__';
   const BATTLE_PERFORMANCE_TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
 
-  function readBattlePerformanceSetting() {
+  function readBattlePerformanceSetting(win = window) {
     try {
-      const saved = JSON.parse(localStorage.getItem(BATTLE_PERFORMANCE_STORAGE_KEY) || 'null');
+      const saved = JSON.parse(win.localStorage.getItem(BATTLE_PERFORMANCE_STORAGE_KEY) || 'null');
       return saved?.enabled === true;
     } catch {
       return false;
     }
   }
 
-  function installBattlePerformanceChildRuntime() {
-    const installed = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
+  function installBattlePerformanceRuntime(win) {
+    if (!win) return null;
+    const doc = win.document;
+    const loc = win.location;
+    const installed = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
     if (installed?.setEnabled) {
       installed.resume?.();
-      installed.setEnabled(readBattlePerformanceSetting());
-      return;
+      return installed;
     }
 
-    let enabled = readBattlePerformanceSetting();
+    let enabled = readBattlePerformanceSetting(win);
     let destroyed = false;
     let suspended = false;
     let style = null;
@@ -48,8 +50,8 @@
       }
     }
 
-    const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
-    const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
+    const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${loc.pathname}${loc.hash}`);
+    const isBattleRuntime = () => isBattleLocation() || Boolean(doc.querySelector('.cnt-raid-stage'));
     const shouldReplaceAsset = value => {
       if (!enabled || !isBattleRuntime()) return false;
       const url = String(value ?? '');
@@ -62,13 +64,13 @@
       enabled
       && isBattleRuntime()
       && canvas
-      && canvas.ownerDocument === document
+      && canvas.ownerDocument === doc
       && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
     );
 
     function ensureStyle() {
       if (!style || !style.isConnected) {
-        style = document.getElementById(BATTLE_PERFORMANCE_STYLE_ID) || document.createElement('style');
+        style = doc.getElementById(BATTLE_PERFORMANCE_STYLE_ID) || doc.createElement('style');
         style.id = BATTLE_PERFORMANCE_STYLE_ID;
         style.textContent = `
           .cnt-raid-stage .prt-bg-stage-distant,
@@ -97,7 +99,7 @@
             transition-delay:0s!important;
           }
         `;
-        const parent = document.head || document.documentElement;
+        const parent = doc.head || doc.documentElement;
         if (parent && !style.isConnected) parent.append(style);
       }
       if (style) style.disabled = !enabled;
@@ -119,7 +121,7 @@
     }
 
     function patchLoadQueue() {
-      const prototype = window.createjs?.LoadQueue?.prototype;
+      const prototype = win.createjs?.LoadQueue?.prototype;
       if (!prototype || prototype[LOAD_QUEUE_MARKER]) return;
       Object.defineProperty(prototype, LOAD_QUEUE_MARKER, { value: true, configurable: true });
       addPatchRestorer(() => { try { delete prototype[LOAD_QUEUE_MARKER]; } catch {} });
@@ -149,17 +151,17 @@
     }
 
     function patchRendering() {
-      for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
+      for (const constructor of [win.WebGLRenderingContext, win.WebGL2RenderingContext]) {
         patchRenderMethod(constructor?.prototype, 'drawArrays');
         patchRenderMethod(constructor?.prototype, 'drawElements');
         patchRenderMethod(constructor?.prototype, 'drawArraysInstanced');
         patchRenderMethod(constructor?.prototype, 'drawElementsInstanced');
       }
-      patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage');
+      patchRenderMethod(win.CanvasRenderingContext2D?.prototype, 'drawImage');
     }
 
     function resolvedLoad() {
-      const deferred = window.jQuery?.Deferred?.();
+      const deferred = win.jQuery?.Deferred?.();
       if (deferred) {
         deferred.resolve();
         return deferred.promise();
@@ -200,14 +202,14 @@
 
     function patchSoundRuntime() {
       if (!enabled || !isBattleRuntime()) return;
-      const setting = window.Game?.setting;
+      const setting = win.Game?.setting;
       if (setting) {
         if (!soundFlagSnapshot || soundFlagSnapshot.owner !== setting) {
           soundFlagSnapshot = { owner: setting, value: setting.sound_flag };
         }
         setting.sound_flag = 0;
       }
-      const sound = window.createjs?.Sound;
+      const sound = win.createjs?.Sound;
       if (sound) {
         if (!createjsMuteSnapshot || createjsMuteSnapshot.owner !== sound) {
           createjsMuteSnapshot = { owner: sound, value: sound.getMute?.() ?? false };
@@ -216,7 +218,7 @@
         try { sound.setMute?.(true); } catch {}
       }
       if (soundModulesRequested) return;
-      const requireAmd = window.requireAMD || window.requirejs || (window.require?.amd ? window.require : null);
+      const requireAmd = win.requireAMD || win.requirejs || (win.require?.amd ? win.require : null);
       if (typeof requireAmd !== 'function') return;
       soundModulesRequested = true;
       try {
@@ -250,8 +252,8 @@
       // -> re-sync) stacked another wrapper on top of the previous one, and every layer
       // slowed down every setAttribute/img.src the game performs until the parent page was
       // reloaded. That matched the reported "only a full parent refresh helps" symptom.
-      const imagePrototype = window.HTMLImageElement?.prototype;
-      const elementPrototype = window.Element?.prototype;
+      const imagePrototype = win.HTMLImageElement?.prototype;
+      const elementPrototype = win.Element?.prototype;
       if (imagePrototype && !imagePrototype[IMAGE_MARKER]) {
         try {
           const descriptor = Object.getOwnPropertyDescriptor(imagePrototype, 'src');
@@ -274,7 +276,7 @@
           if (typeof originalSetAttribute === 'function') {
             Object.defineProperty(elementPrototype, IMAGE_MARKER, { value: true, configurable: true });
             const wrapped = function (name, value) {
-              const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
+              const isImageSource = this instanceof win.HTMLImageElement && String(name).toLowerCase() === 'src';
               return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
             };
             elementPrototype.setAttribute = wrapped;
@@ -300,13 +302,13 @@
 
     function stopPoll() {
       if (pollTimer == null) return;
-      window.clearInterval(pollTimer);
+      win.clearInterval(pollTimer);
       pollTimer = null;
     }
 
     function startPoll() {
       if (pollTimer != null) return;
-      pollTimer = window.setInterval(() => {
+      pollTimer = win.setInterval(() => {
         try { patchNow(); } catch {}
       }, 100);
     }
@@ -326,18 +328,18 @@
     }
 
     const onMessage = event => {
-      if (event.source !== window.parent || event.origin !== location.origin) return;
+      if (event.source !== win.parent || event.origin !== loc.origin) return;
       if (event.data?.type !== BATTLE_PERFORMANCE_MESSAGE_TYPE) return;
       setEnabled(event.data.enabled);
     };
     const onStorage = event => {
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
-      setEnabled(readBattlePerformanceSetting());
+      setEnabled(readBattlePerformanceSetting(win));
     };
-    // Back-forward cache: the very same document can come back. Fully tearing down there
+    // Back-forward cache: the very same doc can come back. Fully tearing down there
     // used to leave the prototype patches installed with no runtime key, so the next
     // parent sync re-injected and stacked a second wrapper layer. Suspend instead, and
-    // keep destroy() for the cases where the document really goes away.
+    // keep destroy() for the cases where the doc really goes away.
     const suspend = () => {
       if (destroyed || suspended) return;
       suspended = true;
@@ -365,16 +367,16 @@
       stopPoll();
       restoreSoundRuntime();
       restoreAllPatches();
-      window.removeEventListener('message', onMessage);
-      window.removeEventListener('storage', onStorage);
-      window.removeEventListener('pagehide', onPageHide);
-      window.removeEventListener('pageshow', onPageShow);
+      win.removeEventListener('message', onMessage);
+      win.removeEventListener('storage', onStorage);
+      win.removeEventListener('pagehide', onPageHide);
+      win.removeEventListener('pageshow', onPageShow);
       try { style?.remove(); } catch {}
       style = null;
-      const runtime = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
+      const runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
       if (runtime?.destroy === destroy) {
-        try { delete window[BATTLE_PERFORMANCE_RUNTIME_KEY]; }
-        catch { window[BATTLE_PERFORMANCE_RUNTIME_KEY] = null; }
+        try { delete win[BATTLE_PERFORMANCE_RUNTIME_KEY]; }
+        catch { win[BATTLE_PERFORMANCE_RUNTIME_KEY] = null; }
       }
     };
     const onPageHide = event => (event?.persisted ? suspend() : destroy());
@@ -383,7 +385,7 @@
     // Publish the handle before patching anything. If a patch step throws, the realm is
     // still recognisable as "already installed" so the next sync calls setEnabled()
     // instead of re-running the patchers and doubling them up.
-    window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
+    win[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
       get enabled() { return enabled; },
       get suspended() { return suspended; },
       setEnabled,
@@ -393,10 +395,10 @@
       destroy
     };
 
-    window.addEventListener('message', onMessage);
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('pagehide', onPageHide);
-    window.addEventListener('pageshow', onPageShow);
+    win.addEventListener('message', onMessage);
+    win.addEventListener('storage', onStorage);
+    win.addEventListener('pagehide', onPageHide);
+    win.addEventListener('pageshow', onPageShow);
 
     patchImageSources();
     patchRendering();
@@ -405,14 +407,16 @@
       patchNow();
       startPoll();
     }
+
+    return win[BATTLE_PERFORMANCE_RUNTIME_KEY];
   }
 
   if (window.top !== window) {
-    installBattlePerformanceChildRuntime();
+    installBattlePerformanceRuntime(window);
     return;
   }
 
-  const APP_VERSION = 56;
+  const APP_VERSION = 57;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1336,7 +1340,9 @@
     telemetryTimers: new Set(),
     frameGeneration: 0,
     frameNavigationId: 0,
-    battlePerformanceEnabled: readBattlePerformanceSetting()
+    battlePerformanceEnabled: readBattlePerformanceSetting(),
+    battlePerformanceFailure: null,
+    battlePerformanceReported: null
   };
 
   const cleanup = new Set();
@@ -1369,38 +1375,53 @@
   const dragLock = { active: false, pointerId: null, owner: null, restore: null };
 
 
+  // The runtime used to be shipped into the frame as source text and compiled there with
+  // win.Function(). On the live site that produced no runtime at all - measurement on an
+  // iPad found the frame's HTMLImageElement.prototype.src and Element.prototype.setAttribute
+  // still native and no runtime key in either realm - so the whole battle lightening
+  // feature was silently inert and full-weight battles ran in the iframe.
+  // The frame is same-origin, so drive it directly instead: no compilation step, nothing a
+  // Content-Security-Policy can block, and one code path shared with the self-install case.
   function bootstrapBattlePerformanceFrameRuntime(win) {
     if (!win || win === window) return null;
+    let sameOrigin = false;
     try {
-      if (new URL(win.location.href).origin !== location.origin) return null;
-      let runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
-      if (!runtime?.setEnabled) {
-        const bootstrap = win.Function(
-          'BATTLE_PERFORMANCE_STORAGE_KEY',
-          'BATTLE_PERFORMANCE_MESSAGE_TYPE',
-          'BATTLE_PERFORMANCE_RUNTIME_KEY',
-          'BATTLE_PERFORMANCE_STYLE_ID',
-          'BATTLE_PERFORMANCE_TRANSPARENT_IMAGE',
-          `
-            const readBattlePerformanceSetting = ${readBattlePerformanceSetting.toString()};
-            const installBattlePerformanceChildRuntime = ${installBattlePerformanceChildRuntime.toString()};
-            installBattlePerformanceChildRuntime();
-          `
-        );
-        bootstrap(
-          BATTLE_PERFORMANCE_STORAGE_KEY,
-          BATTLE_PERFORMANCE_MESSAGE_TYPE,
-          BATTLE_PERFORMANCE_RUNTIME_KEY,
-          BATTLE_PERFORMANCE_STYLE_ID,
-          BATTLE_PERFORMANCE_TRANSPARENT_IMAGE
-        );
-        runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
-      }
-      runtime?.setEnabled(state.battlePerformanceEnabled);
-      return runtime || null;
-    } catch {
+      sameOrigin = new URL(win.location.href).origin === location.origin;
+    } catch (error) {
+      state.battlePerformanceFailure = `frame origin unreadable: ${error.message}`;
       return null;
     }
+    if (!sameOrigin) {
+      state.battlePerformanceFailure = 'frame is cross-origin';
+      return null;
+    }
+    try {
+      const runtime = installBattlePerformanceRuntime(win);
+      if (!runtime?.setEnabled) {
+        state.battlePerformanceFailure = 'runtime handle missing after install';
+        reportBattlePerformanceFailure();
+        return null;
+      }
+      runtime.setEnabled(state.battlePerformanceEnabled);
+      if (state.battlePerformanceFailure) {
+        state.battlePerformanceFailure = null;
+        appendLog('バトル軽量化ランタイムの注入に成功しました', 'success');
+      }
+      return runtime;
+    } catch (error) {
+      state.battlePerformanceFailure = `${error.name}: ${error.message}`;
+      reportBattlePerformanceFailure();
+      return null;
+    }
+  }
+
+  // Never fail silently again: one error log per distinct reason, so a broken injection is
+  // visible in the log panel without a Web Inspector session.
+  function reportBattlePerformanceFailure() {
+    const reason = state.battlePerformanceFailure;
+    if (!reason || state.battlePerformanceReported === reason) return;
+    state.battlePerformanceReported = reason;
+    appendLog(`バトル軽量化ランタイムを注入できませんでした: ${reason}`, 'error', 'バトル軽量化');
   }
 
   function syncBattlePerformanceFrame() {
@@ -1411,7 +1432,10 @@
         type: BATTLE_PERFORMANCE_MESSAGE_TYPE,
         enabled: state.battlePerformanceEnabled
       }, location.origin);
-    } catch {}
+    } catch (error) {
+      state.battlePerformanceFailure = `sync failed: ${error.message}`;
+      reportBattlePerformanceFailure();
+    }
   }
 
   function setBattlePerformanceEnabled(next, { notify = true } = {}) {
@@ -7999,6 +8023,11 @@
       frameGeneration: state.frameGeneration,
       frameNavigationId: state.frameNavigationId,
       hostRuntimeReleased: state.hostRuntimeReleased,
+      battlePerformanceEnabled: state.battlePerformanceEnabled,
+      battlePerformanceFailure: state.battlePerformanceFailure,
+      battlePerformanceInstalled: (() => {
+        try { return Boolean(iframe.contentWindow?.[BATTLE_PERFORMANCE_RUNTIME_KEY]); } catch { return null; }
+      })(),
       resourceTimingEntries: (() => {
         try { return performance.getEntriesByType('resource').length; } catch { return null; }
       })()
