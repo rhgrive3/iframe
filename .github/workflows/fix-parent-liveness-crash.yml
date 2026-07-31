@@ -1,0 +1,390 @@
+name: Fix parent liveness crash
+
+on:
+  push:
+    branches:
+      - fix/parent-liveness-crash
+    paths:
+      - .github/workflows/fix-parent-liveness-crash.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    if: github.event.head_commit.message == 'chore: add verified parent liveness patch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fix/parent-liveness-crash
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply parent liveness fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          def replace_test(text, name, replacement):
+              start = f"test('{name}', () => {{"
+              begin = text.find(start)
+              if begin < 0:
+                  raise SystemExit(f'test not found: {name}')
+              end = text.find('\n\ntest(', begin + len(start))
+              if end < 0:
+                  end = len(text)
+              return text[:begin] + replacement.rstrip() + text[end:]
+
+          a_path = Path('a.js')
+          a = a_path.read_text()
+          a = replace_once(a, 'const APP_VERSION = 60;', 'const APP_VERSION = 61;', 'version')
+
+          a = replace_once(
+              a,
+              """  const notifyFrameLifecycle = (previousFrame, nextFrame) => {
+            for (const subscriber of [...frameLifecycleSubscribers]) {
+              try { subscriber({ previousFrame, nextFrame }); } catch {}
+            }
+          };""",
+              """  const notifyFrameLifecycle = (previousFrame, nextFrame, phase = 'attach') => {
+            for (const subscriber of [...frameLifecycleSubscribers]) {
+              try { subscriber({ previousFrame, nextFrame, phase }); } catch {}
+            }
+          };""",
+              'frame lifecycle payload'
+          )
+
+          a = replace_once(
+              a,
+              """  function releaseWindowRuntime(win, doc, { stopWindow = true } = {}) {
+            if (!win || !doc) return;
+            try {
+              try { win[BATTLE_PERFORMANCE_RUNTIME_KEY]?.destroy?.(); } catch {}""",
+              """  function detachHostRuntimeEvents(win, doc) {
+            const jq = win?.jQuery || win?.$;
+            if (typeof jq === 'function') {
+              try { jq(doc).off(); } catch {}
+              try { jq(win).off(); } catch {}
+            }
+            try { win.onresize = null; } catch {}
+            try { win.onhashchange = null; } catch {}
+            try { win.onpopstate = null; } catch {}
+            try { win.onerror = null; } catch {}
+            try {
+              if (win?.requirejs) win.requirejs.onError = () => {};
+            } catch {}
+          }
+
+          function releaseWindowRuntime(win, doc, { stopWindow = true, hostShell = false } = {}) {
+            if (!win || !doc) return;
+            try {
+              if (hostShell) detachHostRuntimeEvents(win, doc);
+              try { win[BATTLE_PERFORMANCE_RUNTIME_KEY]?.destroy?.(); } catch {}""",
+              'host event detachment'
+          )
+
+          a = replace_once(
+              a,
+              """        if (typeof win?.Game?.router?.move === 'function') {
+                  win.Game.router.move();
+                  routerCleaned = true;
+                }""",
+              """        if (typeof win?.Game?.router?.move === 'function') {
+                  if (hostShell) {
+                    try {
+                      if (typeof win.Game?.loading?.loadStart === 'function') {
+                        win.Game.loading.loadStart = () => {};
+                      }
+                    } catch {}
+                  }
+                  win.Game.router.move();
+                  routerCleaned = true;
+                }""",
+              'host-safe router cleanup'
+          )
+
+          a = replace_once(
+              a,
+              """  function releaseFrameRuntime(frame) {
+            if (!frame) return;
+            try {
+              releaseWindowRuntime(frame.contentWindow, frame.contentDocument, { stopWindow: true });
+            } catch {}
+          }
+
+          function hideBackgroundRendering() {""",
+              """  function releaseFrameRuntime(frame) {
+            if (!frame) return;
+            try {
+              releaseWindowRuntime(frame.contentWindow, frame.contentDocument, { stopWindow: true });
+            } catch {}
+          }
+
+          function releaseFrameParentReferences(frame) {
+            if (!frame) return;
+            let frameDoc = null;
+            try { frameDoc = frame.contentDocument; } catch {}
+            try {
+              if (frameDoc) battleProgressCache.delete(frameDoc);
+            } catch {}
+            state.activeBattleDocument = null;
+            state.activeBattleStatus = null;
+          }
+
+          function hideBackgroundRendering() {""",
+              'parent frame reference release'
+          )
+
+          a = replace_once(a, "      '_',\n", '', 'preserve underscore for official iOS unload handler')
+          a = replace_once(
+              a,
+              '    releaseWindowRuntime(window, document, { stopWindow: false });',
+              '    releaseWindowRuntime(window, document, { stopWindow: false, hostShell: true });',
+              'host release mode'
+          )
+
+          old_blank = """  function blankFrame(frame) {
+            return new Promise(resolve => {
+              let settled = false;
+              let timer = null;
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                frame.removeEventListener('load', finish);
+                resolve();
+              };
+              frame.addEventListener('load', finish);
+              timer = setTimeout(finish, 1200);
+              try { frame.contentWindow.location.replace('about:blank'); }
+              catch {
+                try { frame.src = 'about:blank'; }
+                catch { finish(); }
+              }
+            });
+          }"""
+          new_blank = """  function blankFrame(frame) {
+            return new Promise(resolve => {
+              let settled = false;
+              let timer = null;
+              const finish = loaded => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                frame.removeEventListener('load', onLoad);
+                resolve(Boolean(loaded));
+              };
+              const onLoad = () => finish(true);
+              frame.addEventListener('load', onLoad);
+              timer = setTimeout(() => finish(false), 3000);
+              try { frame.contentWindow.location.replace('about:blank'); }
+              catch {
+                try { frame.src = 'about:blank'; }
+                catch { finish(false); }
+              }
+            });
+          }"""
+          a = replace_once(a, old_blank, new_blank, 'blank frame result')
+
+          start = a.index('  async function replaceFrame(destination, { forceNewElement = true } = {}) {')
+          end = a.index('\n\n  function computedVisible', start)
+          old_replace = a[start:end]
+          new_replace = """  async function replaceFrame(destination, { forceNewElement = false } = {}) {
+            const targetUrl = String(destination || '').trim();
+            if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
+            if (state.destroyed) throw new DOMException('AutoFlowは終了しています', 'AbortError');
+            const navigationId = ++state.frameNavigationId;
+            const assertCurrentNavigation = () => {
+              if (state.destroyed || navigationId !== state.frameNavigationId) {
+                throw new DOMException('より新しいiframe遷移に置き換えられました', 'AbortError');
+              }
+            };
+            clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました');
+            let previousFrame = iframe;
+            previousFrame.removeEventListener('load', handleFrameLoad);
+            notifyFrameLifecycle(previousFrame, null, 'detach');
+            releaseFrameParentReferences(previousFrame);
+            releaseFrameRuntime(previousFrame);
+            const blanked = await blankFrame(previousFrame);
+            assertCurrentNavigation();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            assertCurrentNavigation();
+            const replaceElement = forceNewElement || !blanked;
+            if (!replaceElement) {
+              iframe = previousFrame;
+              bindFrameLoad(previousFrame);
+              notifyFrameLifecycle(previousFrame, previousFrame, 'attach');
+              try { previousFrame.contentWindow.location.replace(targetUrl); }
+              catch { previousFrame.src = targetUrl; }
+              if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = previousFrame;
+              return previousFrame;
+            }
+            const nextFrame = previousFrame.cloneNode(false);
+            nextFrame.removeAttribute('src');
+            bindFrameLoad(nextFrame);
+            previousFrame.replaceWith(nextFrame);
+            iframe = nextFrame;
+            notifyFrameLifecycle(previousFrame, nextFrame, 'attach');
+            previousFrame = null;
+            await new Promise(resolve => setTimeout(resolve, 0));
+            assertCurrentNavigation();
+            nextFrame.src = targetUrl;
+            if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = nextFrame;
+            return nextFrame;
+          }"""
+          a = a[:start] + new_replace + a[end:]
+
+          a = replace_once(
+              a,
+              """      const onFrameLifecycle = () => {
+                if (settled) return;
+                observer?.disconnect();
+                observer = null;
+                observedDoc = null;
+                observedRoots = [];
+                stableSince = null;
+                lastMutation = performance.now();
+                listenedFrame?.removeEventListener('load', onFrameLoad);
+                listenedFrame = null;
+                bindObserver();
+                evaluate();
+              };""",
+              """      const onFrameLifecycle = ({ phase } = {}) => {
+                if (settled) return;
+                observer?.disconnect();
+                observer = null;
+                observedDoc = null;
+                observedRoots = [];
+                stableSince = null;
+                lastMutation = performance.now();
+                listenedFrame?.removeEventListener('load', onFrameLoad);
+                listenedFrame = null;
+                if (phase === 'detach') return;
+                bindObserver();
+                evaluate();
+              };""",
+              'monitor lifecycle detachment'
+          )
+
+          a = replace_once(
+              a,
+              """  const initialUrl = normalizeInitialUrl();
+            urlInput.value = initialUrl;
+            iframe.src = initialUrl;""",
+              """  const initialUrl = normalizeInitialUrl();
+            urlInput.value = initialUrl;
+            try {
+              if (new URL(initialUrl, location.href).origin === location.origin) {
+                releaseHostRuntimeOnce();
+              }
+            } catch {}
+            iframe.src = initialUrl;""",
+              'release host before child load'
+          )
+          a_path.write_text(a)
+
+          test_path = Path('tests/autoflow.static.test.mjs')
+          tests = test_path.read_text()
+          tests = replace_once(tests, "source.includes('const APP_VERSION = 60')", "source.includes('const APP_VERSION = 61')", 'test version')
+
+          tests = replace_test(
+              tests,
+              'game-route navigation tears down and recreates the iframe browsing context',
+              """test('game-route navigation releases the old document before reusing the iframe shell', () => {
+            const helper = source.slice(source.indexOf('function stopRuntimeTelemetry'), source.indexOf('function computedVisible'));
+            assert.ok(helper.includes('async function replaceFrame'));
+            assert.ok(helper.includes("replaceFrame(destination, { forceNewElement = false }"));
+            assert.ok(helper.includes("notifyFrameLifecycle(previousFrame, null, 'detach')"));
+            assert.ok(helper.includes('releaseFrameParentReferences(previousFrame)'));
+            assert.ok(helper.includes('releaseFrameRuntime(previousFrame)'));
+            assert.ok(helper.indexOf("notifyFrameLifecycle(previousFrame, null, 'detach')") < helper.indexOf('releaseFrameRuntime(previousFrame)'));
+            assert.ok(helper.includes('const blanked = await blankFrame(previousFrame)'));
+            assert.ok(helper.includes('const replaceElement = forceNewElement || !blanked'));
+            assert.ok(helper.includes('iframe = previousFrame'));
+            assert.ok(helper.includes("notifyFrameLifecycle(previousFrame, previousFrame, 'attach')"));
+            assert.ok(helper.includes('const nextFrame = previousFrame.cloneNode(false)'));
+            const routeStart = source.lastIndexOf("case 'iframeRoute'");
+            const route = source.slice(routeStart, source.indexOf("case 'iframeReady'", routeStart));
+            assert.ok(route.includes('const before = captureFrameState()'));
+            assert.ok(route.includes('await replaceFrame(gameRouteUrl(block.config.route))'));
+            assert.ok(route.includes('await waitForFrameReady'));
+            assert.ok(!route.includes('frameWindow().location.href'));
+          });"""
+          )
+
+          tests = replace_test(
+              tests,
+              'iframe recycling destroys child runtimes and releases parent references immediately',
+              """test('iframe recycling detaches observers and drops parent references before runtime teardown', () => {
+            const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+            assert.ok(child.includes('let destroyed = false'));
+            assert.ok(child.includes('const destroy = () =>'));
+            assert.ok(child.includes("window.removeEventListener('storage', onStorage)"));
+            assert.ok(child.includes('refresh: patchNow,\\n      destroy'));
+
+            const lifecycle = source.slice(source.indexOf('const cleanup = new Set()'), source.indexOf('function computedVisible'));
+            assert.ok(lifecycle.includes('const frameLifecycleSubscribers = new Set()'));
+            assert.ok(lifecycle.includes("phase = 'attach'"));
+            assert.ok(lifecycle.includes("notifyFrameLifecycle(previousFrame, null, 'detach')"));
+            assert.ok(lifecycle.includes('releaseFrameParentReferences(previousFrame)'));
+            assert.ok(lifecycle.includes("replaceFrame(destination, { forceNewElement = false }"));
+            assert.ok(lifecycle.includes("clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました')"));
+            assert.ok(lifecycle.includes('previousFrame = null'));
+            assert.ok(lifecycle.includes('state.frameGeneration === loadedGeneration'));
+
+            const monitor = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
+            assert.ok(monitor.includes('frameLifecycleSubscribers.add(onFrameLifecycle)'));
+            assert.ok(monitor.includes('frameLifecycleSubscribers.delete(onFrameLifecycle)'));
+            assert.ok(monitor.includes("listenedFrame?.removeEventListener('load', onFrameLoad)"));
+            assert.ok(monitor.includes("if (phase === 'detach') return"));
+          });"""
+          )
+
+          tests += """
+
+          test('host runtime shutdown neutralizes parent reload handlers before Granblue cleanup', () => {
+            const host = source.slice(source.indexOf('function detachHostRuntimeEvents'), source.indexOf('function blankFrame'));
+            assert.ok(host.includes('jq(doc).off()'));
+            assert.ok(host.includes('jq(win).off()'));
+            assert.ok(host.includes('win.onresize = null'));
+            assert.ok(host.includes('win.onerror = null'));
+            assert.ok(host.includes('win.requirejs.onError = () => {}'));
+            assert.ok(host.includes('hostShell = false'));
+            assert.ok(host.includes('if (hostShell) detachHostRuntimeEvents(win, doc)'));
+            assert.ok(host.includes('win.Game.loading.loadStart = () => {}'));
+            assert.ok(host.includes('releaseWindowRuntime(window, document, { stopWindow: false, hostShell: true })'));
+            const discard = host.slice(host.indexOf('function discardHostRuntimeShell'), host.indexOf('function releaseHostRuntimeOnce'));
+            assert.ok(!discard.includes("      '_',"));
+          });
+
+          test('initial installation frees the parent Granblue runtime before loading the child game', () => {
+            const initial = source.slice(source.lastIndexOf('const initialUrl = normalizeInitialUrl()'), source.indexOf('window.__AUTO_TEST__'));
+            assert.ok(initial.includes('releaseHostRuntimeOnce()'));
+            assert.ok(initial.includes('iframe.src = initialUrl'));
+            assert.ok(initial.indexOf('releaseHostRuntimeOnce()') < initial.indexOf('iframe.src = initialUrl'));
+          });
+          """
+          test_path.write_text(tests)
+          PY
+      - name: Verify syntax and regression suite
+        run: |
+          node --check a.js
+          node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+      - name: Commit verified fix
+        run: |
+          git rm .github/workflows/fix-parent-liveness-crash.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add a.js tests/autoflow.static.test.mjs
+          git commit -m 'fix: keep parent alive during workflow recycling'
+          git push origin HEAD:fix/parent-liveness-crash
