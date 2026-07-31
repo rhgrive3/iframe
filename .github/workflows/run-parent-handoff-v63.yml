@@ -9,6 +9,9 @@ on:
       - synchronize
       - reopened
       - ready_for_review
+  issues:
+    types:
+      - opened
 
 permissions:
   contents: write
@@ -19,7 +22,9 @@ concurrency:
 
 jobs:
   patch:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'automation/parent-tab-handoff-v63'
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'automation/parent-tab-handoff-v63') ||
+      (github.event_name == 'issues' && github.event.issue.title == '[internal] run parent handoff v63 patch')
     runs-on: ubuntu-latest
     steps:
       - name: Check out patch branch
@@ -54,7 +59,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+iframe-v63@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/scripts/apply-parent-handoff.py.gz.b64
           git rm .github/workflows/run-parent-handoff-patch.yml
           git add a.js tests/autoflow.static.test.mjs
@@ -75,7 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
-          git config user.email '41898282+iframe-v63@users.noreply.github.com'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/run-parent-handoff-v63.yml
           git rm .github/patch-requests/parent-tab-handoff-v63.txt
           git commit -m 'chore: remove temporary parent handoff runner'
