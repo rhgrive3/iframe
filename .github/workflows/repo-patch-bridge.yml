@@ -173,7 +173,15 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch --no-tags origin main
-          git merge --no-edit origin/main
+          if ! git merge --no-edit origin/main; then
+            echo '--- unresolved files ---'
+            git diff --name-only --diff-filter=U
+            echo '--- a.js conflict markers ---'
+            grep -n -B 80 -A 140 -E '^(<<<<<<<|=======|>>>>>>>)' a.js || true
+            echo '--- test conflict markers ---'
+            grep -n -B 40 -A 80 -E '^(<<<<<<<|=======|>>>>>>>)' tests/autoflow.static.test.mjs || true
+            exit 1
+          fi
           node --check a.js
           node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
           git push origin HEAD:automation/selectable-button-block-v63
