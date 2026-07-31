@@ -262,8 +262,57 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
   assert.ok(!relief.includes('waitForBattleEnd'));
 });
 
+test('battle result redirects recover from attack waits and explicit reload blocks', () => {
+  const recovery = source.slice(
+    source.indexOf('function recoverableBattleEndState'),
+    source.indexOf('function visibleMyPageButton')
+  );
+  assert.ok(recovery.includes('state.expectedBattleRaidId'));
+  assert.ok(recovery.includes("url.includes('result_multi/')"));
+
+  const attackWait = source.slice(source.indexOf('async function waitForAutoAttack'));
+  assert.ok(attackWait.includes('rememberBattleRecoveryConfig(config)'));
+  assert.ok(attackWait.includes('const existingEnd = recoverableBattleEndState()'));
+  assert.ok(attackWait.includes('const navigatedEnd = recoverableBattleEndState()'));
+
+  const reloadStart = source.lastIndexOf("case 'iframeReload':");
+  const reload = source.slice(reloadStart, source.indexOf("case 'iframeBack':", reloadStart));
+  assert.ok(reload.includes('context.battleRecoveryConfig'));
+  assert.ok(reload.includes('recoverableBattleEndState()'));
+  assert.ok(reload.includes('restartWorkflowAfterBattleEnd(recoveryConfig, context, battleEnd)'));
+
+  const probe = source.slice(
+    source.indexOf('async function reloadForBattleEndProbe'),
+    source.indexOf('async function restartWorkflowAfterBattleEnd')
+  );
+  assert.ok(probe.includes('endState: recoverableBattleEndState()'));
+});
+
+test('assist selection excludes raid IDs already entered in the current workflow run', () => {
+  assert.ok(source.includes('recentRaidIds: new Set()'));
+  assert.ok(source.includes('const MAX_RECENT_RAID_IDS = 128'));
+  const flow = source.slice(
+    source.indexOf('async function assistSelectFullFlow'),
+    source.indexOf('function evaluateWorkflowCondition')
+  );
+  assert.ok(flow.includes('.filter(item => !wasRecentRaidId(context, item.raidId))'));
+  assert.ok(flow.includes('rememberRecentRaidId(context, selected.raidId)'));
+
+  const lifecycle = source.slice(
+    source.indexOf('function armBattleEndDetection'),
+    source.indexOf('function battleEndDetectionMatches')
+  );
+  assert.ok(lifecycle.includes('rememberRecentRaidId(state.running, runtime.raidId)'));
+
+  const restart = source.slice(
+    source.indexOf('async function restartWorkflowAfterBattleEnd'),
+    source.indexOf('async function ensureFullAuto')
+  );
+  assert.ok(restart.includes('rememberRecentRaidId(context, endState?.runtime?.raidId || state.expectedBattleRaidId)'));
+});
+
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 59'));
+  assert.ok(source.includes('const APP_VERSION = 60'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));

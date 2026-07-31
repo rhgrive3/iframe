@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 59;
+  const APP_VERSION = 60;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4760,6 +4760,35 @@
     });
   }
 
+  const MAX_RECENT_RAID_IDS = 128;
+
+  function recentRaidIdSet(context = state.running) {
+    const target = context || state.running;
+    if (!target) return null;
+    if (!(target.recentRaidIds instanceof Set)) target.recentRaidIds = new Set();
+    return target.recentRaidIds;
+  }
+
+  function rememberRecentRaidId(context, raidId) {
+    const normalized = String(raidId || '').trim();
+    if (!normalized) return false;
+    const ids = recentRaidIdSet(context);
+    if (!ids) return false;
+    if (ids.has(normalized)) ids.delete(normalized);
+    ids.add(normalized);
+    while (ids.size > MAX_RECENT_RAID_IDS) {
+      const oldest = ids.values().next().value;
+      ids.delete(oldest);
+    }
+    return true;
+  }
+
+  function wasRecentRaidId(context, raidId) {
+    const normalized = String(raidId || '').trim();
+    if (!normalized) return false;
+    return Boolean(recentRaidIdSet(context)?.has(normalized));
+  }
+
   function findAssistRowByRaidId(raidId, doc = frameDocument()) {
     const normalizedRaidId = String(raidId || '');
     if (!normalizedRaidId) return null;
@@ -5164,6 +5193,7 @@
     }
     if (runtime.status) state.activeBattleStatus = runtime.status;
     if (!state.expectedBattleRaidId && runtime.raidId) state.expectedBattleRaidId = runtime.raidId;
+    if (runtime.raidId) rememberRecentRaidId(state.running, runtime.raidId);
     return true;
   }
 
@@ -5258,6 +5288,37 @@
 
   function safeBattleEndState() {
     try { return detectBattleEndState(); } catch { return null; }
+  }
+
+  function recoverableBattleEndState() {
+    const detected = safeBattleEndState();
+    if (detected) return detected;
+    const hasBattleIdentity = state.battleEndArmed
+      || Boolean(state.expectedBattleRaidId)
+      || Boolean(state.activeBattleStatus);
+    if (!hasBattleIdentity) return null;
+    try {
+      const url = currentFrameUrl();
+      if (url.includes('result_multi/')) {
+        return { type: 'RESULT', reason: '戦闘後のリザルト画面を検出', url };
+      }
+      const screen = safeDetectScreenState();
+      if (screen?.type === 'RESULT') {
+        return { type: 'RESULT', reason: '戦闘後の結果画面を検出', url };
+      }
+    } catch {}
+    return null;
+  }
+
+  function rememberBattleRecoveryConfig(config) {
+    if (!state.running || !config) return;
+    state.running.battleRecoveryConfig = {
+      timeoutSec: clamp(finite(config.timeoutSec, 15), 1, 600),
+      battleEndRoute: String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0',
+      battleEndExpectedScreen: normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist'),
+      memoryReliefEveryBattles: clamp(int(config.memoryReliefEveryBattles, 3), 0, 100),
+      memoryReliefSettleSec: clamp(finite(config.memoryReliefSettleSec, 1.5), 0, 30)
+    };
   }
 
   function visibleMyPageButton(doc = frameDocument()) {
@@ -5383,11 +5444,12 @@
         }
       }
     }
-    return { endState: safeBattleEndState(), state: safeDetectScreenState(), reloadError };
+    return { endState: recoverableBattleEndState(), state: safeDetectScreenState(), reloadError };
   }
 
   async function restartWorkflowAfterBattleEnd(config, context, endState) {
     clearPendingAutoAttack('敵撃破を検出しました');
+    rememberRecentRaidId(context, endState?.runtime?.raidId || state.expectedBattleRaidId);
     resetBattleEndDetection();
     const route = String(config.battleEndRoute || '#quest/assist/multi/0').trim() || '#quest/assist/multi/0';
     const expectedScreen = normalizeExpectedScreen(config.battleEndExpectedScreen || 'assist');
@@ -5436,7 +5498,10 @@
 
   async function ensureFullAuto(config, context, { allowReloadProbe = true } = {}) {
     const { signal } = context;
+    rememberBattleRecoveryConfig(config);
     try {
+      const existingEnd = recoverableBattleEndState();
+      if (existingEnd) return restartWorkflowAfterBattleEnd(config, context, existingEnd);
       await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
       const found = await monitorFrame(() => {
         const doc = frameDocument();
@@ -5480,8 +5545,10 @@
       return { changed: true };
     } catch (error) {
       if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
+      const navigatedEnd = recoverableBattleEndState();
+      if (navigatedEnd) return restartWorkflowAfterBattleEnd(config, context, navigatedEnd);
       if (error?.code === 'TIMEOUT' && allowReloadProbe) {
-        const visibleEnd = safeBattleEndState();
+        const visibleEnd = recoverableBattleEndState();
         if (visibleEnd) return restartWorkflowAfterBattleEnd(config, context, visibleEnd);
         const probe = await reloadForBattleEndProbe(config, context);
         if (probe.endState) return restartWorkflowAfterBattleEnd(config, context, probe.endState);
@@ -5633,7 +5700,10 @@
   async function waitForAutoAttack(config, context) {
     const { signal } = context;
     const timeoutMs = config.timeoutSec * 1000;
+    rememberBattleRecoveryConfig(config);
     try {
+      const existingEnd = recoverableBattleEndState();
+      if (existingEnd) return restartWorkflowAfterBattleEnd(config, context, existingEnd);
       await waitForFrameReady({ signal, timeoutMs, expectedScreen: 'battle' });
       const startupDoc = frameDocument();
       const startupRuntime = battleRuntimeState(startupDoc);
@@ -5699,8 +5769,10 @@
       return transition;
     } catch (error) {
       if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
+      const navigatedEnd = recoverableBattleEndState();
+      if (navigatedEnd) return restartWorkflowAfterBattleEnd(config, context, navigatedEnd);
       if (error?.code === 'TIMEOUT') {
-        const visibleEnd = safeBattleEndState();
+        const visibleEnd = recoverableBattleEndState();
         if (visibleEnd) return restartWorkflowAfterBattleEnd(config, context, visibleEnd);
         const probe = await reloadForBattleEndProbe(config, context);
         if (probe.endState) return restartWorkflowAfterBattleEnd(config, context, probe.endState);
@@ -5792,7 +5864,11 @@
         await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
         continue;
       }
-      if (current.type === 'BATTLE') return { attempts: attempt, alreadyInBattle: true };
+      if (current.type === 'BATTLE') {
+        const runtime = battleRuntimeState();
+        rememberRecentRaidId(context, runtime.raidId || state.expectedBattleRaidId);
+        return { attempts: attempt, alreadyInBattle: true };
+      }
       if (current.type !== 'ASSIST_LIST') {
         await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist' });
       }
@@ -5800,7 +5876,8 @@
       const doc = frameDocument();
       assertNoUnknownPopup(doc);
       const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
-      const ranked = rankAssistRows(rows, hpThreshold, hpComparison);
+      const ranked = rankAssistRows(rows, hpThreshold, hpComparison)
+        .filter(item => !wasRecentRaidId(context, item.raidId));
       if (cyclesAssistSlots && !selectedSlots.includes(activeAssistSlot(doc))) {
         const slot = selectedSlots[slotCursor % selectedSlots.length];
         slotCursor = (slotCursor + 1) % selectedSlots.length;
@@ -5844,7 +5921,10 @@
         await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
         continue;
       }
-      if (next.type === 'BATTLE') return { attempts: attempt };
+      if (next.type === 'BATTLE') {
+        rememberRecentRaidId(context, selected.raidId);
+        return { attempts: attempt };
+      }
 
       if (next.type === 'SUPPORTER') {
         const supporterResult = await selectSupporterConditional({
@@ -5868,7 +5948,10 @@
           fastTap: true
         }, context);
         if (deckResult.retry) continue;
-        if (deckResult.battle) return { attempts: attempt };
+        if (deckResult.battle) {
+          rememberRecentRaidId(context, selected.raidId);
+          return { attempts: attempt };
+        }
       }
     }
     throw new FlowError('救援参加の最大再試行回数に達しました', 'ASSIST_MAX_ATTEMPTS');
@@ -6111,14 +6194,28 @@
         case 'iframeReload':
           {
             const before = captureFrameState({ includeDocument: false });
-            await replaceFrame(currentFrameUrl());
-            await waitForFrameReady({
-              signal: context.signal,
-              timeoutMs: block.config.timeoutSec * 1000,
-              expectedScreen: block.config.expectedScreen,
-              before,
-              requireChange: true
-            });
+            const recoveryConfig = context.battleRecoveryConfig || state.running?.battleRecoveryConfig || null;
+            try {
+              await replaceFrame(currentFrameUrl());
+              await waitForFrameReady({
+                signal: context.signal,
+                timeoutMs: block.config.timeoutSec * 1000,
+                expectedScreen: block.config.expectedScreen,
+                before,
+                requireChange: true
+              });
+            } catch (error) {
+              if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
+              const battleEnd = recoverableBattleEndState();
+              if (battleEnd && recoveryConfig) {
+                return restartWorkflowAfterBattleEnd(recoveryConfig, context, battleEnd);
+              }
+              throw error;
+            }
+            const battleEnd = recoverableBattleEndState();
+            if (battleEnd && recoveryConfig) {
+              return restartWorkflowAfterBattleEnd(recoveryConfig, context, battleEnd);
+            }
           }
           break;
         case 'iframeBack':
@@ -6174,7 +6271,9 @@
       cycle: 0,
       totalCycles: null,
       restartCount: 0,
-      completedBattles: 0
+      completedBattles: 0,
+      recentRaidIds: new Set(),
+      battleRecoveryConfig: null
     };
     state.running = context;
     resetBattleEndDetection();
