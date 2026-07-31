@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 54'));
+  assert.ok(source.includes('const APP_VERSION = 55'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -374,7 +374,9 @@ test('battle performance polling only runs while the persistent setting is enabl
   assert.ok(child.includes('function startPoll()'));
   assert.ok(child.includes('function stopPoll()'));
   assert.ok(child.includes('if (pollTimer != null) return;'));
-  assert.ok(child.includes('window.addEventListener(\'pagehide\', stopPoll, { once: true })'));
+  assert.ok(child.includes('window.addEventListener(\'pagehide\', destroy, { once: true })'));
+  assert.ok(child.includes('window.removeEventListener(\'message\', onMessage)'));
+  assert.ok(child.includes('destroy'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
   assert.ok(enabled.includes('startPoll();'));
   assert.ok(enabled.includes('stopPoll();'));
@@ -402,5 +404,32 @@ test('battle performance fully suppresses battle canvas while preserving DOM att
   assert.ok(!child.includes('protectedBattleTextures'));
   assert.ok(!child.includes('patchWebGLTracking'));
   assert.ok(!child.includes('renderAllowed'));
+});
+
+test('iframe recycling destroys child runtimes and releases parent references immediately', () => {
+  const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
+  assert.ok(child.includes('let destroyed = false'));
+  assert.ok(child.includes('const destroy = () =>'));
+  assert.ok(child.includes("window.removeEventListener('storage', onStorage)"));
+  assert.ok(child.includes('refresh: patchNow,\n      destroy'));
+
+  const lifecycle = source.slice(source.indexOf('const cleanup = new Set()'), source.indexOf('function computedVisible'));
+  assert.ok(lifecycle.includes('const frameLifecycleSubscribers = new Set()'));
+  assert.ok(lifecycle.includes('notifyFrameLifecycle(previousFrame, nextFrame)'));
+  assert.ok(lifecycle.includes("replaceFrame(destination, { forceNewElement = true }"));
+  assert.ok(lifecycle.includes("clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました')"));
+  assert.ok(lifecycle.includes('previousFrame = null'));
+  assert.ok(lifecycle.includes('state.frameGeneration === loadedGeneration'));
+  assert.ok(!lifecycle.includes('iframe === loadedFrame'));
+
+  const monitor = source.slice(source.indexOf('function monitorFrame'), source.indexOf('async function waitForFrameReady'));
+  assert.ok(monitor.includes('frameLifecycleSubscribers.add(onFrameLifecycle)'));
+  assert.ok(monitor.includes('frameLifecycleSubscribers.delete(onFrameLifecycle)'));
+  assert.ok(monitor.includes("listenedFrame?.removeEventListener('load', onFrameLoad)"));
+});
+
+test('standalone Safari relief also rebuilds the MyPage browsing context', () => {
+  const relief = source.slice(source.indexOf('async function releaseGranblueResources'), source.indexOf('async function reloadForBattleEndProbe'));
+  assert.ok(relief.includes("hardNavigateAfterRelief(gameRouteUrl('#mypage'), 'mypage', config, context)"));
 });
 

@@ -24,6 +24,7 @@
     }
 
     let enabled = readBattlePerformanceSetting();
+    let destroyed = false;
     let style = null;
     let pollTimer = null;
     let soundFlagSnapshot = null;
@@ -266,6 +267,7 @@
     }
 
     function setEnabled(next) {
+      if (destroyed) return;
       enabled = Boolean(next);
       ensureStyle();
       if (enabled) {
@@ -286,6 +288,23 @@
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
       setEnabled(readBattlePerformanceSetting());
     };
+    const destroy = () => {
+      if (destroyed) return;
+      destroyed = true;
+      enabled = false;
+      stopPoll();
+      restoreSoundRuntime();
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('pagehide', destroy);
+      try { style?.remove(); } catch {}
+      style = null;
+      const runtime = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
+      if (runtime?.destroy === destroy) {
+        try { delete window[BATTLE_PERFORMANCE_RUNTIME_KEY]; }
+        catch { window[BATTLE_PERFORMANCE_RUNTIME_KEY] = null; }
+      }
+    };
 
     patchImageSources();
     patchRendering();
@@ -296,12 +315,13 @@
     }
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
-    window.addEventListener('pagehide', stopPoll, { once: true });
+    window.addEventListener('pagehide', destroy, { once: true });
 
     window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
       get enabled() { return enabled; },
       setEnabled,
-      refresh: patchNow
+      refresh: patchNow,
+      destroy
     };
   }
 
@@ -310,7 +330,7 @@
     return;
   }
 
-  const APP_VERSION = 54;
+  const APP_VERSION = 55;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1238,7 +1258,13 @@
   };
 
   const cleanup = new Set();
+  const frameLifecycleSubscribers = new Set();
   const addCleanup = fn => (cleanup.add(fn), fn);
+  const notifyFrameLifecycle = (previousFrame, nextFrame) => {
+    for (const subscriber of [...frameLifecycleSubscribers]) {
+      try { subscriber({ previousFrame, nextFrame }); } catch {}
+    }
+  };
   const deepClone = value => JSON.parse(JSON.stringify(value));
   const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
   const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -3249,6 +3275,7 @@
   function releaseWindowRuntime(win, doc, { stopWindow = true } = {}) {
     if (!win || !doc) return;
     try {
+      try { win[BATTLE_PERFORMANCE_RUNTIME_KEY]?.destroy?.(); } catch {}
       stopRuntimeTelemetry(win);
       try { releaseKnownGraphicsContexts(win); } catch {}
 
@@ -3382,13 +3409,15 @@
   }
 
   function handleFrameLoad() {
-    const loadedFrame = iframe;
     state.frameGeneration += 1;
+    const loadedGeneration = state.frameGeneration;
     let loadedSameOrigin = false;
-    stopRuntimeTelemetry(loadedFrame?.contentWindow);
+    stopRuntimeTelemetry(iframe?.contentWindow);
     const telemetryTimer = setTimeout(() => {
       state.telemetryTimers.delete(telemetryTimer);
-      if (!state.destroyed && iframe === loadedFrame) stopRuntimeTelemetry(loadedFrame?.contentWindow);
+      if (!state.destroyed && state.frameGeneration === loadedGeneration) {
+        stopRuntimeTelemetry(iframe?.contentWindow);
+      }
     }, 1200);
     state.telemetryTimers.add(telemetryTimer);
     try {
@@ -3410,7 +3439,7 @@
     frame.addEventListener('load', handleFrameLoad);
   }
 
-  async function replaceFrame(destination, { forceNewElement = false } = {}) {
+  async function replaceFrame(destination, { forceNewElement = true } = {}) {
     const targetUrl = String(destination || '').trim();
     if (!targetUrl) throw new FlowError('iframeの移動先が空です', 'INVALID_ROUTE');
     if (state.destroyed) throw new DOMException('AutoFlowは終了しています', 'AbortError');
@@ -3420,7 +3449,8 @@
         throw new DOMException('より新しいiframe遷移に置き換えられました', 'AbortError');
       }
     };
-    const previousFrame = iframe;
+    clearPendingAutoAttack('iframeを再構築するため攻撃監視を解除しました');
+    let previousFrame = iframe;
     previousFrame.removeEventListener('load', handleFrameLoad);
     releaseFrameRuntime(previousFrame);
     await blankFrame(previousFrame);
@@ -3429,6 +3459,7 @@
     assertCurrentNavigation();
     if (!forceNewElement) {
       bindFrameLoad(previousFrame);
+      notifyFrameLifecycle(previousFrame, previousFrame);
       try { previousFrame.contentWindow.location.replace(targetUrl); }
       catch { previousFrame.src = targetUrl; }
       if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = previousFrame;
@@ -3437,8 +3468,12 @@
     const nextFrame = previousFrame.cloneNode(false);
     nextFrame.removeAttribute('src');
     bindFrameLoad(nextFrame);
-    iframe = nextFrame;
     previousFrame.replaceWith(nextFrame);
+    iframe = nextFrame;
+    notifyFrameLifecycle(previousFrame, nextFrame);
+    previousFrame = null;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assertCurrentNavigation();
     nextFrame.src = targetUrl;
     if (window.__AUTO_TEST__) window.__AUTO_TEST__.iframe = nextFrame;
     return nextFrame;
@@ -3599,6 +3634,7 @@
         listenedFrame?.removeEventListener('load', onFrameLoad);
         listenedFrame = null;
         signal?.removeEventListener('abort', onAbort);
+        frameLifecycleSubscribers.delete(onFrameLifecycle);
       };
       const finish = (callback, value) => {
         if (settled) return;
@@ -3698,7 +3734,21 @@
         }
         finish(resolve, result === true ? {} : result);
       };
+      const onFrameLifecycle = () => {
+        if (settled) return;
+        observer?.disconnect();
+        observer = null;
+        observedDoc = null;
+        observedRoots = [];
+        stableSince = null;
+        lastMutation = performance.now();
+        listenedFrame?.removeEventListener('load', onFrameLoad);
+        listenedFrame = null;
+        bindObserver();
+        evaluate();
+      };
 
+      frameLifecycleSubscribers.add(onFrameLifecycle);
       syncFrameListener();
       signal?.addEventListener('abort', onAbort, { once: true });
       if (timeoutMs > 0) timeout = setTimeout(() => finish(reject, new FlowError(`${description}がタイムアウトしました`, 'TIMEOUT')), timeoutMs);
@@ -5028,7 +5078,9 @@
   async function releaseGranblueResources(config, context) {
     const currentUrl = currentFrameUrl();
     await navigateToGranblueMyPage(config, context);
-    if (config.destination === 'mypage') return { state: 'MYPAGE' };
+    if (config.destination === 'mypage') {
+      return hardNavigateAfterRelief(gameRouteUrl('#mypage'), 'mypage', config, context);
+    }
     const targetUrl = config.destination === 'current'
       ? currentUrl
       : gameRouteUrl('#quest/assist/multi/0');
