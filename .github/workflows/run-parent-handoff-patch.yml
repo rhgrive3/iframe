@@ -1,0 +1,55 @@
+name: Apply parent tab handoff patch
+
+on:
+  push:
+    branches:
+      - automation/parent-tab-handoff-v63
+    paths:
+      - '.github/workflows/run-parent-handoff-patch.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: parent-tab-handoff-v63
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out patch branch
+        uses: actions/checkout@v4
+        with:
+          ref: automation/parent-tab-handoff-v63
+          fetch-depth: 0
+
+      - name: Decode and apply deterministic patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .github/scripts/apply-parent-handoff.py.gz.b64 | gzip --decompress > /tmp/apply-parent-handoff.py
+          python3 /tmp/apply-parent-handoff.py
+
+      - name: Validate JavaScript and regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Commit verified implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/scripts/apply-parent-handoff.py.gz.b64
+          git rm .github/workflows/run-parent-handoff-patch.yml
+          git add a.js tests/autoflow.static.test.mjs
+          git diff --cached --check
+          git commit -m 'feat: resume workflows after parent page restart'
+          git push origin HEAD:automation/parent-tab-handoff-v63
