@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 55'));
+  assert.ok(source.includes('const APP_VERSION = 56'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -363,7 +363,7 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
-  assert.ok(child.includes('try { prototype[name] = wrapped; } catch {}'));
+  assert.ok(child.includes('try { prototype[name] = wrapped; } catch { return; }'));
   assert.ok(child.includes('pollTimer = window.setInterval'));
   assert.ok(child.includes('try { patchNow(); } catch {}'));
 });
@@ -374,7 +374,8 @@ test('battle performance polling only runs while the persistent setting is enabl
   assert.ok(child.includes('function startPoll()'));
   assert.ok(child.includes('function stopPoll()'));
   assert.ok(child.includes('if (pollTimer != null) return;'));
-  assert.ok(child.includes('window.addEventListener(\'pagehide\', destroy, { once: true })'));
+  assert.ok(child.includes("window.addEventListener('pagehide', onPageHide)"));
+  assert.ok(child.includes("window.addEventListener('pageshow', onPageShow)"));
   assert.ok(child.includes('window.removeEventListener(\'message\', onMessage)'));
   assert.ok(child.includes('destroy'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
@@ -411,7 +412,7 @@ test('iframe recycling destroys child runtimes and releases parent references im
   assert.ok(child.includes('let destroyed = false'));
   assert.ok(child.includes('const destroy = () =>'));
   assert.ok(child.includes("window.removeEventListener('storage', onStorage)"));
-  assert.ok(child.includes('refresh: patchNow,\n      destroy'));
+  assert.ok(child.includes('refresh: patchNow,\n      suspend,\n      resume,\n      destroy'));
 
   const lifecycle = source.slice(source.indexOf('const cleanup = new Set()'), source.indexOf('function computedVisible'));
   assert.ok(lifecycle.includes('const frameLifecycleSubscribers = new Set()'));

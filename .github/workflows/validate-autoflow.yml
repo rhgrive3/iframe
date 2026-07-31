@@ -34,4 +34,4 @@ jobs:
       - name: JavaScript syntax
         run: node --check a.js
       - name: Regression checks
-        run: node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+        run: node --test tests/autoflow.static.test.mjs tests/safari-performance-regression.test.mjs tests/ui-drag-regression.test.mjs test/touch-event-regression.test.mjs

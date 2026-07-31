@@ -19,21 +19,34 @@
   function installBattlePerformanceChildRuntime() {
     const installed = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
     if (installed?.setEnabled) {
+      installed.resume?.();
       installed.setEnabled(readBattlePerformanceSetting());
       return;
     }
 
     let enabled = readBattlePerformanceSetting();
     let destroyed = false;
+    let suspended = false;
     let style = null;
     let pollTimer = null;
     let soundFlagSnapshot = null;
     let createjsMuteSnapshot = null;
     let soundModulesRequested = false;
     const soundRestorers = [];
-    const patchedSoundObjects = new WeakSet();
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
     const RENDER_MARKER = '__autoFlowBattlePerformanceRender__';
+    const SOUND_MARKER = '__autoFlowBattlePerformanceSound__';
+    const IMAGE_MARKER = '__autoFlowBattlePerformanceImage__';
+    // Every prototype patch registers its own undo here. destroy() unwinds them all so a
+    // later re-injection into the same realm starts from the pristine natives instead of
+    // stacking another wrapper layer that only a full parent reload could remove.
+    const patchRestorers = [];
+    const addPatchRestorer = restore => { patchRestorers.push(restore); };
+    function restoreAllPatches() {
+      while (patchRestorers.length) {
+        try { patchRestorers.pop()(); } catch {}
+      }
+    }
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
     const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
@@ -109,6 +122,7 @@
       const prototype = window.createjs?.LoadQueue?.prototype;
       if (!prototype || prototype[LOAD_QUEUE_MARKER]) return;
       Object.defineProperty(prototype, LOAD_QUEUE_MARKER, { value: true, configurable: true });
+      addPatchRestorer(() => { try { delete prototype[LOAD_QUEUE_MARKER]; } catch {} });
       for (const name of ['loadManifest', 'loadFile']) {
         const original = prototype[name];
         if (typeof original !== 'function') continue;
@@ -116,6 +130,7 @@
           if (args.length) args[0] = name === 'loadManifest' ? rewriteManifest(args[0]) : rewriteManifestItem(args[0]);
           return original.apply(this, args);
         };
+        addPatchRestorer(() => { prototype[name] = original; });
       }
     }
 
@@ -127,7 +142,10 @@
         return original.apply(this, args);
       };
       try { Object.defineProperty(wrapped, RENDER_MARKER, { value: true }); } catch {}
-      try { prototype[name] = wrapped; } catch {}
+      try { prototype[name] = wrapped; } catch { return; }
+      addPatchRestorer(() => {
+        if (prototype[name] === wrapped) prototype[name] = original;
+      });
     }
 
     function patchRendering() {
@@ -150,7 +168,11 @@
     }
 
     function patchSoundObject(sound) {
-      if (!enabled || !sound || patchedSoundObjects.has(sound)) return;
+      // The marker lives on the sound module itself, not on this runtime instance. The
+      // module survives in the RequireJS cache across route changes, so an instance-local
+      // guard would let a re-created runtime wrap the already-wrapped methods and then
+      // "restore" them to the wrappers.
+      if (!enabled || !sound || sound[SOUND_MARKER]) return;
       const loadMethods = ['loadSound', 'loadBGM', 'loadSE', 'loadVoice'];
       const noOpMethods = [
         'playSound', 'playBGM', 'playSE', 'playVoice', 'playBattleReadySE', 'playAssistSE',
@@ -168,10 +190,11 @@
         sound[name] = () => undefined;
       }
       if (!originals.size) return;
-      patchedSoundObjects.add(sound);
+      try { Object.defineProperty(sound, SOUND_MARKER, { value: true, configurable: true }); }
+      catch { sound[SOUND_MARKER] = true; }
       soundRestorers.push(() => {
         for (const [name, original] of originals) sound[name] = original;
-        patchedSoundObjects.delete(sound);
+        try { delete sound[SOUND_MARKER]; } catch { sound[SOUND_MARKER] = false; }
       });
     }
 
@@ -222,24 +245,46 @@
     }
 
     function patchImageSources() {
-      try {
-        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLImageElement?.prototype || {}, 'src');
-        if (descriptor?.get && descriptor?.set && descriptor.configurable) {
-          Object.defineProperty(window.HTMLImageElement.prototype, 'src', {
-            ...descriptor,
-            set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
-          });
-        }
-      } catch {}
-      try {
-        const originalSetAttribute = window.Element?.prototype?.setAttribute;
-        if (typeof originalSetAttribute === 'function') {
-          window.Element.prototype.setAttribute = function (name, value) {
-            const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
-            return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
-          };
-        }
-      } catch {}
+      // Both patches are marker guarded and fully reversible. Without this an
+      // install/destroy/install cycle in one realm (pagehide -> back-forward cache restore
+      // -> re-sync) stacked another wrapper on top of the previous one, and every layer
+      // slowed down every setAttribute/img.src the game performs until the parent page was
+      // reloaded. That matched the reported "only a full parent refresh helps" symptom.
+      const imagePrototype = window.HTMLImageElement?.prototype;
+      const elementPrototype = window.Element?.prototype;
+      if (imagePrototype && !imagePrototype[IMAGE_MARKER]) {
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(imagePrototype, 'src');
+          if (descriptor?.get && descriptor?.set && descriptor.configurable) {
+            Object.defineProperty(imagePrototype, IMAGE_MARKER, { value: true, configurable: true });
+            Object.defineProperty(imagePrototype, 'src', {
+              ...descriptor,
+              set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
+            });
+            addPatchRestorer(() => {
+              try { Object.defineProperty(imagePrototype, 'src', descriptor); } catch {}
+              try { delete imagePrototype[IMAGE_MARKER]; } catch {}
+            });
+          }
+        } catch {}
+      }
+      if (elementPrototype && !elementPrototype[IMAGE_MARKER]) {
+        try {
+          const originalSetAttribute = elementPrototype.setAttribute;
+          if (typeof originalSetAttribute === 'function') {
+            Object.defineProperty(elementPrototype, IMAGE_MARKER, { value: true, configurable: true });
+            const wrapped = function (name, value) {
+              const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
+              return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
+            };
+            elementPrototype.setAttribute = wrapped;
+            addPatchRestorer(() => {
+              if (elementPrototype.setAttribute === wrapped) elementPrototype.setAttribute = originalSetAttribute;
+              try { delete elementPrototype[IMAGE_MARKER]; } catch {}
+            });
+          }
+        } catch {}
+      }
     }
 
     function patchNow() {
@@ -269,6 +314,7 @@
     function setEnabled(next) {
       if (destroyed) return;
       enabled = Boolean(next);
+      if (suspended) return;
       ensureStyle();
       if (enabled) {
         patchNow();
@@ -288,15 +334,41 @@
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
       setEnabled(readBattlePerformanceSetting());
     };
+    // Back-forward cache: the very same document can come back. Fully tearing down there
+    // used to leave the prototype patches installed with no runtime key, so the next
+    // parent sync re-injected and stacked a second wrapper layer. Suspend instead, and
+    // keep destroy() for the cases where the document really goes away.
+    const suspend = () => {
+      if (destroyed || suspended) return;
+      suspended = true;
+      stopPoll();
+      restoreSoundRuntime();
+      restoreAllPatches();
+      if (style) style.disabled = true;
+    };
+    const resume = () => {
+      if (destroyed || !suspended) return;
+      suspended = false;
+      patchImageSources();
+      patchRendering();
+      ensureStyle();
+      if (enabled) {
+        patchNow();
+        startPoll();
+      }
+    };
     const destroy = () => {
       if (destroyed) return;
       destroyed = true;
       enabled = false;
+      suspended = false;
       stopPoll();
       restoreSoundRuntime();
+      restoreAllPatches();
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
-      window.removeEventListener('pagehide', destroy);
+      window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('pageshow', onPageShow);
       try { style?.remove(); } catch {}
       style = null;
       const runtime = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
@@ -305,6 +377,26 @@
         catch { window[BATTLE_PERFORMANCE_RUNTIME_KEY] = null; }
       }
     };
+    const onPageHide = event => (event?.persisted ? suspend() : destroy());
+    const onPageShow = event => { if (event?.persisted) resume(); };
+
+    // Publish the handle before patching anything. If a patch step throws, the realm is
+    // still recognisable as "already installed" so the next sync calls setEnabled()
+    // instead of re-running the patchers and doubling them up.
+    window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
+      get enabled() { return enabled; },
+      get suspended() { return suspended; },
+      setEnabled,
+      refresh: patchNow,
+      suspend,
+      resume,
+      destroy
+    };
+
+    window.addEventListener('message', onMessage);
+    window.addEventListener('storage', onStorage);
+    window.addEventListener('pagehide', onPageHide);
+    window.addEventListener('pageshow', onPageShow);
 
     patchImageSources();
     patchRendering();
@@ -313,16 +405,6 @@
       patchNow();
       startPoll();
     }
-    window.addEventListener('message', onMessage);
-    window.addEventListener('storage', onStorage);
-    window.addEventListener('pagehide', destroy, { once: true });
-
-    window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
-      get enabled() { return enabled; },
-      setEnabled,
-      refresh: patchNow,
-      destroy
-    };
   }
 
   if (window.top !== window) {
@@ -330,7 +412,7 @@
     return;
   }
 
-  const APP_VERSION = 55;
+  const APP_VERSION = 56;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -3387,6 +3469,23 @@
     discardHostRuntimeShell();
   }
 
+  // Everything the parent window accumulates across battles and that only a full page
+  // reload used to clear. Deliberately does NOT touch workflow definitions, saved
+  // settings, UI state, undo history, the tap queue or an in-flight gesture.
+  function resetParentRuntimeState({ reason = '' } = {}) {
+    clearPendingAutoAttack(reason || '親側の実行時状態をリセットしました');
+    for (const timer of state.telemetryTimers) clearTimeout(timer);
+    state.telemetryTimers.clear();
+    state.blockProgress.clear();
+    // The resource timing buffer is the one parent-side structure measured to grow one
+    // entry per iframe navigation and never shrink on its own.
+    try {
+      performance.clearResourceTimings?.();
+      performance.clearMarks?.();
+      performance.clearMeasures?.();
+    } catch {}
+  }
+
   function blankFrame(frame) {
     return new Promise(resolve => {
       let settled = false;
@@ -3993,21 +4092,50 @@
     };
   }
 
+  // A discarded iframe document never runs its pending rAF callbacks. Without the fallback
+  // timer this promise stayed unsettled forever, which both deadlocked the exclusive tap
+  // queue and left the abort listener - and through it the old child window, the old target
+  // element and the gesture trajectory - attached to the run-lifetime signal until the
+  // parent page was reloaded.
+  const ANIMATION_FRAME_FALLBACK_MS = 250;
+
   function nextAnimationFrame(win, signal) {
     return new Promise((resolve, reject) => {
       throwIfAborted(signal);
       const request = win.requestAnimationFrame?.bind(win)
         || (callback => win.setTimeout(() => callback(win.performance?.now?.() ?? performance.now()), 16));
       const cancel = win.cancelAnimationFrame?.bind(win) || win.clearTimeout.bind(win);
+      let settled = false;
       let frameId = 0;
+      let fallbackId = null;
+      const release = () => {
+        settled = true;
+        signal?.removeEventListener('abort', onAbort);
+        if (fallbackId != null) {
+          try { win.clearTimeout(fallbackId); } catch {}
+          fallbackId = null;
+        }
+      };
       const onAbort = () => {
-        cancel(frameId);
+        if (settled) return;
+        release();
+        try { cancel(frameId); } catch {}
         reject(abortException(signal));
       };
-      frameId = request(timestamp => {
-        signal?.removeEventListener('abort', onAbort);
+      const onFrame = timestamp => {
+        if (settled) return;
+        release();
         resolve(timestamp);
-      });
+      };
+      frameId = request(onFrame);
+      try {
+        fallbackId = win.setTimeout(() => {
+          fallbackId = null;
+          if (settled) return;
+          try { cancel(frameId); } catch {}
+          onFrame(highResolutionNow(win));
+        }, ANIMATION_FRAME_FALLBACK_MS);
+      } catch {}
       signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
@@ -5077,6 +5205,7 @@
 
   async function releaseGranblueResources(config, context) {
     const currentUrl = currentFrameUrl();
+    resetParentRuntimeState({ reason: 'メモリ解放のため親側状態をリセットしました' });
     await navigateToGranblueMyPage(config, context);
     if (config.destination === 'mypage') {
       return hardNavigateAfterRelief(gameRouteUrl('#mypage'), 'mypage', config, context);
@@ -5134,6 +5263,7 @@
     context.setProgress?.('敵撃破を検出・復帰中');
 
     if (shouldRelieve) {
+      resetParentRuntimeState({ reason: `${context.completedBattles}戦ごとの軽量化で親側状態をリセットしました` });
       await navigateToGranblueMyPage({
         timeoutSec: Math.max(45, finite(config.timeoutSec, 15)),
         settleSec: clamp(finite(config.memoryReliefSettleSec, 1.5), 0, 30)
@@ -7853,10 +7983,34 @@
   urlInput.value = initialUrl;
   iframe.src = initialUrl;
 
+  // Sizes of the module-local collections that tools/leak-probe.js cannot reach from the
+  // console. Read only: used to tell a real parent-side leak apart from deferred GC.
+  function diagnostics() {
+    return {
+      frameLifecycleSubscribers: frameLifecycleSubscribers.size,
+      cleanup: cleanup.size,
+      telemetryTimers: state.telemetryTimers.size,
+      blockProgress: state.blockProgress.size,
+      collapsed: state.collapsed.size,
+      logs: state.logs.length,
+      workflowUndo: state.workflowUndo.length,
+      workflowRedo: state.workflowRedo.length,
+      pendingAutoAttack: Boolean(state.pendingAutoAttack),
+      frameGeneration: state.frameGeneration,
+      frameNavigationId: state.frameNavigationId,
+      hostRuntimeReleased: state.hostRuntimeReleased,
+      resourceTimingEntries: (() => {
+        try { return performance.getEntriesByType('resource').length; } catch { return null; }
+      })()
+    };
+  }
+
   window.__AUTO_TEST__ = {
     APP_VERSION,
     state,
     iframe,
+    diagnostics,
+    resetParentRuntimeState,
     normalizePopupText,
     normalizeBlock,
     normalizeWorkflow,
