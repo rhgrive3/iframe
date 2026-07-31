@@ -13,7 +13,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 concurrency:
   group: granblue-runtime-state-v50
@@ -28,8 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: main
           fetch-depth: 0
 
       - name: Patch runtime-backed Granblue state handling
@@ -53,8 +52,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git rm .github/workflows/harden-runtime-state.yml
           git rm .github/scripts/harden-runtime-state.py
-          git rm .github/patch-requests/runtime-state-v50.txt
           git add a.js tests/autoflow.static.test.mjs
           git diff --cached --check
           git commit -m 'fix: use Granblue runtime state for battle automation'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:main
