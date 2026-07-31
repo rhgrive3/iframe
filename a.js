@@ -6650,13 +6650,14 @@
     try {
       const loopCount = clamp(int(workflow.loopCount, 1), 1, MAX_WORKFLOW_LOOP_COUNT);
       const loopInfinite = Boolean(workflow.loopInfinite);
-      let cycle = resumeRuntime ? Math.max(1, int(resumeRuntime.cycle, 1)) : 0;
-      if (!loopInfinite) cycle = Math.min(cycle, loopCount);
+      let cycle = resumeRuntime ? Math.max(0, int(resumeRuntime.cycle, 1) - 1) : 0;
+      if (!loopInfinite) cycle = Math.min(cycle, Math.max(0, loopCount - 1));
       let resumeCurrentCycle = Boolean(resumeRuntime);
-      while (!controller.signal.aborted && (resumeCurrentCycle || loopInfinite || cycle < loopCount)) {
+      while (!controller.signal.aborted && (loopInfinite || cycle < loopCount)) {
         clearPendingAutoAttack('次のワークフロー周回を開始します');
         if (resumeCurrentCycle) {
           resumeCurrentCycle = false;
+          cycle += 1;
           context.cycle = cycle;
           context.totalCycles = loopInfinite ? null : loopCount;
           const cycleLabel = loopInfinite ? `${cycle}周目` : `${cycle} / ${loopCount}周目`;
@@ -6674,7 +6675,7 @@
 
         while (!controller.signal.aborted) {
           try {
-            await runBlockList(workflow.blocks, context, 'root');
+            await runBlockList(workflow.blocks, context);
             break;
           } catch (error) {
             if (!(error instanceof FlowRestart)) throw error;

@@ -1,28 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { gunzipSync } from 'node:zlib';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import './safari-performance-regression.test.mjs';
 import './ui-drag-regression.test.mjs';
 import './granblue-captured-simulation.test.mjs';
-
-// __PARENT_HANDOFF_PATCH_BOOTSTRAP_START__
-{
-  const repoRoot = fileURLToPath(new URL('..', import.meta.url));
-  const payloadPath = fileURLToPath(new URL('../.github/scripts/apply-parent-handoff-main.py.gz.b64', import.meta.url));
-  const tempDir = mkdtempSync(join(tmpdir(), 'parent-handoff-patch-'));
-  const scriptPath = join(tempDir, 'apply-parent-handoff.py');
-  const payload = readFileSync(payloadPath, 'utf8').trim();
-  writeFileSync(scriptPath, gunzipSync(Buffer.from(payload, 'base64')));
-  execFileSync('python3', [scriptPath], { cwd: repoRoot, stdio: 'inherit' });
-  rmSync(payloadPath, { force: true });
-  rmSync(tempDir, { recursive: true, force: true });
-}
-// __PARENT_HANDOFF_PATCH_BOOTSTRAP_END__
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
@@ -621,5 +602,38 @@ test('initial install releases the parent runtime before loading the child game'
   const install = source.slice(source.lastIndexOf('const initialUrl = normalizeInitialUrl()'));
   assert.ok(install.includes('releaseHostRuntimeOnce()'));
   assert.ok(install.indexOf('releaseHostRuntimeOnce()') < install.indexOf('iframe.src = initialUrl'));
+});
+
+test('parent-page restart handoff persists ownership and safe fallbacks', () => {
+  const handoff = source.slice(source.indexOf('function createWorkflowExecutionState'), source.indexOf('async function runBlockList'));
+  assert.ok(source.includes('const WORKFLOW_HANDOFF_SCHEMA_VERSION = 1'));
+  assert.ok(source.includes('const WORKFLOW_HANDOFF_TTL_MS = 5 * 60_000'));
+  assert.ok(handoff.includes('if (window.name !== handoff.targetName) return null'));
+  assert.ok(handoff.includes('handoff.claimedBy && handoff.claimedBy !== instanceId'));
+  assert.ok(handoff.includes('window.open(handoff.parentUrl, handoff.targetName)'));
+  assert.ok(handoff.includes("phase: 'committed', mode: 'same-tab'"));
+  assert.ok(handoff.includes('location.replace(handoff.parentUrl)'));
+  assert.ok(handoff.includes("location.replace('about:blank')"));
+  assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
+});
+
+test('workflow cursor resumes after the restart block without replaying it', () => {
+  const runner = source.slice(source.indexOf('async function runBlockList'), source.indexOf('async function executeWorkflowBlock'));
+  assert.ok(runner.includes('const frame = executionListFrame(context, listKey)'));
+  assert.ok(runner.includes('if (!definition?.container) frame.index = index + 1'));
+  assert.ok(runner.indexOf('if (!definition?.container) frame.index = index + 1') < runner.indexOf('await executeWorkflowBlock(block, context, execution)'));
+  assert.ok(runner.includes('if (definition?.container) frame.index = index + 1'));
+  assert.ok(source.includes('executionState: deepClone(context.executionState)'));
+  assert.ok(source.includes('executionState: createWorkflowExecutionState(resumeRuntime?.executionState)'));
+  assert.ok(source.includes("case 'parentTabRestart'"));
+});
+
+test('nested repeat and conditional frames retain exact in-progress state', () => {
+  assert.ok(source.includes("kind: 'repeat', iteration: 0"));
+  assert.ok(source.includes("kind: 'repeatUntil'"));
+  assert.ok(source.includes('inIteration: false'));
+  assert.ok(source.includes("kind: 'if'"));
+  assert.ok(source.includes("branch: evaluateWorkflowCondition(block.config.condition) ? 'children' : 'elseChildren'"));
+  assert.ok(source.includes('context.executionState = createWorkflowExecutionState()'));
 });
 
