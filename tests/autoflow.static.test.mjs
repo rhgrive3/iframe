@@ -316,7 +316,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 61'));
+  assert.ok(source.includes('const APP_VERSION = 62'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -358,11 +358,16 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   assert.ok(end.includes('runtime.status === state.activeBattleStatus'));
 });
 
-test('full auto waits for the game runtime to expose an actionable button', () => {
+test('full auto waits for the game runtime to expose an actionable button without redundant latency', () => {
   const body = source.slice(source.indexOf('async function ensureFullAuto'), source.indexOf('function elementDisplayOn'));
   assert.ok(body.includes('if (observed.on) return observed;'));
   assert.ok(body.includes('!observed.exists || !observed.visible || !observed.enabled'));
   assert.ok(body.indexOf('if (observed.on) return observed;') < body.indexOf('!observed.exists || !observed.visible || !observed.enabled'));
+  const wait = body.slice(body.indexOf('const found = await monitorFrame'), body.indexOf('if (found.battleEnd)'));
+  assert.ok(wait.includes('stableMs: 0'));
+  assert.ok(wait.includes('observeCharacterData: false'));
+  assert.ok(wait.includes('intervalMs: 80'));
+  assert.ok(body.includes("jqTapStrict(found.button, { signal, label: 'フルオート', fast: true })"));
 });
 
 test('battle ended is available as a workflow condition without HP inference', () => {
@@ -515,7 +520,7 @@ test('full-auto startup cannot return to assist before the current battle is arm
     source.indexOf('async function ensureFullAuto'),
     source.indexOf('function elementDisplayOn')
   );
-  const readyIndex = ensure.indexOf("await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' })");
+  const readyIndex = ensure.indexOf("await waitForFrameReady({\n        signal,\n        timeoutMs: config.timeoutSec * 1000,\n        expectedScreen: 'battle',\n        stableMs: 0\n      })");
   const monitorIndex = ensure.indexOf('const found = await monitorFrame');
   assert.ok(readyIndex >= 0);
   assert.ok(monitorIndex > readyIndex);

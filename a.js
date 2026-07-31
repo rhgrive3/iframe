@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 61;
+  const APP_VERSION = 62;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -5535,7 +5535,12 @@
     try {
       const existingEnd = recoverableBattleEndState();
       if (existingEnd) return restartWorkflowAfterBattleEnd(config, context, existingEnd);
-      await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'battle' });
+      await waitForFrameReady({
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        expectedScreen: 'battle',
+        stableMs: 0
+      });
       const found = await monitorFrame(() => {
         const doc = frameDocument();
         const observed = fullAutoState(doc);
@@ -5561,16 +5566,18 @@
       }, {
         signal,
         timeoutMs: config.timeoutSec * 1000,
-        stableMs: DEFAULT_STABLE_MS,
+        stableMs: 0,
         description: 'フルオート操作可能状態待ち',
-        observeRoots: battleObservationRoots
+        observeRoots: battleObservationRoots,
+        observeCharacterData: false,
+        intervalMs: 80
       });
 
       if (found.battleEnd) return restartWorkflowAfterBattleEnd(config, context, found.battleEnd);
       if (found.on) return { changed: false };
       const pending = armPendingAutoAttack(config.timeoutSec * 1000, signal);
       try {
-        await jqTapStrict(found.button, { signal, label: 'フルオート' });
+        await jqTapStrict(found.button, { signal, label: 'フルオート', fast: true });
       } catch (error) {
         if (state.pendingAutoAttack === pending) clearPendingAutoAttack('フルオート押下に失敗しました');
         throw error;
