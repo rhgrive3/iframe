@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import './safari-performance-regression.test.mjs';
+import './ui-drag-regression.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
