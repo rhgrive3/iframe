@@ -1,2 +1,2 @@
 Apply the guarded stale battle runtime redirect hotfix to main.
-Retry after aligning the legacy runtime-structure assertion.
+Final retry after updating all legacy runtime-end assertions.
