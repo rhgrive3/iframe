@@ -18,25 +18,37 @@
 
   function installBattlePerformanceChildRuntime() {
     const installed = window[BATTLE_PERFORMANCE_RUNTIME_KEY];
-    if (installed?.setEnabled) {
+    if (installed?.version === 2 && installed?.setEnabled) {
       installed.setEnabled(readBattlePerformanceSetting());
       return;
     }
+    try { installed?.destroy?.(); } catch {}
 
     let enabled = readBattlePerformanceSetting();
     let destroyed = false;
     let style = null;
     let pollTimer = null;
+    let pollDeadline = 0;
+    let battleRuntime = false;
     let soundFlagSnapshot = null;
     let createjsMuteSnapshot = null;
     let soundModulesRequested = false;
+    let imageSrcRestore = null;
+    let setAttributeRestore = null;
     const soundRestorers = [];
     const patchedSoundObjects = new WeakSet();
+    const patchedStages = new Map();
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
-    const RENDER_MARKER = '__autoFlowBattlePerformanceRender__';
+    const STAGE_RENDER_MARKER = '__autoFlowBattlePerformanceStageRender__';
+    const runtimeToken = {};
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
-    const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
+    const refreshBattleRuntime = () => {
+      battleRuntime = isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
+      return battleRuntime;
+    };
+    const isBattleRuntime = () => battleRuntime;
+    refreshBattleRuntime();
     const shouldReplaceAsset = value => {
       if (!enabled || !isBattleRuntime()) return false;
       const url = String(value ?? '');
@@ -45,13 +57,6 @@
         || /\/sp\/assets\/enemy\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url);
     };
     const rewriteAsset = value => shouldReplaceAsset(value) ? BATTLE_PERFORMANCE_TRANSPARENT_IMAGE : value;
-    const battleCanvas = canvas => Boolean(
-      enabled
-      && isBattleRuntime()
-      && canvas
-      && canvas.ownerDocument === document
-      && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
-    );
 
     function ensureStyle() {
       if (!style || !style.isConnected) {
@@ -105,39 +110,113 @@
       return rewriteManifestItem(manifest);
     }
 
+    function restoreLoadQueue() {
+      const prototype = window.createjs?.LoadQueue?.prototype;
+      const marker = prototype?.[LOAD_QUEUE_MARKER];
+      if (!prototype || marker?.owner !== runtimeToken) return;
+      for (const [name, original] of marker.originals) {
+        try {
+          if (prototype[name] === marker.wrappers.get(name)) prototype[name] = original;
+        } catch {}
+      }
+      try { delete prototype[LOAD_QUEUE_MARKER]; } catch {}
+    }
+
     function patchLoadQueue() {
       const prototype = window.createjs?.LoadQueue?.prototype;
-      if (!prototype || prototype[LOAD_QUEUE_MARKER]) return;
-      Object.defineProperty(prototype, LOAD_QUEUE_MARKER, { value: true, configurable: true });
+      if (!prototype) return false;
+      const installed = prototype[LOAD_QUEUE_MARKER];
+      if (installed?.owner === runtimeToken) return true;
+      if (installed) return false;
+      const originals = new Map();
+      const wrappers = new Map();
       for (const name of ['loadManifest', 'loadFile']) {
         const original = prototype[name];
         if (typeof original !== 'function') continue;
-        prototype[name] = function (...args) {
+        const wrapped = function (...args) {
           if (args.length) args[0] = name === 'loadManifest' ? rewriteManifest(args[0]) : rewriteManifestItem(args[0]);
           return original.apply(this, args);
         };
+        originals.set(name, original);
+        wrappers.set(name, wrapped);
+        prototype[name] = wrapped;
+      }
+      if (!originals.size) return false;
+      try {
+        Object.defineProperty(prototype, LOAD_QUEUE_MARKER, {
+          value: { owner: runtimeToken, originals, wrappers },
+          configurable: true
+        });
+      } catch {
+        for (const [name, original] of originals) {
+          try {
+            if (prototype[name] === wrappers.get(name)) prototype[name] = original;
+          } catch {}
+        }
+        return false;
+      }
+      return true;
+    }
+
+    function battleStage(stage) {
+      try {
+        const canvas = stage?.canvas;
+        return Boolean(
+          stage
+          && canvas
+          && canvas.ownerDocument === document
+          && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
+        );
+      } catch {
+        return false;
       }
     }
 
-    function patchRenderMethod(prototype, name) {
-      const original = prototype?.[name];
-      if (typeof original !== 'function' || original[RENDER_MARKER]) return;
-      const wrapped = function (...args) {
-        if (battleCanvas(this?.canvas)) return undefined;
-        return original.apply(this, args);
-      };
-      try { Object.defineProperty(wrapped, RENDER_MARKER, { value: true }); } catch {}
-      try { prototype[name] = wrapped; } catch {}
+    function restoreStageRendering() {
+      for (const [stage, snapshot] of patchedStages) {
+        try {
+          if (stage[snapshot.name] !== snapshot.wrapper) continue;
+          if (snapshot.hadOwn) stage[snapshot.name] = snapshot.original;
+          else delete stage[snapshot.name];
+        } catch {}
+      }
+      patchedStages.clear();
     }
 
-    function patchRendering() {
-      for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
-        patchRenderMethod(constructor?.prototype, 'drawArrays');
-        patchRenderMethod(constructor?.prototype, 'drawElements');
-        patchRenderMethod(constructor?.prototype, 'drawArraysInstanced');
-        patchRenderMethod(constructor?.prototype, 'drawElementsInstanced');
+    function patchStageRendering() {
+      if (!enabled || !isBattleRuntime()) return false;
+      const candidates = new Set([
+        window.stage,
+        window.Game?.view?.stage,
+        window.exportRoot?.stage
+      ].filter(Boolean));
+      let ready = false;
+      for (const stage of candidates) {
+        if (!battleStage(stage)) continue;
+        if (patchedStages.has(stage)) {
+          ready = true;
+          continue;
+        }
+        const name = typeof stage.ra === 'function'
+          ? 'ra'
+          : typeof stage.draw === 'function' ? 'draw' : null;
+        if (!name) continue;
+        const original = stage[name];
+        const hadOwn = Object.prototype.hasOwnProperty.call(stage, name);
+        const wrapper = function () { return true; };
+        try { Object.defineProperty(wrapper, STAGE_RENDER_MARKER, { value: true }); } catch {}
+        try {
+          stage[name] = wrapper;
+          patchedStages.set(stage, {
+            name,
+            original,
+            wrapper,
+            hadOwn
+          });
+          ready = true;
+        } catch {}
       }
-      patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage');
+      return ready;
     }
 
     function resolvedLoad() {
@@ -221,49 +300,82 @@
       }
     }
 
+    function restoreImageSources() {
+      try { imageSrcRestore?.(); } catch {}
+      try { setAttributeRestore?.(); } catch {}
+      imageSrcRestore = null;
+      setAttributeRestore = null;
+    }
+
     function patchImageSources() {
-      try {
-        const descriptor = Object.getOwnPropertyDescriptor(window.HTMLImageElement?.prototype || {}, 'src');
-        if (descriptor?.get && descriptor?.set && descriptor.configurable) {
-          Object.defineProperty(window.HTMLImageElement.prototype, 'src', {
-            ...descriptor,
-            set(value) { return descriptor.set.call(this, rewriteAsset(value)); }
-          });
-        }
-      } catch {}
-      try {
-        const originalSetAttribute = window.Element?.prototype?.setAttribute;
-        if (typeof originalSetAttribute === 'function') {
-          window.Element.prototype.setAttribute = function (name, value) {
-            const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
-            return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
-          };
-        }
-      } catch {}
+      if (!imageSrcRestore) {
+        try {
+          const prototype = window.HTMLImageElement?.prototype;
+          const descriptor = Object.getOwnPropertyDescriptor(prototype || {}, 'src');
+          if (prototype && descriptor?.get && descriptor?.set && descriptor.configurable) {
+            const wrappedSet = function (value) {
+              return descriptor.set.call(this, rewriteAsset(value));
+            };
+            Object.defineProperty(prototype, 'src', { ...descriptor, set: wrappedSet });
+            imageSrcRestore = () => {
+              const current = Object.getOwnPropertyDescriptor(prototype, 'src');
+              if (current?.set === wrappedSet) Object.defineProperty(prototype, 'src', descriptor);
+            };
+          }
+        } catch {}
+      }
+      if (!setAttributeRestore) {
+        try {
+          const prototype = window.Element?.prototype;
+          const originalSetAttribute = prototype?.setAttribute;
+          if (prototype && typeof originalSetAttribute === 'function') {
+            const wrappedSetAttribute = function (name, value) {
+              const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
+              return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
+            };
+            prototype.setAttribute = wrappedSetAttribute;
+            setAttributeRestore = () => {
+              if (prototype.setAttribute === wrappedSetAttribute) prototype.setAttribute = originalSetAttribute;
+            };
+          }
+        } catch {}
+      }
     }
 
     function patchNow() {
+      refreshBattleRuntime();
       ensureStyle();
-      try { patchLoadQueue(); } catch {}
-      try { patchRendering(); } catch {}
       if (isBattleRuntime()) {
+        try { patchImageSources(); } catch {}
+        try { patchLoadQueue(); } catch {}
+        try { patchStageRendering(); } catch {}
         try { patchSoundRuntime(); } catch {}
       } else {
         restoreSoundRuntime();
+        restoreStageRendering();
+        restoreLoadQueue();
+        restoreImageSources();
       }
     }
 
     function stopPoll() {
-      if (pollTimer == null) return;
-      window.clearInterval(pollTimer);
+      if (pollTimer != null) window.clearInterval(pollTimer);
       pollTimer = null;
+      pollDeadline = 0;
     }
 
-    function startPoll() {
+    function startPoll(durationMs = 30_000) {
+      if (!enabled || destroyed) return;
+      pollDeadline = Math.max(pollDeadline, performance.now() + durationMs);
       if (pollTimer != null) return;
       pollTimer = window.setInterval(() => {
+        if (!enabled || destroyed) {
+          stopPoll();
+          return;
+        }
         try { patchNow(); } catch {}
-      }, 100);
+        if (performance.now() >= pollDeadline) stopPoll();
+      }, 250);
     }
 
     function setEnabled(next) {
@@ -275,7 +387,10 @@
         startPoll();
       } else {
         stopPoll();
+        restoreStageRendering();
         restoreSoundRuntime();
+        restoreLoadQueue();
+        restoreImageSources();
       }
     }
 
@@ -288,14 +403,31 @@
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
       setEnabled(readBattlePerformanceSetting());
     };
+    const onRouteChange = () => {
+      refreshBattleRuntime();
+      if (enabled) {
+        patchNow();
+        startPoll();
+      } else {
+        restoreStageRendering();
+        restoreSoundRuntime();
+      }
+    };
     const destroy = () => {
       if (destroyed) return;
       destroyed = true;
       enabled = false;
       stopPoll();
+      restoreStageRendering();
       restoreSoundRuntime();
+      restoreLoadQueue();
+      restoreImageSources();
       window.removeEventListener('message', onMessage);
       window.removeEventListener('storage', onStorage);
+      window.removeEventListener('hashchange', onRouteChange);
+      window.removeEventListener('popstate', onRouteChange);
+      window.removeEventListener('pageshow', onRouteChange);
+      window.removeEventListener('load', onRouteChange);
       window.removeEventListener('pagehide', destroy);
       try { style?.remove(); } catch {}
       style = null;
@@ -306,8 +438,6 @@
       }
     };
 
-    patchImageSources();
-    patchRendering();
     ensureStyle();
     if (enabled) {
       patchNow();
@@ -315,9 +445,14 @@
     }
     window.addEventListener('message', onMessage);
     window.addEventListener('storage', onStorage);
+    window.addEventListener('hashchange', onRouteChange);
+    window.addEventListener('popstate', onRouteChange);
+    window.addEventListener('pageshow', onRouteChange);
+    window.addEventListener('load', onRouteChange);
     window.addEventListener('pagehide', destroy, { once: true });
 
     window[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
+      version: 2,
       get enabled() { return enabled; },
       setEnabled,
       refresh: patchNow,
@@ -330,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 55;
+  const APP_VERSION = 57;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1171,7 +1306,7 @@
             </div>
             <label class="settingToggle" for="battlePerformanceToggle">
               <input id="battlePerformanceToggle" type="checkbox">
-              <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、WebGL描画とバトル音声を止め、表示専用演出を最短化します。バトルロジックとタイムラインは維持します。</small></span>
+              <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、CreateJSの描画走査とバトル音声を止め、表示専用演出を最短化します。Ticker・バトルロジック・Tween・タイムラインは維持します。</small></span>
             </label>
             <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映し、次回のページ読込では画像取得前から適用します。OFFにした時、すでに省略済みの画像は次の再読込から復元されます。</div>
           </article>
@@ -1284,7 +1419,7 @@
   }
   const narrowScreen = isNarrowViewport();
   dock.classList.toggle('narrowViewport', narrowScreen);
-  const dragLock = { active: false, pointerId: null, owner: null, restore: null };
+  const dragLock = { active: false, pointerId: null, owner: null, restore: null, cancel: null };
 
 
   function bootstrapBattlePerformanceFrameRuntime(win) {
@@ -1292,7 +1427,8 @@
     try {
       if (new URL(win.location.href).origin !== location.origin) return null;
       let runtime = win[BATTLE_PERFORMANCE_RUNTIME_KEY];
-      if (!runtime?.setEnabled) {
+      if (runtime?.version !== 2) {
+        try { runtime?.destroy?.(); } catch {}
         const bootstrap = win.Function(
           'BATTLE_PERFORMANCE_STORAGE_KEY',
           'BATTLE_PERFORMANCE_MESSAGE_TYPE',
@@ -1360,12 +1496,24 @@
     else event?.stopPropagation?.();
   }
 
-  function acquireDragLock(event, owner) {
-    releaseDragLock();
+  function cancelActiveDrag(reason = 'cancel') {
+    if (!dragLock.active) return;
+    const cancel = dragLock.cancel;
+    dragLock.cancel = null;
+    try {
+      cancel?.(reason);
+    } finally {
+      if (dragLock.active) releaseDragLock();
+    }
+  }
+
+  function acquireDragLock(event, owner, cancel = null) {
+    cancelActiveDrag('replaced');
     consumeDragEvent(event, true);
     dragLock.active = true;
     dragLock.pointerId = event.pointerId;
     dragLock.owner = owner;
+    dragLock.cancel = cancel;
     root.classList.add('ui-dragging');
     owner?.classList?.add('is-dragging');
     try { owner?.setPointerCapture?.(event.pointerId); } catch {}
@@ -1390,16 +1538,19 @@
     if (!dragLock.active) return;
     if (event && dragLock.pointerId != null && event.pointerId != null && event.pointerId !== dragLock.pointerId) return;
     consumeDragEvent(event, true);
-    try {
-      if (owner?.hasPointerCapture?.(dragLock.pointerId)) owner.releasePointerCapture(dragLock.pointerId);
-    } catch {}
-    owner?.classList?.remove('is-dragging');
-    root.classList.remove('ui-dragging');
-    try { dragLock.restore?.(); } catch {}
+    const pointerId = dragLock.pointerId;
+    const restore = dragLock.restore;
     dragLock.active = false;
     dragLock.pointerId = null;
     dragLock.owner = null;
     dragLock.restore = null;
+    dragLock.cancel = null;
+    owner?.classList?.remove('is-dragging');
+    root.classList.remove('ui-dragging');
+    try {
+      if (owner?.hasPointerCapture?.(pointerId)) owner.releasePointerCapture(pointerId);
+    } catch {}
+    try { restore?.(); } catch {}
   }
 
   const suppressNativeDrag = event => {
@@ -1408,15 +1559,46 @@
   for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
     window.addEventListener(type, suppressNativeDrag, { capture: true, passive: false });
   }
-  const releaseDragOnBlur = () => releaseDragLock();
-  window.addEventListener('blur', releaseDragOnBlur, true);
+  const cancelDragOnBlur = () => {
+    cancelActiveDrag('blur');
+    cancelActiveRecordPointers();
+  };
+  const cancelDragOnPageHide = () => {
+    cancelActiveDrag('pagehide');
+    cancelActiveRecordPointers();
+  };
+  const cancelDragOnVisibilityChange = () => {
+    if (document.visibilityState !== 'hidden') return;
+    cancelActiveDrag('hidden');
+    cancelActiveRecordPointers();
+  };
+  const cancelDragOnLostCapture = event => {
+    if (
+      dragLock.active
+      && event.target === dragLock.owner
+      && (dragLock.pointerId == null || event.pointerId === dragLock.pointerId)
+    ) cancelActiveDrag('lostpointercapture');
+  };
+  window.addEventListener('blur', cancelDragOnBlur, true);
+  window.addEventListener('pagehide', cancelDragOnPageHide, true);
+  document.addEventListener('visibilitychange', cancelDragOnVisibilityChange, true);
+  shadow.addEventListener('lostpointercapture', cancelDragOnLostCapture, true);
   addCleanup(() => {
-    releaseDragLock();
+    cancelActiveDrag('destroy');
     for (const type of ['touchmove', 'gesturestart', 'gesturechange']) {
       window.removeEventListener(type, suppressNativeDrag, true);
     }
-    window.removeEventListener('blur', releaseDragOnBlur, true);
+    window.removeEventListener('blur', cancelDragOnBlur, true);
+    window.removeEventListener('pagehide', cancelDragOnPageHide, true);
+    document.removeEventListener('visibilitychange', cancelDragOnVisibilityChange, true);
+    shadow.removeEventListener('lostpointercapture', cancelDragOnLostCapture, true);
   });
+
+  function pointerDragThreshold(event) {
+    if (event?.pointerType === 'touch') return 9;
+    if (event?.pointerType === 'pen') return 6;
+    return 3;
+  }
 
   function normalizePopupText(value) {
     return String(value ?? '').replace(/\s+/g, '').trim();
@@ -3293,18 +3475,8 @@
 
       try { win?.Backbone?.history?.stop?.(); } catch {}
       try { win?.createjs?.Ticker?.removeAllEventListeners?.(); } catch {}
-      try {
-        const ticker = win?.createjs?.Ticker;
-        if (ticker?._timerId != null) {
-          if (ticker._raf) {
-            const cancel = win.cancelAnimationFrame || win.webkitCancelAnimationFrame;
-            cancel?.call(win, ticker._timerId);
-          } else {
-            win.clearTimeout(ticker._timerId);
-          }
-          ticker._timerId = null;
-        }
-      } catch {}
+      try { win?.createjs?.Ticker?.reset?.(true); } catch {}
+      try { win?.createjs?.Tween?.removeAllTweens?.(); } catch {}
       try { win?.createjs?.Sound?.stop?.(); } catch {}
       try { win?.createjs?.Sound?.reset?.(true); } catch {}
       try { win?.createjs?.WebAudioPlugin?.reset?.(); } catch {}
@@ -4938,8 +5110,8 @@
 
   function fullAutoState(doc = frameDocument()) {
     const button = doc.querySelector(SELECTORS.fullAuto);
-    const visible = computedVisible(button);
     const runtime = battleRuntimeState(doc);
+    const visible = runtime.available ? elementDisplayOn(button) : computedVisible(button);
     return {
       button,
       exists: Boolean(button),
@@ -4979,14 +5151,14 @@
       return { type: 'RUNTIME_FINISHED', reason: 'ゲーム内部の戦闘終了状態を検出', runtime };
     }
     const notice = doc.querySelector(SELECTORS.battleEndNotice);
-    if (notice && computedVisible(notice)) {
+    if (notice && elementDisplayOn(notice)) {
       const text = normalizePopupText(notice.textContent || '');
       if (!text || text.includes(BATTLE_END_MESSAGE)) {
         return { type: 'REMATCH_FAIL', reason: text || BATTLE_END_MESSAGE };
       }
     }
     const resultButton = doc.querySelector(SELECTORS.battleResult);
-    if (resultButton && computedVisible(resultButton)) {
+    if (resultButton && elementDisplayOn(resultButton)) {
       return { type: 'RESULT_BUTTON', reason: 'バトル終了ボタンを検出' };
     }
     return null;
@@ -5190,7 +5362,7 @@
           attack.start
           && attack.start.classList.contains('display-on')
           && !attack.start.classList.contains('display-off')
-          && computedVisible(attack.start)
+          && attack.startVisible
           && !attack.dummyVisible
           && !attack.cancelVisible
           && !attack.actorAttacking
@@ -5230,11 +5402,14 @@
   }
 
   function elementDisplayOn(element) {
-    return Boolean(
-      element
-      && !element.classList.contains('display-off')
-      && (element.classList.contains('display-on') || computedVisible(element))
-    );
+    if (!element || !element.isConnected || element.hidden) return false;
+    if (element.classList.contains('display-off')) return false;
+    if (element.classList.contains('display-on')) return true;
+    const style = element.style;
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && style.visibility !== 'collapse'
+      && (style.opacity === '' || Number(style.opacity) !== 0);
   }
 
   function turnSignature(doc = frameDocument()) {
@@ -5268,12 +5443,13 @@
   }
 
   function attackSnapshot(doc = frameDocument()) {
+    const runtime = battleRuntimeState(doc);
+    const useDomFallback = !runtime.available;
     const start = doc.querySelector(SELECTORS.attackStart);
     const dummy = doc.querySelector(SELECTORS.attackDummy);
     const cancel = doc.querySelector(SELECTORS.attackCancel);
-    const turn = turnSignature(doc);
-    const runtime = battleRuntimeState(doc);
-    const domActorAttacking = Boolean(doc.querySelector(SELECTORS.attackActor));
+    const turn = useDomFallback ? turnSignature(doc) : '';
+    const domActorAttacking = useDomFallback && Boolean(doc.querySelector(SELECTORS.attackActor));
     return {
       start,
       dummy,
@@ -5286,7 +5462,7 @@
       attackButtonPushed: runtime.attackButtonPushed,
       actorAttacking: runtime.attacking || runtime.attackButtonPushed || domActorAttacking,
       turn,
-      progress: battleProgressSignature(doc, turn)
+      progress: useDomFallback ? battleProgressSignature(doc, turn) : ''
     };
   }
 
@@ -5337,9 +5513,9 @@
       stableMs: 0,
       description: 'フルオート押下後の攻撃開始待ち',
       observeRoots: battleObservationRoots,
-      observeOnLightweight: true,
-      observeCharacterData: true,
-      intervalMs: 120
+      observeOnLightweight: false,
+      observeCharacterData: false,
+      intervalMs: 160
     }).then(
       result => ({ ok: true, result }),
       error => ({ ok: false, error })
@@ -5402,9 +5578,9 @@
         stableMs: 0,
         description: 'フルオート攻撃受付待ち',
         observeRoots: battleObservationRoots,
-        observeOnLightweight: true,
-        observeCharacterData: true,
-        intervalMs: 120
+        observeOnLightweight: false,
+        observeCharacterData: false,
+        intervalMs: 160
       });
       if (armed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, armed.battleEnd);
       if (armed.alreadyAttacking) return armed;
@@ -5421,9 +5597,9 @@
         stableMs: 0,
         description: 'フルオート攻撃開始待ち',
         observeRoots: battleObservationRoots,
-        observeOnLightweight: true,
-        observeCharacterData: true,
-        intervalMs: 120
+        observeOnLightweight: false,
+        observeCharacterData: false,
+        intervalMs: 160
       });
       if (transition.battleEnd) return restartWorkflowAfterBattleEnd(config, context, transition.battleEnd);
       return transition;
@@ -6408,7 +6584,7 @@
       marker.classList.toggle('selected', action.id === state.selectedLegacyId);
       marker.style.left = `${action.cx}px`;
       marker.style.top = `${action.cy}px`;
-      marker.addEventListener('click', () => {
+      const selectMarker = () => {
         state.selectedLegacyId = action.id;
         state.legacy.selectedId = action.id;
         shadow.querySelectorAll('.legacyRow').forEach(candidate => {
@@ -6422,36 +6598,64 @@
           const nextMarker = Array.from(markerLayer.children).find(candidate => candidate.dataset.actionId === String(action.id));
           nextMarker?.focus({ preventScroll: true });
         });
-      });
-      const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
+      };
+      marker.addEventListener('click', selectMarker);
+      const drag = {
+        active: false, id: null, startX: 0, startY: 0,
+        baseX: 0, baseY: 0, moved: false, threshold: 3
+      };
+      const detach = () => {
+        window.removeEventListener('pointermove', move, true);
+        window.removeEventListener('pointerup', finish, true);
+        window.removeEventListener('pointercancel', finish, true);
+      };
       const move = event => {
         if (!drag.active || event.pointerId !== drag.id) return;
         consumeDragEvent(event, true);
-        action.cx = clamp(drag.baseX + event.clientX - drag.startX, 0, window.innerWidth);
-        action.cy = clamp(drag.baseY + event.clientY - drag.startY, 0, window.innerHeight);
+        const dx = event.clientX - drag.startX;
+        const dy = event.clientY - drag.startY;
+        if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
+        drag.moved = true;
+        action.cx = clamp(drag.baseX + dx, 0, window.innerWidth);
+        action.cy = clamp(drag.baseY + dy, 0, window.innerHeight);
         marker.style.left = `${action.cx}px`;
         marker.style.top = `${action.cy}px`;
+      };
+      const cancel = () => {
+        if (!drag.active) return;
+        drag.active = false;
+        action.cx = drag.baseX;
+        action.cy = drag.baseY;
+        marker.style.left = `${action.cx}px`;
+        marker.style.top = `${action.cy}px`;
+        detach();
+        releaseDragLock(null, marker);
+        saveLegacyState();
+        renderLegacyListOnly();
       };
       const finish = event => {
         if (!drag.active || event.pointerId !== drag.id) return;
         consumeDragEvent(event, true);
+        if (event.type === 'pointercancel') return cancel();
         drag.active = false;
         releaseDragLock(event, marker);
-        window.removeEventListener('pointermove', move, true);
-        window.removeEventListener('pointerup', finish, true);
-        window.removeEventListener('pointercancel', finish, true);
+        detach();
         saveLegacyState();
         renderLegacyListOnly();
+        if (!drag.moved) selectMarker();
       };
       marker.addEventListener('pointerdown', event => {
         if (state.legacyRunning || state.recording || event.button !== 0) return;
-        acquireDragLock(event, marker);
+        cancelActiveDrag('replaced');
         drag.active = true;
         drag.id = event.pointerId;
         drag.startX = event.clientX;
         drag.startY = event.clientY;
         drag.baseX = action.cx;
         drag.baseY = action.cy;
+        drag.moved = false;
+        drag.threshold = pointerDragThreshold(event);
+        acquireDragLock(event, marker, cancel);
         window.addEventListener('pointermove', move, { capture: true, passive: false });
         window.addEventListener('pointerup', finish, { capture: true, passive: false });
         window.addEventListener('pointercancel', finish, { capture: true, passive: false });
@@ -6932,6 +7136,21 @@
     ui.recordCount.textContent = `${state.recordedPoints.length}件`;
   }
 
+  function recordPointerCancel(event) {
+    const item = state.activeRecordPointers.get(event.pointerId);
+    if (!item) return;
+    event.preventDefault();
+    state.activeRecordPointers.delete(event.pointerId);
+    item.dot.remove();
+    ui.recordCount.textContent = `${state.recordedPoints.length}件`;
+  }
+
+  function cancelActiveRecordPointers() {
+    for (const item of state.activeRecordPointers.values()) item.dot.remove();
+    state.activeRecordPointers.clear();
+    if (state.recording) ui.recordCount.textContent = `${state.recordedPoints.length}件`;
+  }
+
   function selectWorkflow(id) {
     if (!state.workflows.workflows.some(workflow => workflow.id === id)) return;
     state.selectedWorkflowId = id;
@@ -7286,31 +7505,49 @@
   }
 
   function installDockDrag(handle) {
-    const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0, moved: false };
+    const drag = {
+      active: false, id: null, startX: 0, startY: 0,
+      baseX: 0, baseY: 0, moved: false, threshold: 3
+    };
+    const detach = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+    };
     const move = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
-      drag.moved ||= Math.hypot(dx, dy) > 3;
+      if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
+      drag.moved = true;
       state.dockX = drag.baseX + dx;
       state.dockY = drag.baseY + dy;
       positionDock();
     };
+    const cancel = () => {
+      if (!drag.active) return;
+      drag.active = false;
+      state.dockX = drag.baseX;
+      state.dockY = drag.baseY;
+      positionDock();
+      detach();
+      releaseDragLock(null, handle);
+      saveLegacyState();
+    };
     const finish = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
+      if (event.type === 'pointercancel') return cancel();
       drag.active = false;
       releaseDragLock(event, handle);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      detach();
       if (!drag.moved && handle.id === 'compactGrip') setCompact(false);
       saveLegacyState();
     };
     handle.addEventListener('pointerdown', event => {
       if (event.button !== 0) return;
-      acquireDragLock(event, handle);
+      cancelActiveDrag('replaced');
       const rect = dock.getBoundingClientRect();
       drag.active = true;
       drag.id = event.pointerId;
@@ -7319,6 +7556,8 @@
       drag.baseX = rect.left;
       drag.baseY = rect.top;
       drag.moved = false;
+      drag.threshold = pointerDragThreshold(event);
+      acquireDragLock(event, handle, cancel);
       window.addEventListener('pointermove', move, { capture: true, passive: false });
       window.addEventListener('pointerup', finish, { capture: true, passive: false });
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
@@ -7344,61 +7583,88 @@
     };
     handle.addEventListener('keydown', keyMove);
     addCleanup(() => {
-      if (drag.active) releaseDragLock(null, handle);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      if (drag.active) cancel();
+      detach();
       handle.removeEventListener('keydown', keyMove);
     });
   }
 
   function installDockHeaderDrag(header) {
-    const drag = { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0 };
+    const drag = {
+      active: false, id: null, startX: 0, startY: 0,
+      baseX: 0, baseY: 0, moved: false, threshold: 3
+    };
+    const detach = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+    };
     const move = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
-      state.dockX = drag.baseX + event.clientX - drag.startX;
-      state.dockY = drag.baseY + event.clientY - drag.startY;
+      const dx = event.clientX - drag.startX;
+      const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
+      drag.moved = true;
+      state.dockX = drag.baseX + dx;
+      state.dockY = drag.baseY + dy;
       positionDock();
+    };
+    const cancel = () => {
+      if (!drag.active) return;
+      drag.active = false;
+      state.dockX = drag.baseX;
+      state.dockY = drag.baseY;
+      positionDock();
+      detach();
+      releaseDragLock(null, header);
+      saveLegacyState();
     };
     const finish = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
+      if (event.type === 'pointercancel') return cancel();
       drag.active = false;
       releaseDragLock(event, header);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      detach();
       saveLegacyState();
     };
     const start = event => {
       if (event.button !== 0 || event.target.closest?.('button,input,select,textarea,a')) return;
+      cancelActiveDrag('replaced');
       const rect = dock.getBoundingClientRect();
-      acquireDragLock(event, header);
       drag.active = true;
       drag.id = event.pointerId;
       drag.startX = event.clientX;
       drag.startY = event.clientY;
       drag.baseX = rect.left;
       drag.baseY = rect.top;
+      drag.moved = false;
+      drag.threshold = pointerDragThreshold(event);
+      acquireDragLock(event, header, cancel);
       window.addEventListener('pointermove', move, { capture: true, passive: false });
       window.addEventListener('pointerup', finish, { capture: true, passive: false });
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
     };
     header.addEventListener('pointerdown', start, { passive: false });
     addCleanup(() => {
-      if (drag.active) releaseDragLock(null, header);
+      if (drag.active) cancel();
       header.removeEventListener('pointerdown', start);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      detach();
     });
   }
 
   function installDockResize(handle, side) {
     const drag = {
       active: false, id: null, startX: 0, startY: 0,
-      baseLeft: 0, baseTop: 0, baseWidth: 0, baseHeight: 0, baseRight: 0
+      baseLeft: 0, baseTop: 0, baseWidth: 0, baseHeight: 0, baseRight: 0,
+      initialX: null, initialY: null, initialWidth: null, initialHeight: null,
+      moved: false, threshold: 3
+    };
+    const detach = () => {
+      window.removeEventListener('pointermove', move, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
     };
     const resizeTo = (desiredWidth, desiredHeight) => {
       const viewport = window.visualViewport;
@@ -7425,23 +7691,36 @@
       consumeDragEvent(event, true);
       const dx = event.clientX - drag.startX;
       const dy = event.clientY - drag.startY;
+      if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
+      drag.moved = true;
       resizeTo(drag.baseWidth + (side === 'left' ? -dx : dx), drag.baseHeight + dy);
+    };
+    const cancel = () => {
+      if (!drag.active) return;
+      drag.active = false;
+      state.dockX = drag.initialX;
+      state.dockY = drag.initialY;
+      state.dockWidth = drag.initialWidth;
+      state.dockHeight = drag.initialHeight;
+      positionDock();
+      detach();
+      releaseDragLock(null, handle);
+      saveLegacyState();
     };
     const finish = event => {
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
+      if (event.type === 'pointercancel') return cancel();
       drag.active = false;
       releaseDragLock(event, handle);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      detach();
       saveLegacyState();
       announce(`パネルサイズを幅${Math.round(state.dockWidth)}、高さ${Math.round(state.dockHeight)}に変更しました`);
     };
     const start = event => {
       if (event.button !== 0 || dock.classList.contains('compact')) return;
+      cancelActiveDrag('replaced');
       const rect = dock.getBoundingClientRect();
-      acquireDragLock(event, handle);
       Object.assign(drag, {
         active: true,
         id: event.pointerId,
@@ -7451,8 +7730,15 @@
         baseTop: rect.top,
         baseWidth: rect.width,
         baseHeight: rect.height,
-        baseRight: rect.right
+        baseRight: rect.right,
+        initialX: state.dockX,
+        initialY: state.dockY,
+        initialWidth: state.dockWidth,
+        initialHeight: state.dockHeight,
+        moved: false,
+        threshold: pointerDragThreshold(event)
       });
+      acquireDragLock(event, handle, cancel);
       window.addEventListener('pointermove', move, { capture: true, passive: false });
       window.addEventListener('pointerup', finish, { capture: true, passive: false });
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
@@ -7491,13 +7777,11 @@
     handle.addEventListener('keydown', keyResize);
     handle.addEventListener('dblclick', reset);
     addCleanup(() => {
-      if (drag.active) releaseDragLock(null, handle);
+      if (drag.active) cancel();
       handle.removeEventListener('pointerdown', start);
       handle.removeEventListener('keydown', keyResize);
       handle.removeEventListener('dblclick', reset);
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
+      detach();
     });
   }
 
@@ -7728,7 +8012,7 @@
   recordLayer.addEventListener('pointerdown', recordPointerDown, { passive: false });
   recordLayer.addEventListener('pointermove', recordPointerMove, { passive: false });
   recordLayer.addEventListener('pointerup', recordPointerEnd, { passive: false });
-  recordLayer.addEventListener('pointercancel', recordPointerEnd, { passive: false });
+  recordLayer.addEventListener('pointercancel', recordPointerCancel, { passive: false });
 
   importFile.addEventListener('change', async () => {
     const file = importFile.files?.[0];

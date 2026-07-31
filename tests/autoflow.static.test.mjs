@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import './safari-performance-regression.test.mjs';
+import './ui-drag-regression.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
@@ -177,6 +179,8 @@ test('battle-end recovery explicitly releases Granblue graphics and telemetry be
     'content_close',
     'destroyImages',
     'Ticker?.removeAllEventListeners',
+    'Ticker?.reset',
+    'Tween?.removeAllTweens',
     'Sound?.reset',
     'WebAudioPlugin?.reset',
     'WEBGL_lose_context',
@@ -259,7 +263,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 55'));
+  assert.ok(source.includes('const APP_VERSION = 57'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -292,6 +296,8 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   const attack = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function attackTransitionFromBaseline'));
   assert.ok(attack.includes('runtimeAttacking: runtime.attacking'));
   assert.ok(attack.includes('attackButtonPushed: runtime.attackButtonPushed'));
+  assert.ok(attack.includes('const useDomFallback = !runtime.available'));
+  assert.ok(attack.includes("progress: useDomFallback ? battleProgressSignature(doc, turn) : ''"));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
   assert.ok(end.includes('const runtime = battleRuntimeState(doc)'));
   assert.ok(end.includes('if (runtime.finished)'));
@@ -329,24 +335,31 @@ test('battle performance mode is persistent and independent from workflow execut
   assert.ok(source.includes('syncBattlePerformanceFrame();'));
 });
 
-test('battle performance child runtime preserves logic while suppressing heavy media', () => {
+test('battle performance preserves game ticks while suppressing only the stage render traversal', () => {
   const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
   assert.ok(child.includes("['loadManifest', 'loadFile']"));
   assert.ok(child.includes('BATTLE_PERFORMANCE_TRANSPARENT_IMAGE'));
-  assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawArrays')"));
-  assert.ok(child.includes("patchRenderMethod(constructor?.prototype, 'drawElements')"));
-  assert.ok(child.includes("patchRenderMethod(window.CanvasRenderingContext2D?.prototype, 'drawImage')"));
+  assert.ok(child.includes('function patchStageRendering()'));
+  assert.ok(child.includes('function restoreStageRendering()'));
+  assert.ok(child.includes("typeof stage.ra === 'function'"));
+  assert.ok(child.includes("typeof stage.draw === 'function'"));
   assert.ok(child.includes("requireAmd(['model/sound', 'lib/sound']"));
   assert.ok(child.includes('setting.sound_flag = 0'));
   assert.ok(child.includes('animation-duration:.001s!important'));
   assert.ok(child.includes("canvas.id === 'canvas'"));
+  assert.ok(!child.includes('drawArrays'));
+  assert.ok(!child.includes('drawElements'));
+  assert.ok(!child.includes('CanvasRenderingContext2D'));
   assert.ok(!child.includes('Ticker.removeAllEventListeners'));
   assert.ok(!child.includes('Stage.update ='));
+  assert.ok(!child.includes('stage.update ='));
 });
 
 
 test('battle performance mode bootstraps into a same-origin iframe when only the controller was injected', () => {
   assert.ok(source.includes('function bootstrapBattlePerformanceFrameRuntime(win)'));
+  assert.ok(source.includes('runtime?.version !== 2'));
+  assert.ok(source.includes('try { runtime?.destroy?.(); } catch {}'));
   assert.ok(source.includes('const bootstrap = win.Function('));
   assert.ok(source.includes('readBattlePerformanceSetting.toString()'));
   assert.ok(source.includes('installBattlePerformanceChildRuntime.toString()'));
@@ -360,23 +373,33 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
   const patchNow = child.slice(child.indexOf('function patchNow'), child.indexOf('function setEnabled'));
   assert.ok(patchNow.includes('try { patchLoadQueue(); } catch {}'));
-  assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
+  assert.ok(patchNow.includes('try { patchStageRendering(); } catch {}'));
+  assert.ok(patchNow.includes('restoreStageRendering();'));
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
-  assert.ok(child.includes('try { prototype[name] = wrapped; } catch {}'));
+  assert.ok(patchNow.includes('restoreLoadQueue();'));
+  assert.ok(patchNow.includes('restoreImageSources();'));
+  assert.ok(patchNow.indexOf('if (isBattleRuntime())') < patchNow.indexOf('try { patchImageSources(); } catch {}'));
+  assert.ok(child.includes('stage[name] = wrapper'));
+  assert.ok(child.includes('function restoreLoadQueue()'));
+  assert.ok(child.includes('function restoreImageSources()'));
+  assert.ok(child.includes('version: 2'));
   assert.ok(child.includes('pollTimer = window.setInterval'));
   assert.ok(child.includes('try { patchNow(); } catch {}'));
 });
 
 
-test('battle performance polling only runs while the persistent setting is enabled', () => {
+test('battle performance setup polling is bounded, route-aware, and disabled cleanly', () => {
   const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
-  assert.ok(child.includes('function startPoll()'));
+  assert.ok(child.includes('function startPoll(durationMs = 30_000)'));
   assert.ok(child.includes('function stopPoll()'));
-  assert.ok(child.includes('if (pollTimer != null) return;'));
+  assert.ok(child.includes('performance.now() >= pollDeadline'));
+  assert.ok(child.includes('}, 250);'));
+  assert.ok(!child.includes('}, 100);'));
+  assert.ok(child.includes('window.addEventListener(\'hashchange\', onRouteChange)'));
+  assert.ok(child.includes('window.removeEventListener(\'hashchange\', onRouteChange)'));
   assert.ok(child.includes('window.addEventListener(\'pagehide\', destroy, { once: true })'));
   assert.ok(child.includes('window.removeEventListener(\'message\', onMessage)'));
-  assert.ok(child.includes('destroy'));
   const enabled = child.slice(child.indexOf('function setEnabled'), child.indexOf('const onMessage'));
   assert.ok(enabled.includes('startPoll();'));
   assert.ok(enabled.includes('stopPoll();'));
@@ -389,21 +412,17 @@ test('battle performance setting rolls back its UI state when persistence fails'
   assert.ok(setter.includes('ui.battlePerformanceToggle.checked = previous;'));
 });
 
-test('battle performance fully suppresses battle canvas while preserving DOM attack controls', () => {
+test('battle performance hides the canvas while preserving independent DOM attack controls', () => {
   const child = source.slice(source.indexOf('function installBattlePerformanceChildRuntime'), source.indexOf('const APP_VERSION'));
-  const renderer = child.slice(child.indexOf('function patchRenderMethod'), child.indexOf('function patchRendering'));
   const assets = child.slice(child.indexOf('const shouldReplaceAsset'), child.indexOf('const rewriteAsset'));
   assert.ok(child.includes('.cnt-raid-stage canvas#canvas { visibility:hidden!important; }'));
   assert.ok(child.includes('.cnt-raid > .btn-auto,'));
   assert.ok(child.includes('.cnt-raid #cnt-raid-information .btn-attack-start'));
-  assert.ok(renderer.includes('if (battleCanvas(this?.canvas)) return undefined;'));
+  assert.ok(child.includes('stage[name] = wrapper'));
   assert.ok(assets.includes('/\\/sp\\/cjs\\/'));
-  assert.ok(!assets.includes('isBattleControlAsset'));
-  assert.ok(!child.includes('BATTLE_CONTROL_ASSET_PATTERN'));
-  assert.ok(!child.includes('WEBGL_TRACK_MARKER'));
-  assert.ok(!child.includes('protectedBattleTextures'));
-  assert.ok(!child.includes('patchWebGLTracking'));
-  assert.ok(!child.includes('renderAllowed'));
+  assert.ok(!child.includes('battleCanvas'));
+  assert.ok(!child.includes('patchRenderMethod'));
+  assert.ok(!child.includes('patchRendering'));
 });
 
 test('iframe recycling destroys child runtimes and releases parent references immediately', () => {
