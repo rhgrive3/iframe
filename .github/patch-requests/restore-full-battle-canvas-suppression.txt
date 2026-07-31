@@ -1,0 +1,1 @@
+Restore the original lightweight battle behavior: hide the battle canvas and suppress all WebGL/Canvas2D draw calls. Keep only the independent DOM attack and full-auto controls visible using selectors rooted at .cnt-raid.
