@@ -3437,6 +3437,288 @@
     }
   }
 
+  const ELEMENT_PICKER_TARGET_SELECTOR = [
+    'button', 'a', 'input', 'select', 'textarea',
+    '[role="button"]', '[onclick]', '[data-href]', '[data-location-href]',
+    '[class*="btn-"]', '[class*="button"]'
+  ].join(',');
+  const ELEMENT_PICKER_ATTRIBUTES = Object.freeze([
+    'data-testid', 'data-test', 'data-href', 'data-location-href',
+    'data-slot', 'data-raid-id', 'aria-label', 'name', 'title', 'role'
+  ]);
+  const ELEMENT_PICKER_VOLATILE_CLASSES = new Set([
+    'active', 'selected', 'show', 'hide', 'hidden', 'display-on', 'display-off',
+    'on', 'off', 'enabled', 'disabled', 'focus', 'hover', 'touch', 'se'
+  ]);
+
+  function cssIdentifier(value, doc = document) {
+    const escape = doc.defaultView?.CSS?.escape || window.CSS?.escape;
+    if (escape) return escape(String(value));
+    return String(value).replace(/(^-?\d)|[^a-zA-Z0-9_-]/g, match =>
+      `\\${match.codePointAt(0).toString(16)} `
+    );
+  }
+
+  function cssAttributeValue(value) {
+    return String(value)
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\a ');
+  }
+
+  function selectorUniquelyMatches(doc, selector, target) {
+    try {
+      const matches = doc.querySelectorAll(selector);
+      return matches.length === 1 && matches[0] === target;
+    } catch {
+      return false;
+    }
+  }
+
+  function stablePickerClasses(element) {
+    return [...element.classList].filter(name =>
+      name
+      && name.length <= 80
+      && /^[a-zA-Z_][\w-]*$/.test(name)
+      && !ELEMENT_PICKER_VOLATILE_CLASSES.has(name)
+      && !/^(?:is-|has-)?(?:active|selected|show|hide|hidden|disabled|enabled)$/i.test(name)
+    ).slice(0, 3);
+  }
+
+  function pickerSelectorSegment(element, doc) {
+    const tag = element.localName || '*';
+    const classes = stablePickerClasses(element);
+    let segment = `${tag}${classes.map(name => `.${cssIdentifier(name, doc)}`).join('')}`;
+    const parent = element.parentElement;
+    if (!parent) return segment;
+    let duplicates = [];
+    try { duplicates = [...parent.children].filter(child => child.matches(segment)); } catch {}
+    if (duplicates.length > 1) {
+      const sameTag = [...parent.children].filter(child => child.localName === element.localName);
+      segment += `:nth-of-type(${sameTag.indexOf(element) + 1})`;
+    }
+    return segment;
+  }
+
+  function uniqueElementSelector(target, doc = target?.ownerDocument) {
+    if (!target || !doc || target.ownerDocument !== doc) {
+      throw new FlowError('選択したHTML要素を確認できません', 'PICKER_TARGET_INVALID');
+    }
+    if (target.id) {
+      const candidate = `#${cssIdentifier(target.id, doc)}`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const tag = target.localName || '*';
+    for (const name of ELEMENT_PICKER_ATTRIBUTES) {
+      const value = target.getAttribute(name);
+      if (!value || value.length > 240) continue;
+      const candidate = `${tag}[${name}="${cssAttributeValue(value)}"]`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const classes = stablePickerClasses(target);
+    if (classes.length) {
+      const candidate = `${tag}${classes.map(name => `.${cssIdentifier(name, doc)}`).join('')}`;
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+    }
+    const path = [];
+    let current = target;
+    for (let depth = 0; current && current.nodeType === 1 && depth < 12; depth++) {
+      path.unshift(pickerSelectorSegment(current, doc));
+      const candidate = path.join(' > ');
+      if (selectorUniquelyMatches(doc, candidate, target)) return candidate;
+      if (current === doc.body || current === doc.documentElement) break;
+      current = current.parentElement;
+    }
+    throw new FlowError('選択した要素を一意に識別できませんでした', 'PICKER_SELECTOR_NOT_UNIQUE');
+  }
+
+  function preferredPickerTarget(raw) {
+    if (!raw || raw.nodeType !== 1) return null;
+    return raw.closest?.(ELEMENT_PICKER_TARGET_SELECTOR) || raw;
+  }
+
+  function pickerTargetLabel(target) {
+    const compact = value => String(value || '').replace(/\s+/g, ' ').trim();
+    const text = compact(
+      target.getAttribute('aria-label')
+      || target.getAttribute('title')
+      || target.textContent
+    ).slice(0, 60);
+    const classes = stablePickerClasses(target).slice(0, 2);
+    const descriptor = `${target.localName || 'element'}${target.id ? `#${target.id}` : classes.map(name => `.${name}`).join('')}`;
+    return (text ? `${text} (${descriptor})` : descriptor).slice(0, 120);
+  }
+
+  function suppressElementPickerEvent(event) {
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  }
+
+  function clearElementPickerHighlight(picker = state.elementPicker) {
+    const highlighted = picker?.highlighted;
+    if (!highlighted) return;
+    const {
+      element: highlightedElement,
+      outline,
+      outlinePriority,
+      outlineOffset,
+      outlineOffsetPriority,
+      cursor,
+      cursorPriority
+    } = highlighted;
+    if (highlightedElement?.style) {
+      highlightedElement.style.setProperty('outline', outline, outlinePriority);
+      highlightedElement.style.setProperty('outline-offset', outlineOffset, outlineOffsetPriority);
+      highlightedElement.style.setProperty('cursor', cursor, cursorPriority);
+    }
+    picker.highlighted = null;
+  }
+
+  function highlightElementPickerTarget(target, picker = state.elementPicker) {
+    if (!picker || picker.highlighted?.element === target) return;
+    clearElementPickerHighlight(picker);
+    if (!target?.style) return;
+    picker.highlighted = {
+      element: target,
+      outline: target.style.getPropertyValue('outline'),
+      outlinePriority: target.style.getPropertyPriority('outline'),
+      outlineOffset: target.style.getPropertyValue('outline-offset'),
+      outlineOffsetPriority: target.style.getPropertyPriority('outline-offset'),
+      cursor: target.style.getPropertyValue('cursor'),
+      cursorPriority: target.style.getPropertyPriority('cursor')
+    };
+    target.style.setProperty('outline', '3px solid #66b8ff', 'important');
+    target.style.setProperty('outline-offset', '2px', 'important');
+    target.style.setProperty('cursor', 'crosshair', 'important');
+  }
+
+  function stopElementPicker({ restoreFocus = true, message = '' } = {}) {
+    const picker = state.elementPicker;
+    if (!picker) return;
+    state.elementPicker = null;
+    clearTimeout(picker.finishTimer);
+    clearElementPickerHighlight(picker);
+    try { picker.cleanupDocument?.(); } catch {}
+    picker.frame?.removeEventListener('load', picker.onFrameLoad);
+    window.removeEventListener('keydown', picker.onKeyDown, true);
+    root.classList.remove('element-picking');
+    ui.elementPickerToolbar.hidden = true;
+    if (message) toast(message);
+    if (restoreFocus) focusBlockControl(picker.blockId, 'toggle', message || '要素選択を終了しました');
+  }
+
+  function bindElementPickerDocument(picker) {
+    picker.cleanupDocument?.();
+    picker.cleanupDocument = null;
+    let doc;
+    try {
+      doc = frameDocument();
+    } catch (error) {
+      ui.elementPickerHint.textContent = error.message;
+      return;
+    }
+
+    const preview = event => {
+      if (picker.finishing || state.elementPicker !== picker) return;
+      const target = preferredPickerTarget(event.target);
+      if (!target) return;
+      highlightElementPickerTarget(target, picker);
+      ui.elementPickerHint.textContent = `選択候補: ${pickerTargetLabel(target)}`;
+    };
+    const choose = event => {
+      suppressElementPickerEvent(event);
+      if (picker.finishing || state.elementPicker !== picker) return;
+      const target = preferredPickerTarget(event.target);
+      if (!target) {
+        ui.elementPickerHint.textContent = 'HTML要素を選択できませんでした。別の位置をタップしてください。';
+        return;
+      }
+      try {
+        const selector = uniqueElementSelector(target, doc);
+        const matches = doc.querySelectorAll(selector);
+        if (matches.length !== 1 || matches[0] !== target) {
+          throw new FlowError('選択した要素を一意に識別できませんでした', 'PICKER_SELECTOR_NOT_UNIQUE');
+        }
+        const location = findBlockLocation(picker.blockId);
+        if (!location || location.block.type !== 'iframeTapElement') {
+          throw new FlowError('設定対象のブロックが見つかりません', 'PICKER_BLOCK_MISSING');
+        }
+        const label = pickerTargetLabel(target);
+        picker.finishing = true;
+        updateBlockConfig(location.block, config => {
+          config.selector = selector;
+          config.targetLabel = label;
+        });
+        renderWorkflowEditor();
+        ui.elementPickerHint.textContent = `${label} を保存しました`;
+        picker.finishTimer = setTimeout(() => {
+          stopElementPicker({ message: `「${label}」を選択しました` });
+        }, 350);
+      } catch (error) {
+        ui.elementPickerHint.textContent = error.message;
+        toast(error.message);
+      }
+    };
+    const suppress = event => suppressElementPickerEvent(event);
+    const listeners = [
+      ['pointerover', preview, { capture: true, passive: true }],
+      ['pointerdown', choose, { capture: true, passive: false }],
+      ['touchstart', choose, { capture: true, passive: false }],
+      ['mousedown', choose, { capture: true, passive: false }],
+      ['click', suppress, { capture: true, passive: false }],
+      ['contextmenu', suppress, { capture: true, passive: false }]
+    ];
+    for (const [type, listener, options] of listeners) doc.addEventListener(type, listener, options);
+    picker.cleanupDocument = () => {
+      for (const [type, listener, options] of listeners) doc.removeEventListener(type, listener, options);
+    };
+  }
+
+  function startElementPicker(blockId) {
+    if (state.running || state.legacyRunning || state.recording) {
+      return toast('実行中または記録中はHTML要素を選択できません');
+    }
+    const location = findBlockLocation(blockId);
+    if (!location || location.block.type !== 'iframeTapElement') {
+      return toast('設定対象のブロックが見つかりません');
+    }
+    try {
+      frameDocument();
+    } catch (error) {
+      return toast(error.message);
+    }
+    if (state.elementPicker) stopElementPicker({ restoreFocus: false });
+    const picker = {
+      blockId,
+      frame: iframe,
+      highlighted: null,
+      cleanupDocument: null,
+      finishing: false,
+      finishTimer: null,
+      onFrameLoad: null,
+      onKeyDown: null
+    };
+    picker.onFrameLoad = () => {
+      if (state.elementPicker === picker) bindElementPickerDocument(picker);
+    };
+    picker.onKeyDown = event => {
+      if (event.key !== 'Escape' || state.elementPicker !== picker) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      stopElementPicker({ message: '要素選択をキャンセルしました' });
+    };
+    state.elementPicker = picker;
+    root.classList.add('element-picking');
+    ui.elementPickerHint.textContent = 'iframe内のHTML要素をタップしてください。実際のゲーム操作は発火しません。';
+    ui.elementPickerToolbar.hidden = false;
+    picker.frame.addEventListener('load', picker.onFrameLoad);
+    window.addEventListener('keydown', picker.onKeyDown, true);
+    bindElementPickerDocument(picker);
+    announce('押すボタンを画面から選択します');
+    requestAnimationFrame(() => ui.elementPickerCancel.focus({ preventScroll: true }));
+  }
+
   function stopRuntimeTelemetry(win) {
     try {
       win?.DD_RUM?.stopSessionReplayRecording?.();
