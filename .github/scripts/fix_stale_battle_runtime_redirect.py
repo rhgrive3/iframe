@@ -148,6 +148,13 @@ tests = replace_once(
     'runtime structure assertion'
 )
 
+tests = replace_once(
+    tests,
+    "  assert.ok(end.includes('const runtime = battleRuntimeState(doc)'));\n  assert.ok(end.includes('if (runtime.finished)'));",
+    "  assert.ok(end.includes('const runtime = trustLiveBattleRuntime(battleRuntimeState(doc))'));\n  assert.ok(end.includes('runtime.status === state.activeBattleStatus'));",
+    'trusted runtime end assertions'
+)
+
 new_test = r'''
 
 test('full-auto startup rejects stale finished state from the previous rescue battle', () => {
