@@ -33,19 +33,12 @@
     const patchedSoundObjects = new WeakSet();
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
     const RENDER_MARKER = '__autoFlowBattlePerformanceRender__';
-    const WEBGL_TRACK_MARKER = '__autoFlowBattlePerformanceWebGLTrack__';
-    const BATTLE_CONTROL_ASSET_PATTERN = /\/sp\/cjs\/raid_parts_(?:attack|auto|full_auto|auto_guard|full_auto_guard)\.(?:png|jpe?g|webp)(?:[?#]|$)/i;
-    const protectedBattleTextures = new WeakSet();
-    const webglBindings = new WeakMap();
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${location.pathname}${location.hash}`);
     const isBattleRuntime = () => isBattleLocation() || Boolean(document.querySelector('.cnt-raid-stage'));
-    const assetSource = value => String(value?.currentSrc || value?.src || value || '');
-    const isBattleControlAsset = value => BATTLE_CONTROL_ASSET_PATTERN.test(assetSource(value));
     const shouldReplaceAsset = value => {
       if (!enabled || !isBattleRuntime()) return false;
       const url = String(value ?? '');
-      if (isBattleControlAsset(url)) return false;
       return /\/sp\/cjs\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/raid\/bg\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/assets\/enemy\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url);
@@ -67,9 +60,9 @@
           .cnt-raid-stage .prt-bg-stage-distant,
           .cnt-raid-stage .prt-bg-effect-brightness,
           .cnt-raid-stage .prt-bg-effect-color { background-image:none!important; }
-          .cnt-raid-stage canvas#canvas { visibility:visible!important; }
-          .cnt-raid-stage .btn-auto,
-          .cnt-raid-stage #cnt-raid-information .btn-attack-start {
+          .cnt-raid-stage canvas#canvas { visibility:hidden!important; }
+          .cnt-raid > .btn-auto,
+          .cnt-raid #cnt-raid-information .btn-attack-start {
             visibility:visible!important;
             opacity:1!important;
           }
@@ -125,82 +118,11 @@
       }
     }
 
-    function webglState(context) {
-      let state = webglBindings.get(context);
-      if (!state) {
-        state = { activeUnit: context?.TEXTURE0 ?? 0, texturesByUnit: new Map(), lastBoundTexture: null };
-        webglBindings.set(context, state);
-      }
-      return state;
-    }
-
-    function hasProtectedBattleTexture(context) {
-      const state = webglBindings.get(context);
-      return Boolean(state?.lastBoundTexture && protectedBattleTextures.has(state.lastBoundTexture));
-    }
-
-    function patchWebGLTracking(prototype) {
-      if (!prototype || prototype[WEBGL_TRACK_MARKER]) return;
-      try { Object.defineProperty(prototype, WEBGL_TRACK_MARKER, { value: true, configurable: true }); } catch {}
-      const wrap = (name, handler) => {
-        const original = prototype[name];
-        if (typeof original !== 'function' || original[WEBGL_TRACK_MARKER]) return;
-        const wrapped = function (...args) {
-          return handler.call(this, original, args);
-        };
-        try { Object.defineProperty(wrapped, WEBGL_TRACK_MARKER, { value: true }); } catch {}
-        try { prototype[name] = wrapped; } catch {}
-      };
-      wrap('activeTexture', function (original, args) {
-        webglState(this).activeUnit = args[0];
-        return original.apply(this, args);
-      });
-      wrap('bindTexture', function (original, args) {
-        const result = original.apply(this, args);
-        if (args[0] === this.TEXTURE_2D) {
-          const state = webglState(this);
-          const texture = args[1] || null;
-          state.texturesByUnit.set(state.activeUnit, texture);
-          state.lastBoundTexture = texture;
-        }
-        return result;
-      });
-      for (const name of ['texImage2D', 'texSubImage2D']) {
-        wrap(name, function (original, args) {
-          const result = original.apply(this, args);
-          const sourceObject = args.find(value => value && typeof value === 'object' && ('src' in value || 'currentSrc' in value));
-          const state = webglState(this);
-          const texture = state.texturesByUnit.get(state.activeUnit);
-          if (texture && sourceObject) {
-            if (isBattleControlAsset(sourceObject)) protectedBattleTextures.add(texture);
-            else protectedBattleTextures.delete(texture);
-          }
-          return result;
-        });
-      }
-      wrap('deleteTexture', function (original, args) {
-        const texture = args[0];
-        if (texture) protectedBattleTextures.delete(texture);
-        const state = webglState(this);
-        if (state.lastBoundTexture === texture) state.lastBoundTexture = null;
-        for (const [unit, bound] of state.texturesByUnit) {
-          if (bound === texture) state.texturesByUnit.delete(unit);
-        }
-        return original.apply(this, args);
-      });
-    }
-
-    function renderAllowed(context, name, args) {
-      if (!battleCanvas(context?.canvas)) return true;
-      if (name === 'drawImage') return isBattleControlAsset(args[0]);
-      return hasProtectedBattleTexture(context);
-    }
-
     function patchRenderMethod(prototype, name) {
       const original = prototype?.[name];
       if (typeof original !== 'function' || original[RENDER_MARKER]) return;
       const wrapped = function (...args) {
-        if (!renderAllowed(this, name, args)) return undefined;
+        if (battleCanvas(this?.canvas)) return undefined;
         return original.apply(this, args);
       };
       try { Object.defineProperty(wrapped, RENDER_MARKER, { value: true }); } catch {}
@@ -209,7 +131,6 @@
 
     function patchRendering() {
       for (const constructor of [window.WebGLRenderingContext, window.WebGL2RenderingContext]) {
-        patchWebGLTracking(constructor?.prototype);
         patchRenderMethod(constructor?.prototype, 'drawArrays');
         patchRenderMethod(constructor?.prototype, 'drawElements');
         patchRenderMethod(constructor?.prototype, 'drawArraysInstanced');
@@ -389,7 +310,7 @@
     return;
   }
 
-  const APP_VERSION = 53;
+  const APP_VERSION = 54;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
