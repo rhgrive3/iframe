@@ -1,0 +1,46 @@
+name: Restore full battle canvas suppression
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - '.github/patch-requests/restore-full-battle-canvas-suppression.txt'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: restore-full-battle-canvas-suppression
+  cancel-in-progress: false
+
+jobs:
+  patch-main:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply focused patch
+        run: python3 .github/scripts/restore_full_battle_canvas_suppression.py
+
+      - name: Validate JavaScript and tests
+        run: |
+          node --check a.js
+          for test_file in tests/*.test.mjs; do
+            node --test "$test_file"
+          done
+
+      - name: Commit directly to main and remove temporary patch files
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git rm .github/workflows/restore-full-battle-canvas-suppression.yml
+          git rm .github/scripts/restore_full_battle_canvas_suppression.py
+          git add a.js tests/autoflow.static.test.mjs
+          git commit -m "fix: fully suppress battle canvas rendering"
+          git push origin HEAD:main
