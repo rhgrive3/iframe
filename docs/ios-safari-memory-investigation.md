@@ -113,6 +113,57 @@ bfcache での suspend / resume は、**親が patch を当てる構成になっ
 </details>
 
 
+### 結論 B-2 (実機報告 → 実測で再現) — 軽量化を ON にするとゲームが停止する
+
+B の修正でランタイムが実際に注入されるようになった結果、今度は
+「軽量化 ON でゲームが動かない」という症状が出た。原因は 2 つ。
+
+#### (1) ホットパスで毎回 `document.querySelector` していた
+
+```js
+const isBattleRuntime = () => isBattleLocation() || Boolean(doc.querySelector('.cnt-raid-stage'));
+const shouldReplaceAsset = value => { if (!enabled || !isBattleRuntime()) return false; ... };
+const battleCanvas = canvas => Boolean(enabled && isBattleRuntime() && ... canvas.closest?.('.cnt-raid-stage'));
+```
+
+`battleCanvas()` は **`drawImage` のたび**、`shouldReplaceAsset()` は **`img.src` 代入のたび**に呼ばれる。
+非 raid URL では `isBattleLocation()` が false になるので、**呼び出しごとに全 document 走査**が走っていた。
+グラブルのバトルは 1 フレームに数千回 `drawImage` を呼ぶ。
+
+2500 要素の document で実測:
+
+| ホットパス | 修正前 | 修正後 |
+|---|---|---|
+| `drawImage` × 20,000 | **1140 ms** | **55.8 ms** (約 20 倍) |
+| `img.src` × 5,000 | **277.1 ms** | **9.8 ms** (約 28 倍) |
+
+1 フレーム分の描画に 1 秒以上かかっていた。DOM が大きいほど悪化するので実機ではさらに重い。
+
+修正: 判定を 100 ms のポーリング時にだけ計算して `battleRuntimeActive` (boolean) に保持し、
+ホットパスはその boolean だけを読む。canvas ごとの祖先walk (`closest`) も
+`WeakMap` + 世代番号でキャッシュする。
+
+#### (2) ゲームの読込パイプラインに嘘をつく処理が既定で有効だった
+
+`patchLoadQueue()` / `patchImageSources()` は CJS 画像・背景・敵画像を 1×1 の透明 GIF に差し替え、
+`patchSoundObject()` は音声モジュールの `loadBGM` などを解決済み Deferred に、`playSE` などを
+`undefined` を返す関数に置き換える。**メモリ削減の本体はここだが、ゲーム側の前提を壊しうるのもここ**
+(1×1 画像に対するスプライトシートのフレーム計算、戻り値の型を前提にしたチェーン)。
+
+修正: 設定を 2 段階に分離した。
+
+| 段階 | 内容 | 既定 |
+|---|---|---|
+| **バトル軽量化・高速化** | CSS 抑止 (canvas 非表示・背景画像除去・演出短縮) + バトル canvas への描画コール停止 + `Game.setting.sound_flag` / `createjs.Sound.setMute` によるミュート。**ゲームの読込処理には触れない** | ON にできる |
+| **アセット差し替え (強力・実験的)** | 画像の透明 GIF 置換 + 音声モジュールのメソッド置換 | **OFF** |
+
+上段だけでも WebGL / Canvas への描画とテクスチャ更新は止まるので、GPU 側の負荷は大きく下がる。
+下段は「バトルが進まなくなったら OFF」と UI に明記した。
+
+また OFF に戻したときに `restoreAllPatches()` を通すようにして、
+**スイッチを切れば prototype が完全に素の状態へ戻る** ようにした
+(以前は `enabled=false` の素通し wrapper が残り続けていた)。
+
 ### 結論 C (確度: 中 / 実機検証が必要) — 残る候補は **WebKit の detached subframe 遅延解放**
 
 結論 A で親側の JS 参照が潔白と分かったので、これが残る。ただし

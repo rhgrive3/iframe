@@ -16,6 +16,17 @@
     }
   }
 
+  // Defaults to off for anyone who already has the main switch saved, so an upgrade never
+  // silently turns the game-breaking tier on.
+  function readBattlePerformanceAssetSetting(win = window) {
+    try {
+      const saved = JSON.parse(win.localStorage.getItem(BATTLE_PERFORMANCE_STORAGE_KEY) || 'null');
+      return saved?.enabled === true && saved?.assets === true;
+    } catch {
+      return false;
+    }
+  }
+
   function installBattlePerformanceRuntime(win) {
     if (!win) return null;
     const doc = win.document;
@@ -27,6 +38,12 @@
     }
 
     let enabled = readBattlePerformanceSetting(win);
+    // The aggressive tier lies to the game's own loaders: it swaps battle artwork for a
+    // 1x1 gif and replaces the sound module's load/play methods. That is where the memory
+    // win is, but it is also the only part that can break game logic (sprite sheet frame
+    // maths on a 1x1 image, unexpected return types from the sound methods), so it is a
+    // separate opt-in and stays off unless asked for.
+    let assetsEnabled = readBattlePerformanceAssetSetting(win);
     let destroyed = false;
     let suspended = false;
     let style = null;
@@ -51,22 +68,41 @@
     }
 
     const isBattleLocation = () => /(?:#|\/)raid(?:[_/]|$)/i.test(`${loc.pathname}${loc.hash}`);
-    const isBattleRuntime = () => isBattleLocation() || Boolean(doc.querySelector('.cnt-raid-stage'));
+
+    // These predicates sit on the hottest paths in the game: every drawImage, every
+    // img.src assignment and every setAttribute. Evaluating them used to run
+    // document.querySelector('.cnt-raid-stage') per call, which is a full document query
+    // thousands of times per frame and made the game unusable while the feature was on.
+    // Resolve the state on the 100ms poll instead and let the hot paths read a boolean.
+    let battleRuntimeActive = false;
+    let battleFlagGeneration = 0;
+    const battleCanvasCache = new WeakMap();
+
+    function refreshBattleRuntimeFlag() {
+      const next = enabled && (isBattleLocation() || Boolean(doc.querySelector('.cnt-raid-stage')));
+      if (next !== battleRuntimeActive) {
+        battleRuntimeActive = next;
+        battleFlagGeneration += 1;
+      }
+      return battleRuntimeActive;
+    }
+
     const shouldReplaceAsset = value => {
-      if (!enabled || !isBattleRuntime()) return false;
+      if (!battleRuntimeActive || !assetsEnabled) return false;
       const url = String(value ?? '');
       return /\/sp\/cjs\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/raid\/bg\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/assets\/enemy\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url);
     };
     const rewriteAsset = value => shouldReplaceAsset(value) ? BATTLE_PERFORMANCE_TRANSPARENT_IMAGE : value;
-    const battleCanvas = canvas => Boolean(
-      enabled
-      && isBattleRuntime()
-      && canvas
-      && canvas.ownerDocument === doc
-      && (canvas.id === 'canvas' || canvas.closest?.('.cnt-raid-stage'))
-    );
+    const battleCanvas = canvas => {
+      if (!battleRuntimeActive || !canvas || canvas.ownerDocument !== doc) return false;
+      const cached = battleCanvasCache.get(canvas);
+      if (cached && cached.generation === battleFlagGeneration) return cached.value;
+      const value = canvas.id === 'canvas' || Boolean(canvas.closest?.('.cnt-raid-stage'));
+      battleCanvasCache.set(canvas, { generation: battleFlagGeneration, value });
+      return value;
+    };
 
     function ensureStyle() {
       if (!style || !style.isConnected) {
@@ -174,7 +210,7 @@
       // module survives in the RequireJS cache across route changes, so an instance-local
       // guard would let a re-created runtime wrap the already-wrapped methods and then
       // "restore" them to the wrappers.
-      if (!enabled || !sound || sound[SOUND_MARKER]) return;
+      if (!enabled || !assetsEnabled || !sound || sound[SOUND_MARKER]) return;
       const loadMethods = ['loadSound', 'loadBGM', 'loadSE', 'loadVoice'];
       const noOpMethods = [
         'playSound', 'playBGM', 'playSE', 'playVoice', 'playBattleReadySE', 'playAssistSE',
@@ -201,7 +237,7 @@
     }
 
     function patchSoundRuntime() {
-      if (!enabled || !isBattleRuntime()) return;
+      if (!enabled || !battleRuntimeActive) return;
       const setting = win.Game?.setting;
       if (setting) {
         if (!soundFlagSnapshot || soundFlagSnapshot.owner !== setting) {
@@ -290,14 +326,26 @@
     }
 
     function patchNow() {
+      refreshBattleRuntimeFlag();
       ensureStyle();
-      try { patchLoadQueue(); } catch {}
       try { patchRendering(); } catch {}
-      if (isBattleRuntime()) {
+      if (assetsEnabled) {
+        try { patchLoadQueue(); } catch {}
+      }
+      if (battleRuntimeActive) {
         try { patchSoundRuntime(); } catch {}
       } else {
         restoreSoundRuntime();
       }
+    }
+
+    // Reinstall exactly the patches the current tiers call for, starting from the pristine
+    // natives so toggling never stacks or strands a wrapper.
+    function applyPatches() {
+      restoreAllPatches();
+      if (!enabled) return;
+      if (assetsEnabled) patchImageSources();
+      patchRendering();
     }
 
     function stopPoll() {
@@ -313,28 +361,33 @@
       }, 100);
     }
 
-    function setEnabled(next) {
+    function setEnabled(next, nextAssets = assetsEnabled) {
       if (destroyed) return;
       enabled = Boolean(next);
+      assetsEnabled = Boolean(nextAssets);
       if (suspended) return;
       ensureStyle();
+      applyPatches();
       if (enabled) {
         patchNow();
         startPoll();
       } else {
+        // Turning the switch off must give back the untouched game, not a pass-through
+        // wrapper on every setAttribute and every draw call.
         stopPoll();
         restoreSoundRuntime();
+        refreshBattleRuntimeFlag();
       }
     }
 
     const onMessage = event => {
       if (event.source !== win.parent || event.origin !== loc.origin) return;
       if (event.data?.type !== BATTLE_PERFORMANCE_MESSAGE_TYPE) return;
-      setEnabled(event.data.enabled);
+      setEnabled(event.data.enabled, event.data.assets);
     };
     const onStorage = event => {
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
-      setEnabled(readBattlePerformanceSetting(win));
+      setEnabled(readBattlePerformanceSetting(win), readBattlePerformanceAssetSetting(win));
     };
     // Back-forward cache: the very same doc can come back. Fully tearing down there
     // used to leave the prototype patches installed with no runtime key, so the next
@@ -351,8 +404,7 @@
     const resume = () => {
       if (destroyed || !suspended) return;
       suspended = false;
-      patchImageSources();
-      patchRendering();
+      applyPatches();
       ensureStyle();
       if (enabled) {
         patchNow();
@@ -387,6 +439,7 @@
     // instead of re-running the patchers and doubling them up.
     win[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
       get enabled() { return enabled; },
+      get assetsEnabled() { return assetsEnabled; },
       get suspended() { return suspended; },
       setEnabled,
       refresh: patchNow,
@@ -400,8 +453,8 @@
     win.addEventListener('pagehide', onPageHide);
     win.addEventListener('pageshow', onPageShow);
 
-    patchImageSources();
-    patchRendering();
+    refreshBattleRuntimeFlag();
+    applyPatches();
     ensureStyle();
     if (enabled) {
       patchNow();
@@ -416,7 +469,7 @@
     return;
   }
 
-  const APP_VERSION = 57;
+  const APP_VERSION = 58;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1259,7 +1312,11 @@
               <input id="battlePerformanceToggle" type="checkbox">
               <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、WebGL描画とバトル音声を止め、表示専用演出を最短化します。バトルロジックとタイムラインは維持します。</small></span>
             </label>
-            <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映し、次回のページ読込では画像取得前から適用します。OFFにした時、すでに省略済みの画像は次の再読込から復元されます。</div>
+            <label class="settingToggle" for="battlePerformanceAssetToggle">
+              <input id="battlePerformanceAssetToggle" type="checkbox">
+              <span class="settingToggleCopy"><strong>アセット差し替え（強力・実験的）</strong><small>CJS画像・背景・敵画像の取得を透明データへ置換し、音声モジュールの読込と再生を無効化します。メモリ削減は最大ですが、ゲーム側の画像サイズ計算や戻り値の前提を崩すため、バトルが進まなくなる場合はOFFにしてください。</small></span>
+            </label>
+            <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映します。上のスイッチだけなら描画停止と演出短縮のみで、ゲームの読み込み処理には手を触れません。アセット差し替えは次回のページ読込から完全に適用され、OFFに戻すと省略済みの画像は再読込後に復元されます。</div>
           </article>
         </section>
       </div>
@@ -1292,7 +1349,8 @@
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
     undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
     validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
-    validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle')
+    validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle'),
+    battlePerformanceAssetToggle: byId('battlePerformanceAssetToggle')
   };
 
   const state = {
@@ -1341,6 +1399,7 @@
     frameGeneration: 0,
     frameNavigationId: 0,
     battlePerformanceEnabled: readBattlePerformanceSetting(),
+    battlePerformanceAssets: readBattlePerformanceAssetSetting(),
     battlePerformanceFailure: null,
     battlePerformanceReported: null
   };
@@ -1402,7 +1461,7 @@
         reportBattlePerformanceFailure();
         return null;
       }
-      runtime.setEnabled(state.battlePerformanceEnabled);
+      runtime.setEnabled(state.battlePerformanceEnabled, state.battlePerformanceAssets);
       if (state.battlePerformanceFailure) {
         state.battlePerformanceFailure = null;
         appendLog('バトル軽量化ランタイムの注入に成功しました', 'success');
@@ -1430,7 +1489,8 @@
       bootstrapBattlePerformanceFrameRuntime(win);
       win?.postMessage({
         type: BATTLE_PERFORMANCE_MESSAGE_TYPE,
-        enabled: state.battlePerformanceEnabled
+        enabled: state.battlePerformanceEnabled,
+        assets: state.battlePerformanceAssets
       }, location.origin);
     } catch (error) {
       state.battlePerformanceFailure = `sync failed: ${error.message}`;
@@ -1438,25 +1498,40 @@
     }
   }
 
-  function setBattlePerformanceEnabled(next, { notify = true } = {}) {
-    const previous = state.battlePerformanceEnabled;
-    state.battlePerformanceEnabled = Boolean(next);
+  function syncBattlePerformanceToggles() {
     ui.battlePerformanceToggle.checked = state.battlePerformanceEnabled;
+    ui.battlePerformanceAssetToggle.checked = state.battlePerformanceAssets;
+    ui.battlePerformanceAssetToggle.disabled = !state.battlePerformanceEnabled;
+  }
+
+  function setBattlePerformanceEnabled(next, { notify = true, assets = state.battlePerformanceAssets } = {}) {
+    const previous = state.battlePerformanceEnabled;
+    const previousAssets = state.battlePerformanceAssets;
+    state.battlePerformanceEnabled = Boolean(next);
+    state.battlePerformanceAssets = state.battlePerformanceEnabled && Boolean(assets);
+    syncBattlePerformanceToggles();
     try {
       localStorage.setItem(BATTLE_PERFORMANCE_STORAGE_KEY, JSON.stringify({
         version: 1,
         enabled: state.battlePerformanceEnabled,
+        assets: state.battlePerformanceAssets,
         updatedAt: Date.now()
       }));
     } catch (error) {
       state.battlePerformanceEnabled = previous;
-      ui.battlePerformanceToggle.checked = previous;
+      state.battlePerformanceAssets = previousAssets;
+      syncBattlePerformanceToggles();
       appendLog(`バトル軽量化設定の保存失敗: ${error.message}`, 'error');
       if (notify) toast('バトル軽量化設定を保存できませんでした');
       return false;
     }
     syncBattlePerformanceFrame();
-    if (notify) toast(state.battlePerformanceEnabled ? 'バトル軽量化・高速化をONにしました' : 'バトル軽量化・高速化をOFFにしました');
+    if (notify) {
+      if (!state.battlePerformanceEnabled) toast('バトル軽量化・高速化をOFFにしました');
+      else if (state.battlePerformanceAssets !== previousAssets) {
+        toast(state.battlePerformanceAssets ? 'アセット差し替えをONにしました' : 'アセット差し替えをOFFにしました');
+      } else toast('バトル軽量化・高速化をONにしました');
+    }
     return true;
   }
 
@@ -7785,6 +7860,8 @@
   });
   byId('workflowErrorLogs').addEventListener('click', () => setPage('logs'));
   ui.battlePerformanceToggle.addEventListener('change', () => setBattlePerformanceEnabled(ui.battlePerformanceToggle.checked));
+  ui.battlePerformanceAssetToggle.addEventListener('change', () =>
+    setBattlePerformanceEnabled(state.battlePerformanceEnabled, { assets: ui.battlePerformanceAssetToggle.checked }));
   byId('workflowErrorDismiss').addEventListener('click', clearWorkflowError);
   ui.paletteSearch.addEventListener('input', () => {
     state.paletteQuery = ui.paletteSearch.value;
@@ -7983,7 +8060,7 @@
   stopRuntimeTelemetry(window);
   loadWorkflowStore();
   loadLegacyState();
-  ui.battlePerformanceToggle.checked = state.battlePerformanceEnabled;
+  syncBattlePerformanceToggles();
   renderTemplateSelect();
   renderWorkflowSelect();
   renderPalette();
@@ -8024,6 +8101,7 @@
       frameNavigationId: state.frameNavigationId,
       hostRuntimeReleased: state.hostRuntimeReleased,
       battlePerformanceEnabled: state.battlePerformanceEnabled,
+      battlePerformanceAssets: state.battlePerformanceAssets,
       battlePerformanceFailure: state.battlePerformanceFailure,
       battlePerformanceInstalled: (() => {
         try { return Boolean(iframe.contentWindow?.[BATTLE_PERFORMANCE_RUNTIME_KEY]); } catch { return null; }

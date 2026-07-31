@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 57'));
+  assert.ok(source.includes('const APP_VERSION = 58'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -364,7 +364,8 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   const patchNow = child.slice(child.indexOf('function patchNow'), child.indexOf('function setEnabled'));
   assert.ok(patchNow.includes('try { patchLoadQueue(); } catch {}'));
   assert.ok(patchNow.includes('try { patchRendering(); } catch {}'));
-  assert.ok(patchNow.includes('if (isBattleRuntime())'));
+  assert.ok(patchNow.includes('refreshBattleRuntimeFlag();'));
+  assert.ok(patchNow.includes('if (battleRuntimeActive)'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
   assert.ok(child.includes('try { prototype[name] = wrapped; } catch { return; }'));
   assert.ok(child.includes('pollTimer = win.setInterval'));
@@ -390,7 +391,8 @@ test('battle performance setting rolls back its UI state when persistence fails'
   const setter = source.slice(source.indexOf('function setBattlePerformanceEnabled'), source.indexOf('function consumeDragEvent'));
   assert.ok(setter.includes('const previous = state.battlePerformanceEnabled;'));
   assert.ok(setter.includes('state.battlePerformanceEnabled = previous;'));
-  assert.ok(setter.includes('ui.battlePerformanceToggle.checked = previous;'));
+  assert.ok(setter.includes('state.battlePerformanceAssets = previousAssets;'));
+  assert.ok(setter.includes('syncBattlePerformanceToggles();'));
 });
 
 test('battle performance fully suppresses battle canvas while preserving DOM attack controls', () => {

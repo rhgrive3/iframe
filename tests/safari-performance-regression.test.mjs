@@ -31,6 +31,8 @@ test('running block UI is updated without rebuilding editor', () => {
   assert.match(body, /card\?\.classList\.add\('running'\)/);
 });
 
+const stripLineComments = text => text.replace(/^[ \t]*\/\/.*$/gm, '');
+
 const childRuntime = source.slice(
   source.indexOf('function installBattlePerformanceRuntime'),
   source.indexOf('const APP_VERSION')
@@ -71,7 +73,7 @@ test('back-forward cache suspends the child runtime instead of destroying it', (
 
 test('the runtime handle is published before any prototype is patched', () => {
   const publish = childRuntime.indexOf('win[BATTLE_PERFORMANCE_RUNTIME_KEY] = {');
-  const firstPatchCall = childRuntime.indexOf('\n    patchImageSources();');
+  const firstPatchCall = childRuntime.indexOf('\n    applyPatches();');
   assert.ok(publish > 0 && firstPatchCall > 0);
   assert.ok(publish < firstPatchCall, 'a throwing patcher must not leave a patched realm without a runtime key');
 });
@@ -132,12 +134,65 @@ test('the runtime takes its realm as a parameter so both entry points share one 
   assert.match(source, /const doc = win\.document;/);
   assert.match(source, /const loc = win\.location;/);
   assert.match(source, /if \(window\.top !== window\) \{\n    installBattlePerformanceRuntime\(window\);/);
-  // no realm-bound global may leak back into the runtime body
-  const body = source.slice(
+  assert.match(source, /function readBattlePerformanceAssetSetting\(win = window\)/);
+  // no realm-bound global may leak back into the runtime body (comments excluded)
+  const body = stripLineComments(source.slice(
     source.indexOf('function installBattlePerformanceRuntime'),
     source.indexOf('if (window.top !== window) {')
-  );
+  ));
   assert.doesNotMatch(body, /(?<![.\w$])window\b/);
   assert.doesNotMatch(body, /(?<![.\w$])document\b/);
   assert.doesNotMatch(body, /(?<![.\w$])location\b/);
+});
+
+test('battle detection is resolved on the poll, never inside the hot paths', () => {
+  // These predicates run on every drawImage, every img.src and every setAttribute. Doing a
+  // document.querySelector per call cost 1140ms per 20k drawImage calls on a 2500 element
+  // document and froze the game outright; the cached flag brings that to 56ms.
+  const body = stripLineComments(source.slice(
+    source.indexOf('function installBattlePerformanceRuntime'),
+    source.indexOf('if (window.top !== window) {')
+  ));
+  assert.match(body, /let battleRuntimeActive = false;/);
+  assert.match(body, /function refreshBattleRuntimeFlag\(\)/);
+  const hotPaths = body.slice(body.indexOf('const shouldReplaceAsset'), body.indexOf('function ensureStyle'));
+  assert.doesNotMatch(hotPaths, /isBattleRuntime\(\)/);
+  assert.doesNotMatch(hotPaths, /querySelector/);
+  assert.match(hotPaths, /if \(!battleRuntimeActive/);
+  // the per-canvas ancestor walk must be cached too
+  assert.match(hotPaths, /battleCanvasCache/);
+  assert.match(hotPaths, /generation === battleFlagGeneration/);
+  // the poll is the only place the flag is recomputed
+  const patchNow = body.slice(body.indexOf('function patchNow'), body.indexOf('function applyPatches'));
+  assert.match(patchNow, /refreshBattleRuntimeFlag\(\);/);
+});
+
+test('the tier that lies to the game loaders is opt-in and off by default', () => {
+  assert.match(source, /function readBattlePerformanceAssetSetting\(win = window\)/);
+  assert.match(source, /saved\?\.enabled === true && saved\?\.assets === true/);
+  const body = stripLineComments(source.slice(
+    source.indexOf('function installBattlePerformanceRuntime'),
+    source.indexOf('if (window.top !== window) {')
+  ));
+  // asset rewriting and sound method replacement are both gated on the extra tier
+  assert.match(body, /if \(!battleRuntimeActive \|\| !assetsEnabled\) return false;/);
+  assert.match(body, /if \(!enabled \|\| !assetsEnabled \|\| !sound \|\| sound\[SOUND_MARKER\]\) return;/);
+  assert.match(body, /if \(assetsEnabled\) patchImageSources\(\);/);
+  // draw suppression and the stylesheet stay in the safe tier
+  const apply = body.slice(body.indexOf('function applyPatches'), body.indexOf('function stopPoll'));
+  assert.match(apply, /patchRendering\(\);/);
+});
+
+test('turning the switch off restores the untouched game', () => {
+  const body = stripLineComments(source.slice(
+    source.indexOf('function installBattlePerformanceRuntime'),
+    source.indexOf('if (window.top !== window) {')
+  ));
+  const setEnabled = body.slice(body.indexOf('function setEnabled'), body.indexOf('const onMessage'));
+  assert.match(setEnabled, /applyPatches\(\);/);
+  assert.match(setEnabled, /restoreSoundRuntime\(\);/);
+  // applyPatches unwinds everything first, and installs nothing while disabled
+  const apply = body.slice(body.indexOf('function applyPatches'), body.indexOf('function stopPoll'));
+  assert.match(apply, /restoreAllPatches\(\);/);
+  assert.match(apply, /if \(!enabled\) return;/);
 });
