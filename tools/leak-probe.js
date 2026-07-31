@@ -485,9 +485,86 @@
     };
   }
 
+  // 計測器が本当に効いているかを 1 秒で確かめる。
+  // どれかが false なら、その API のフックが誰かに戻されている = 計測値は信用できない。
+  function selfTest() {
+    if (!installed) { console.warn('[leakProbe] install() してから実行してください'); return null; }
+    const before = { ...totals };
+    const timeoutId = window.setTimeout(() => {}, 60000);
+    window.clearTimeout(timeoutId);
+    const intervalId = window.setInterval(() => {}, 60000);
+    window.clearInterval(intervalId);
+    const frameId = window.requestAnimationFrame(() => {});
+    window.cancelAnimationFrame(frameId);
+    const probeTarget = document.createElement('div');
+    const noop = () => {};
+    probeTarget.addEventListener('__probe', noop);
+    probeTarget.removeEventListener('__probe', noop);
+    const observer = new MutationObserver(() => {});
+    observer.disconnect();
+    const rows = [
+      { api: 'setTimeout', ok: totals.timeoutsCreated - before.timeoutsCreated === 1 },
+      { api: 'setInterval', ok: totals.intervalsCreated - before.intervalsCreated === 1 },
+      { api: 'requestAnimationFrame', ok: totals.rafCreated - before.rafCreated === 1 },
+      { api: 'addEventListener', ok: totals.listenersAdded - before.listenersAdded === 1 },
+      { api: 'MutationObserver', ok: totals.observersCreated - before.observersCreated === 1 }
+    ];
+    console.table(rows);
+    const broken = rows.filter(row => !row.ok).map(row => row.api);
+    if (broken.length) console.warn('[leakProbe] フックが効いていない API:', broken.join(', '));
+    else console.log('[leakProbe] 全 API のフックが有効です');
+    return rows;
+  }
+
+  // いま何が走っているのかを一目で出す。ワークフロー実行中に叩くこと。
+  function runState() {
+    const test = window.__AUTO_TEST__;
+    const state = test?.state;
+    const data = {
+      appVersion: test?.APP_VERSION ?? null,
+      ワークフロー実行中: Boolean(state?.running),
+      レガシー実行中: Boolean(state?.legacyRunning),
+      現在ブロック: state?.running?.currentBlockId ?? null,
+      周回: state?.running?.cycle ?? null,
+      完了戦闘数: state?.running?.completedBattles ?? null,
+      再開回数: state?.running?.restartCount ?? null,
+      稼働中インターバル: live.intervals.size,
+      累計インターバル: totals.intervalsCreated,
+      累計タイムアウト: totals.timeoutsCreated,
+      累計Observer: totals.observersCreated,
+      frameGeneration: state?.frameGeneration ?? null,
+      lightweightMode: window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? null
+    };
+    console.log(data);
+    return data;
+  }
+
+  // 子 realm へのランタイム注入がなぜ失敗しているかを切り分ける。
+  function injectionReport() {
+    const test = window.__AUTO_TEST__;
+    const frame = currentFrame();
+    const win = frame?.contentWindow;
+    if (!win) { console.warn('[leakProbe] iframe window がありません'); return null; }
+    const attempt = fn => { try { return fn(); } catch (error) { return `ERR ${error.name}: ${error.message}`; } };
+    const data = {
+      appVersion: test?.APP_VERSION ?? null,
+      バトル軽量化トグル: test?.state?.battlePerformanceEnabled ?? null,
+      frameGeneration: test?.state?.frameGeneration ?? null,
+      hostRuntimeReleased: test?.state?.hostRuntimeReleased ?? null,
+      frameHref: attempt(() => win.location.href),
+      sameOrigin: attempt(() => new URL(win.location.href).origin === location.origin),
+      documentDomain: [document.domain, attempt(() => win.document.domain)],
+      runtimeKey: attempt(() => Boolean(win['__FULLSCREEN_IFRAME_BATTLE_PERFORMANCE__'])),
+      子realmでeval可能: attempt(() => typeof win.Function('return 1')()),
+      子realmへ書込可能: attempt(() => { win.Function('value', 'window.__leakProbeInjected = value')('ok'); return win.__leakProbeInjected; })
+    };
+    console.log(data);
+    return data;
+  }
+
   window[KEY] = {
     get installed() { return installed; },
-    install, uninstall,
+    install, uninstall, selfTest, runState, injectionReport,
     snapshot, mark, diff, marks,
     trackFrame, autoTrack, stopAutoTrack, gcReport, tracked,
     protoReport, reinjectDelta,
