@@ -375,6 +375,9 @@ test('battle performance hooks are isolated and restore audio outside battle rou
   assert.ok(patchNow.includes('restoreStageRendering();'));
   assert.ok(patchNow.includes('if (isBattleRuntime())'));
   assert.ok(patchNow.includes('else {\n        restoreSoundRuntime();'));
+  assert.ok(patchNow.includes('restoreLoadQueue();'));
+  assert.ok(patchNow.includes('restoreImageSources();'));
+  assert.ok(patchNow.indexOf('if (isBattleRuntime())') < patchNow.indexOf('try { patchImageSources(); } catch {}'));
   assert.ok(child.includes('stage[name] = wrapper'));
   assert.ok(child.includes('function restoreLoadQueue()'));
   assert.ok(child.includes('function restoreImageSources()'));

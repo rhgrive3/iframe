@@ -147,7 +147,14 @@
           value: { owner: runtimeToken, originals, wrappers },
           configurable: true
         });
-      } catch {}
+      } catch {
+        for (const [name, original] of originals) {
+          try {
+            if (prototype[name] === wrappers.get(name)) prototype[name] = original;
+          } catch {}
+        }
+        return false;
+      }
       return true;
     }
 
@@ -338,14 +345,16 @@
     function patchNow() {
       refreshBattleRuntime();
       ensureStyle();
-      try { patchImageSources(); } catch {}
-      try { patchLoadQueue(); } catch {}
       if (isBattleRuntime()) {
+        try { patchImageSources(); } catch {}
+        try { patchLoadQueue(); } catch {}
         try { patchStageRendering(); } catch {}
         try { patchSoundRuntime(); } catch {}
       } else {
         restoreSoundRuntime();
         restoreStageRendering();
+        restoreLoadQueue();
+        restoreImageSources();
       }
     }
 

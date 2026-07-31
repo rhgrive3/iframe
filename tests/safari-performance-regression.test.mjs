@@ -31,6 +31,13 @@ test('running block UI is updated without rebuilding editor', () => {
   assert.match(body, /card\?\.classList\.add\('running'\)/);
 });
 
+test('battle media hooks exist only while the active route is a battle', () => {
+  const body = source.slice(source.indexOf('function patchNow'), source.indexOf('function stopPoll'));
+  assert.ok(body.indexOf('if (isBattleRuntime())') < body.indexOf('patchImageSources()'));
+  assert.match(body, /restoreLoadQueue\(\)/);
+  assert.match(body, /restoreImageSources\(\)/);
+});
+
 test('mobile battle waits use runtime polling without animation observers', () => {
   const body = source.slice(source.indexOf('function armPendingAutoAttack'), source.indexOf('async function recoverKnownPopup'));
   assert.equal((body.match(/observeOnLightweight: false/g) || []).length, 3);
