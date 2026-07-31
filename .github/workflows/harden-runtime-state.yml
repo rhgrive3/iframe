@@ -1,0 +1,60 @@
+name: Harden Granblue runtime state
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - '.github/patch-requests/runtime-state-v50.txt'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: granblue-runtime-state-v50
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'automation/runtime-state-v50'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Patch runtime-backed Granblue state handling
+        run: python3 .github/scripts/harden-runtime-state.py
+
+      - name: Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check a.js
+          mapfile -d '' test_files < <(find tests test -type f -name '*.test.mjs' -print0 2>/dev/null || true)
+          if ((${#test_files[@]})); then
+            node --test "${test_files[@]}"
+          fi
+
+      - name: Commit generated patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/harden-runtime-state.yml
+          git rm .github/scripts/harden-runtime-state.py
+          git rm .github/patch-requests/runtime-state-v50.txt
+          git add a.js tests/autoflow.static.test.mjs
+          git diff --cached --check
+          git commit -m 'fix: use Granblue runtime state for battle automation'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
