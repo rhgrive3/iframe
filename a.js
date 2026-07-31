@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 65;
+  const APP_VERSION = 66;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -651,14 +651,16 @@
         position:fixed;z-index:180;left:10px;bottom:max(10px,env(safe-area-inset-bottom));
         width:var(--dock-width,min(820px,calc(100vw - 20px)));width:var(--dock-width,min(820px,calc(100dvw - 20px)));
         height:var(--dock-height,min(860px,calc(100vh - 86px)));height:var(--dock-height,min(860px,calc(100dvh - 86px)));
-        max-width:calc(100dvw - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;
+        max-width:calc(100vw - 8px);max-width:calc(100dvw - 8px);
+        max-height:calc(100vh - 8px);max-height:calc(100dvh - 8px);display:flex;flex-direction:column;
         border:1px solid var(--line-strong);border-radius:var(--radius-lg);color:var(--text);
         background:var(--panel);box-shadow:var(--shadow-lg);overflow:hidden;isolation:isolate
       }
       #dock.narrowViewport{
-        width:var(--dock-width,86vw);width:var(--dock-width,86dvw);
-        height:var(--dock-height,54vh);height:var(--dock-height,54dvh);
-        max-width:calc(100dvw - 18px);max-height:calc(100dvh - 54px);border-radius:14px
+        width:var(--dock-width,min(380px,82vw));width:var(--dock-width,min(380px,82dvw));
+        height:var(--dock-height,min(500px,46vh));height:var(--dock-height,min(500px,46dvh));
+        max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px);
+        max-height:54vh;max-height:54dvh;border-radius:14px
       }
       #dock::before{
         content:'';position:absolute;z-index:-1;inset:0 0 auto;height:150px;pointer-events:none;
@@ -1022,7 +1024,7 @@
         #browserBar button,#browserBar input{height:44px;min-height:44px}
         #browserBar input{padding:4px 8px;font-size:16px}
         #loadUrl{font-size:10px}
-        #dock{left:6px;width:var(--dock-width,min(340px,86vw));width:var(--dock-width,min(340px,86dvw));height:var(--dock-height,min(480px,54vh));height:var(--dock-height,min(480px,54dvh));max-height:calc(100dvh - 54px);border-radius:14px}
+        #dock{left:6px;width:var(--dock-width,min(380px,82vw));width:var(--dock-width,min(380px,82dvw));height:var(--dock-height,min(500px,46vh));height:var(--dock-height,min(500px,46dvh));max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px);max-height:54vh;max-height:54dvh;border-radius:14px}
         #dock.compact{width:104px;height:48px;border-radius:24px}
         #dockHeader{grid-template-columns:40px minmax(0,1fr) 40px 40px;gap:3px;min-height:56px;padding:5px 7px}
         #dockGrip,#toggleCompact,#closeApp{width:40px;height:40px;min-height:40px}
@@ -1444,14 +1446,20 @@
 
   const supportsNativeBlockDrag = window.matchMedia?.('(hover: hover) and (pointer: fine)').matches ?? true;
   const lightweightMode = window.matchMedia?.('(hover: none) and (pointer: coarse)').matches ?? false;
+  function isAndroidPhone() {
+    const userAgent = String(navigator.userAgent || '');
+    const mobileHint = navigator.userAgentData?.mobile === true || /\bMobile\b/i.test(userAgent);
+    return /\bAndroid\b/i.test(userAgent) && mobileHint;
+  }
   function isNarrowViewport() {
+    if (isAndroidPhone()) return true;
     if (window.matchMedia?.('(max-width: 620px)').matches) return true;
     return [window.visualViewport?.width, window.screen?.width, window.innerWidth].some(value => {
       const width = Number(value);
       return Number.isFinite(width) && width > 0 && width <= 620;
     });
   }
-  const narrowScreen = isNarrowViewport();
+  let narrowScreen = isNarrowViewport();
   dock.classList.toggle('narrowViewport', narrowScreen);
   const dragLock = { active: false, pointerId: null, owner: null, restore: null, cancel: null };
 
@@ -8512,6 +8520,31 @@
     saveLegacyState();
   }
 
+  function narrowDockDefaultSize() {
+    const viewport = window.visualViewport;
+    const viewportWidth = finite(viewport?.width, window.innerWidth);
+    const viewportHeight = finite(viewport?.height, window.innerHeight);
+    return {
+      width: Math.max(260, Math.min(380, viewportWidth * 0.82)),
+      height: Math.max(260, Math.min(500, viewportHeight * 0.46))
+    };
+  }
+
+  function normalizeNarrowDockSize() {
+    if (!dock.classList.contains('narrowViewport')) return false;
+    const size = narrowDockDefaultSize();
+    let changed = false;
+    if (Number.isFinite(state.dockWidth) && state.dockWidth > size.width) {
+      state.dockWidth = size.width;
+      changed = true;
+    }
+    if (Number.isFinite(state.dockHeight) && state.dockHeight > size.height) {
+      state.dockHeight = size.height;
+      changed = true;
+    }
+    return changed;
+  }
+
   function positionDock() {
     const viewport = window.visualViewport;
     const viewportLeft = finite(viewport?.offsetLeft, 0);
@@ -9069,7 +9102,10 @@
   bindFrameLoad(iframe);
 
   const resizeHandler = () => {
-    dock.classList.toggle('narrowViewport', isNarrowViewport());
+    const wasNarrow = narrowScreen;
+    narrowScreen = isNarrowViewport();
+    dock.classList.toggle('narrowViewport', narrowScreen);
+    if (narrowScreen && !wasNarrow) normalizeNarrowDockSize();
     positionDock();
     for (const action of state.legacy?.actions || []) {
       if (action.type === 'click') {
@@ -9149,6 +9185,7 @@
   stopRuntimeTelemetry(window);
   loadWorkflowStore();
   loadLegacyState();
+  normalizeNarrowDockSize();
   ui.battlePerformanceToggle.checked = state.battlePerformanceEnabled;
   renderTemplateSelect();
   renderWorkflowSelect();

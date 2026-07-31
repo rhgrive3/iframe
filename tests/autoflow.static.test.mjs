@@ -242,15 +242,22 @@ test('lightweight execution keeps only error logs and removes continuous overlay
   assert.ok(source.includes("if (!lightweightMode) {\n      renderPalette();\n      renderWorkflowEditor();\n    }"));
 });
 
-test('narrow phones launch compact with viewport-independent resizable sizing', () => {
+test('Android phones launch compact and stale desktop dock sizes are normalized', () => {
+  assert.ok(source.includes('function isAndroidPhone()'));
+  assert.ok(source.includes('navigator.userAgentData?.mobile === true'));
+  assert.ok(source.includes('/\\bAndroid\\b/i.test(userAgent)'));
   assert.ok(source.includes('function isNarrowViewport()'));
   assert.ok(source.includes('window.screen?.width'));
   assert.ok(source.includes("dock.classList.toggle('narrowViewport', narrowScreen)"));
-  assert.ok(source.includes("dock.classList.toggle('narrowViewport', isNarrowViewport())"));
+  assert.ok(source.includes('narrowScreen = isNarrowViewport()'));
+  assert.ok(source.includes('if (narrowScreen && !wasNarrow) normalizeNarrowDockSize()'));
   assert.ok(source.includes('setBrowserHidden(state.legacy.browserHidden || narrowScreen)'));
   assert.ok(source.includes('setCompact(state.legacy.compact || narrowScreen)'));
-  assert.ok(source.includes('width:var(--dock-width,min(340px,86dvw))'));
-  assert.ok(source.includes('height:var(--dock-height,min(480px,54dvh))'));
+  assert.ok(source.includes('normalizeNarrowDockSize();'));
+  assert.ok(source.includes('width:var(--dock-width,min(380px,82dvw))'));
+  assert.ok(source.includes('height:var(--dock-height,min(500px,46dvh))'));
+  assert.ok(source.includes('max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px)'));
+  assert.ok(source.includes('max-height:54vh;max-height:54dvh'));
   assert.ok(source.includes('button{min-height:40px}'));
   assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
 });
@@ -354,7 +361,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 65'));
+  assert.ok(source.includes('const APP_VERSION = 66'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
