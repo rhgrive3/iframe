@@ -1,0 +1,67 @@
+{
+  "captureBasis": [
+    "マルチバトルリスト.txt",
+    "ステージ選択後.txt",
+    "2-1 ステージ選択中の例外.txt",
+    "2-2 ステージ選択画面の例外2(未確認バトルを確認してください).txt",
+    "人数オーバー.txt",
+    "3.バトル中.txt",
+    "攻撃実行後.txt",
+    "4 未確認バトル確認画面.txt"
+  ],
+  "urls": {
+    "assist": "https://game.granbluefantasy.jp/#quest/assist/multi/0",
+    "battle": "https://game.granbluefantasy.jp/#raid_multi/46244081963",
+    "result": "https://game.granbluefantasy.jp/#result_multi/46244081963"
+  },
+  "messages": {
+    "maxAssist": "救援できるマルチバトルは最大3つまでです。",
+    "unclaimed": "未確認バトルを確認して下さい。",
+    "raidFull": "参戦人数が上限に達しているため\n参戦できませんでした。",
+    "battleEnded": "敵が倒されたため、\nこのバトルは終了しました。"
+  },
+  "assistRows": [
+    { "raidId": "46244030087", "hp": 7, "people": "7/18" },
+    { "raidId": "46244057125", "hp": 26, "people": "5/18" },
+    { "raidId": "46244088266", "hp": 54, "people": "4/18" },
+    { "raidId": "46244075451", "hp": 60, "people": "3/18" },
+    { "raidId": "46244081963", "hp": 80, "people": "1/18" },
+    { "raidId": "46244077420", "hp": 83, "people": "1/18" },
+    { "raidId": "46244080269", "hp": 63, "people": "2/18" },
+    { "raidId": "46244084680", "hp": 49, "people": "6/18" }
+  ],
+  "raids": {
+    "previous": "46244075451",
+    "selected": "46244081963",
+    "next": "46244077420"
+  },
+  "status": {
+    "staleFinished": {
+      "enable_auto_button": 1,
+      "auto_attack": 1,
+      "attacking": 0,
+      "finish": 1,
+      "battle_end": 1,
+      "already_finish": 1,
+      "attackQueue": { "attackButtonPushed": 0 }
+    },
+    "loading": {
+      "enable_auto_button": 0,
+      "auto_attack": 0,
+      "attacking": 0,
+      "finish": 0,
+      "battle_end": 0,
+      "already_finish": 0,
+      "attackQueue": { "attackButtonPushed": 0 }
+    },
+    "ready": {
+      "enable_auto_button": 1,
+      "auto_attack": 0,
+      "attacking": 0,
+      "finish": 0,
+      "battle_end": 0,
+      "already_finish": 0,
+      "attackQueue": { "attackButtonPushed": 0 }
+    }
+  }
+}
