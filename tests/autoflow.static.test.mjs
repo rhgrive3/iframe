@@ -259,7 +259,7 @@ test('MyPage and Safari relief blocks run immediately without battle-end waits',
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 58'));
+  assert.ok(source.includes('const APP_VERSION = 59'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -399,7 +399,7 @@ test('battle performance fully suppresses battle canvas while preserving DOM att
   const child = source.slice(source.indexOf('function installBattlePerformanceRuntime'), source.indexOf('const APP_VERSION'));
   const renderer = child.slice(child.indexOf('function patchRenderMethod'), child.indexOf('function patchRendering'));
   const assets = child.slice(child.indexOf('const shouldReplaceAsset'), child.indexOf('const rewriteAsset'));
-  assert.ok(child.includes('.cnt-raid-stage canvas#canvas { visibility:hidden!important; }'));
+  assert.ok(child.includes('canvas#canvas { visibility:hidden!important; }'));
   assert.ok(child.includes('.cnt-raid > .btn-auto,'));
   assert.ok(child.includes('.cnt-raid #cnt-raid-information .btn-attack-start'));
   assert.ok(renderer.includes('if (battleCanvas(this?.canvas)) return undefined;'));

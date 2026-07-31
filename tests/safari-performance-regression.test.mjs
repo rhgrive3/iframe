@@ -134,7 +134,7 @@ test('the runtime takes its realm as a parameter so both entry points share one 
   assert.match(source, /const doc = win\.document;/);
   assert.match(source, /const loc = win\.location;/);
   assert.match(source, /if \(window\.top !== window\) \{\n    installBattlePerformanceRuntime\(window\);/);
-  assert.match(source, /function readBattlePerformanceAssetSetting\(win = window\)/);
+  assert.match(source, /function readBattlePerformanceStrongSetting\(win = window\)/);
   // no realm-bound global may leak back into the runtime body (comments excluded)
   const body = stripLineComments(source.slice(
     source.indexOf('function installBattlePerformanceRuntime'),
@@ -168,19 +168,23 @@ test('battle detection is resolved on the poll, never inside the hot paths', () 
 });
 
 test('the tier that lies to the game loaders is opt-in and off by default', () => {
-  assert.match(source, /function readBattlePerformanceAssetSetting\(win = window\)/);
-  assert.match(source, /saved\?\.enabled === true && saved\?\.assets === true/);
+  assert.match(source, /function readBattlePerformanceStrongSetting\(win = window\)/);
+  assert.match(source, /saved\?\.enabled === true && \(saved\?\.strong === true \|\| saved\?\.assets === true\)/);
   const body = stripLineComments(source.slice(
     source.indexOf('function installBattlePerformanceRuntime'),
     source.indexOf('if (window.top !== window) {')
   ));
   // asset rewriting and sound method replacement are both gated on the extra tier
-  assert.match(body, /if \(!battleRuntimeActive \|\| !assetsEnabled\) return false;/);
-  assert.match(body, /if \(!enabled \|\| !assetsEnabled \|\| !sound \|\| sound\[SOUND_MARKER\]\) return;/);
-  assert.match(body, /if \(assetsEnabled\) patchImageSources\(\);/);
-  // draw suppression and the stylesheet stay in the safe tier
+  assert.match(body, /if \(!battleRuntimeActive \|\| !aggressiveEnabled\) return false;/);
+  assert.match(body, /if \(!enabled \|\| !aggressiveEnabled \|\| !sound \|\| sound\[SOUND_MARKER\]\) return;/);
+  assert.match(body, /if \(!enabled \|\| !aggressiveEnabled\) return;/);
+  // draw suppression is a strong-tier behaviour too: an invisible battle is
+  // indistinguishable from a broken one, so the safe tier must not touch rendering
   const apply = body.slice(body.indexOf('function applyPatches'), body.indexOf('function stopPoll'));
+  assert.match(apply, /patchImageSources\(\);/);
   assert.match(apply, /patchRendering\(\);/);
+  assert.match(body, /\$\{aggressiveEnabled \? STRONG_STYLE : ''\}/);
+  assert.match(body, /canvas#canvas \{ visibility:hidden!important; \}/);
 });
 
 test('turning the switch off restores the untouched game', () => {
@@ -194,5 +198,34 @@ test('turning the switch off restores the untouched game', () => {
   // applyPatches unwinds everything first, and installs nothing while disabled
   const apply = body.slice(body.indexOf('function applyPatches'), body.indexOf('function stopPoll'));
   assert.match(apply, /restoreAllPatches\(\);/);
-  assert.match(apply, /if \(!enabled\) return;/);
+  assert.match(apply, /if \(!enabled \|\| !aggressiveEnabled\) return;/);
+});
+
+test('a battle that never becomes operable steps the feature down by itself', () => {
+  const watchdog = source.slice(
+    source.indexOf('function checkBattlePerformanceWatchdog'),
+    source.indexOf('function syncBattlePerformanceFrame')
+  );
+  // only does work while the frame is actually sitting on a raid route
+  assert.match(watchdog, /raid\(\?:\[_\/\]\|\$\)/);
+  assert.match(watchdog, /pageBaseReady\(doc\)/);
+  assert.match(watchdog, /SELECTORS\.fullAuto\}, \$\{SELECTORS\.attackStart\}/);
+  assert.match(watchdog, /BATTLE_STALL_TIMEOUT_MS/);
+  assert.match(watchdog, /stepDownBattlePerformance\(/);
+
+  const stepDown = source.slice(
+    source.indexOf('function stepDownBattlePerformance'),
+    source.indexOf('function checkBattlePerformanceWatchdog')
+  );
+  // strong tier goes first, the safe tier only if the strong one was already off
+  assert.match(stepDown, /if \(state\.battlePerformanceAssets\) \{/);
+  assert.match(stepDown, /setBattlePerformanceEnabled\(true, \{ notify: false, assets: false \}\)/);
+  // the safe tier is never clobbered: it cannot be what stalled the battle
+  assert.doesNotMatch(stepDown, /setBattlePerformanceEnabled\(false/);
+  assert.match(stepDown, /if \(state\.battlePerformanceSteppedDown\) return;/);
+  assert.match(stepDown, /'error', 'バトル軽量化'/);
+
+  // the watchdog timer must be registered for teardown
+  assert.match(source, /const battleWatchdogTimer = setInterval\(/);
+  assert.match(source, /addCleanup\(\(\) => clearInterval\(battleWatchdogTimer\)\)/);
 });

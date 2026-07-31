@@ -18,10 +18,10 @@
 
   // Defaults to off for anyone who already has the main switch saved, so an upgrade never
   // silently turns the game-breaking tier on.
-  function readBattlePerformanceAssetSetting(win = window) {
+  function readBattlePerformanceStrongSetting(win = window) {
     try {
       const saved = JSON.parse(win.localStorage.getItem(BATTLE_PERFORMANCE_STORAGE_KEY) || 'null');
-      return saved?.enabled === true && saved?.assets === true;
+      return saved?.enabled === true && (saved?.strong === true || saved?.assets === true);
     } catch {
       return false;
     }
@@ -43,7 +43,7 @@
     // win is, but it is also the only part that can break game logic (sprite sheet frame
     // maths on a 1x1 image, unexpected return types from the sound methods), so it is a
     // separate opt-in and stays off unless asked for.
-    let assetsEnabled = readBattlePerformanceAssetSetting(win);
+    let aggressiveEnabled = readBattlePerformanceStrongSetting(win);
     let destroyed = false;
     let suspended = false;
     let style = null;
@@ -88,7 +88,7 @@
     }
 
     const shouldReplaceAsset = value => {
-      if (!battleRuntimeActive || !assetsEnabled) return false;
+      if (!battleRuntimeActive || !aggressiveEnabled) return false;
       const url = String(value ?? '');
       return /\/sp\/cjs\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/raid\/bg\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
@@ -104,15 +104,18 @@
       return value;
     };
 
-    function ensureStyle() {
-      if (!style || !style.isConnected) {
-        style = doc.getElementById(BATTLE_PERFORMANCE_STYLE_ID) || doc.createElement('style');
-        style.id = BATTLE_PERFORMANCE_STYLE_ID;
-        style.textContent = `
+    // Hiding the battle canvas makes the fight invisible, which is indistinguishable from a
+    // broken battle. It belongs to the strong tier, not to the tier that is safe to leave on.
+    const STRONG_STYLE = `
+      .cnt-raid-stage canvas#canvas { visibility:hidden!important; }
+    `;
+
+    function styleText() {
+      return `
           .cnt-raid-stage .prt-bg-stage-distant,
           .cnt-raid-stage .prt-bg-effect-brightness,
           .cnt-raid-stage .prt-bg-effect-color { background-image:none!important; }
-          .cnt-raid-stage canvas#canvas { visibility:hidden!important; }
+          ${aggressiveEnabled ? STRONG_STYLE : ''}
           .cnt-raid > .btn-auto,
           .cnt-raid #cnt-raid-information .btn-attack-start {
             visibility:visible!important;
@@ -135,10 +138,19 @@
             transition-delay:0s!important;
           }
         `;
+    }
+
+    function ensureStyle() {
+      if (!style || !style.isConnected) {
+        style = doc.getElementById(BATTLE_PERFORMANCE_STYLE_ID) || doc.createElement('style');
+        style.id = BATTLE_PERFORMANCE_STYLE_ID;
         const parent = doc.head || doc.documentElement;
         if (parent && !style.isConnected) parent.append(style);
       }
-      if (style) style.disabled = !enabled;
+      if (!style) return;
+      const text = styleText();
+      if (style.textContent !== text) style.textContent = text;
+      style.disabled = !enabled;
     }
 
     function rewriteManifestItem(item) {
@@ -210,7 +222,7 @@
       // module survives in the RequireJS cache across route changes, so an instance-local
       // guard would let a re-created runtime wrap the already-wrapped methods and then
       // "restore" them to the wrappers.
-      if (!enabled || !assetsEnabled || !sound || sound[SOUND_MARKER]) return;
+      if (!enabled || !aggressiveEnabled || !sound || sound[SOUND_MARKER]) return;
       const loadMethods = ['loadSound', 'loadBGM', 'loadSE', 'loadVoice'];
       const noOpMethods = [
         'playSound', 'playBGM', 'playSE', 'playVoice', 'playBattleReadySE', 'playAssistSE',
@@ -328,8 +340,8 @@
     function patchNow() {
       refreshBattleRuntimeFlag();
       ensureStyle();
-      try { patchRendering(); } catch {}
-      if (assetsEnabled) {
+      if (aggressiveEnabled) {
+        try { patchRendering(); } catch {}
         try { patchLoadQueue(); } catch {}
       }
       if (battleRuntimeActive) {
@@ -343,8 +355,10 @@
     // natives so toggling never stacks or strands a wrapper.
     function applyPatches() {
       restoreAllPatches();
-      if (!enabled) return;
-      if (assetsEnabled) patchImageSources();
+      if (!enabled || !aggressiveEnabled) return;
+      // Everything below reaches into the game's own rendering and loading. None of it runs
+      // unless the strong tier is explicitly on.
+      patchImageSources();
       patchRendering();
     }
 
@@ -361,10 +375,10 @@
       }, 100);
     }
 
-    function setEnabled(next, nextAssets = assetsEnabled) {
+    function setEnabled(next, nextAssets = aggressiveEnabled) {
       if (destroyed) return;
       enabled = Boolean(next);
-      assetsEnabled = Boolean(nextAssets);
+      aggressiveEnabled = Boolean(nextAssets);
       if (suspended) return;
       ensureStyle();
       applyPatches();
@@ -387,7 +401,7 @@
     };
     const onStorage = event => {
       if (event.key !== BATTLE_PERFORMANCE_STORAGE_KEY) return;
-      setEnabled(readBattlePerformanceSetting(win), readBattlePerformanceAssetSetting(win));
+      setEnabled(readBattlePerformanceSetting(win), readBattlePerformanceStrongSetting(win));
     };
     // Back-forward cache: the very same doc can come back. Fully tearing down there
     // used to leave the prototype patches installed with no runtime key, so the next
@@ -439,7 +453,7 @@
     // instead of re-running the patchers and doubling them up.
     win[BATTLE_PERFORMANCE_RUNTIME_KEY] = {
       get enabled() { return enabled; },
-      get assetsEnabled() { return assetsEnabled; },
+      get aggressiveEnabled() { return aggressiveEnabled; },
       get suspended() { return suspended; },
       setEnabled,
       refresh: patchNow,
@@ -469,7 +483,7 @@
     return;
   }
 
-  const APP_VERSION = 58;
+  const APP_VERSION = 59;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -488,6 +502,8 @@
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
   const MAX_WORKFLOW_RESTARTS = 10_000;
+  const BATTLE_STALL_TIMEOUT_MS = 12_000;
+  const BATTLE_WATCHDOG_INTERVAL_MS = 1_000;
   const WORKFLOW_YIELD_INTERVAL = 64;
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
@@ -1310,13 +1326,13 @@
             </div>
             <label class="settingToggle" for="battlePerformanceToggle">
               <input id="battlePerformanceToggle" type="checkbox">
-              <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、WebGL描画とバトル音声を止め、表示専用演出を最短化します。バトルロジックとタイムラインは維持します。</small></span>
+              <span class="settingToggleCopy"><strong>バトル軽量化・高速化（安全）</strong><small>バトル背景画像を外し、カットインなど表示専用の演出を最短化し、ゲーム標準の設定で音声を止めます。ゲームの描画処理と読込処理には一切手を触れないため、バトルは今まで通り表示され操作できます。</small></span>
             </label>
             <label class="settingToggle" for="battlePerformanceAssetToggle">
               <input id="battlePerformanceAssetToggle" type="checkbox">
-              <span class="settingToggleCopy"><strong>アセット差し替え（強力・実験的）</strong><small>CJS画像・背景・敵画像の取得を透明データへ置換し、音声モジュールの読込と再生を無効化します。メモリ削減は最大ですが、ゲーム側の画像サイズ計算や戻り値の前提を崩すため、バトルが進まなくなる場合はOFFにしてください。</small></span>
+              <span class="settingToggleCopy"><strong>強力モード（実験的・バトル画面は表示されません）</strong><small>バトルcanvasを非表示にして描画処理そのものを止め、CJS画像・背景・敵画像の取得を透明データへ置換し、音声モジュールを無効化します。メモリ削減は最大ですが、ゲーム側の描画・読込処理に介入するため不具合が出る場合があります。バトルが12秒たっても操作可能にならなければ自動でOFFに戻ります。</small></span>
             </label>
-            <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映します。上のスイッチだけなら描画停止と演出短縮のみで、ゲームの読み込み処理には手を触れません。アセット差し替えは次回のページ読込から完全に適用され、OFFに戻すと省略済みの画像は再読込後に復元されます。</div>
+            <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映します。上のスイッチだけならCSSによる演出抑制と音声OFFのみで、ゲームのJavaScriptには一切介入しません。強力モードは次回のページ読込から完全に適用され、OFFに戻すと省略済みの画像は再読込後に復元されます。どちらもOFFにすると、書き換えたブラウザ機能は即座に元の状態へ戻します。</div>
           </article>
         </section>
       </div>
@@ -1399,11 +1415,13 @@
     frameGeneration: 0,
     frameNavigationId: 0,
     battlePerformanceEnabled: readBattlePerformanceSetting(),
-    battlePerformanceAssets: readBattlePerformanceAssetSetting(),
+    battlePerformanceAssets: readBattlePerformanceStrongSetting(),
+    battlePerformanceSteppedDown: false,
     battlePerformanceFailure: null,
     battlePerformanceReported: null
   };
 
+  let battleStallSince = 0;
   const cleanup = new Set();
   const frameLifecycleSubscribers = new Set();
   const addCleanup = fn => (cleanup.add(fn), fn);
@@ -1483,6 +1501,50 @@
     appendLog(`バトル軽量化ランタイムを注入できませんでした: ${reason}`, 'error', 'バトル軽量化');
   }
 
+  // A battle that never becomes operable while the lightening is on is indistinguishable
+  // from a hung game, and nobody should have to open a Web Inspector to get out of it.
+  // Step the feature down one tier and say so; the next battle runs without it.
+  function stepDownBattlePerformance(reason) {
+    if (state.battlePerformanceAssets) {
+      state.battlePerformanceSteppedDown = true;
+      appendLog(`${reason}ため強力モードを自動でOFFにしました`, 'error', 'バトル軽量化');
+      toast('バトルが開始しないため強力モードをOFFにしました');
+      setBattlePerformanceEnabled(true, { notify: false, assets: false });
+      return;
+    }
+    // The safe tier is CSS plus the game's own mute switches, so it cannot be what stalled
+    // the battle. Say so once and leave the setting alone rather than clobbering it.
+    if (state.battlePerformanceSteppedDown) return;
+    state.battlePerformanceSteppedDown = true;
+    appendLog(`${reason}が、軽量化は演出抑制のみのため設定は変更しません`, 'error', 'バトル軽量化');
+  }
+
+  function checkBattlePerformanceWatchdog() {
+    if (state.destroyed || !state.battlePerformanceEnabled) {
+      battleStallSince = 0;
+      return;
+    }
+    if (!/(?:#|\/)raid(?:[_/]|$)/i.test(currentFrameUrl())) {
+      battleStallSince = 0;
+      return;
+    }
+    let doc;
+    try { doc = frameDocument(); } catch { battleStallSince = 0; return; }
+    if (!pageBaseReady(doc)) { battleStallSince = 0; return; }
+    if (doc.querySelector(`${SELECTORS.fullAuto}, ${SELECTORS.attackStart}`)) {
+      battleStallSince = 0;
+      state.battlePerformanceSteppedDown = false;
+      return;
+    }
+    if (!battleStallSince) {
+      battleStallSince = performance.now();
+      return;
+    }
+    if (performance.now() - battleStallSince < BATTLE_STALL_TIMEOUT_MS) return;
+    battleStallSince = 0;
+    stepDownBattlePerformance('バトル画面が操作可能にならなかった');
+  }
+
   function syncBattlePerformanceFrame() {
     try {
       const win = iframe.contentWindow;
@@ -1514,6 +1576,7 @@
       localStorage.setItem(BATTLE_PERFORMANCE_STORAGE_KEY, JSON.stringify({
         version: 1,
         enabled: state.battlePerformanceEnabled,
+        strong: state.battlePerformanceAssets,
         assets: state.battlePerformanceAssets,
         updatedAt: Date.now()
       }));
@@ -1529,7 +1592,7 @@
     if (notify) {
       if (!state.battlePerformanceEnabled) toast('バトル軽量化・高速化をOFFにしました');
       else if (state.battlePerformanceAssets !== previousAssets) {
-        toast(state.battlePerformanceAssets ? 'アセット差し替えをONにしました' : 'アセット差し替えをOFFにしました');
+        toast(state.battlePerformanceAssets ? '強力モードをONにしました' : '強力モードをOFFにしました');
       } else toast('バトル軽量化・高速化をONにしました');
     }
     return true;
@@ -8000,6 +8063,10 @@
     saveLegacyState();
   };
   window.addEventListener('pagehide', pageHideHandler);
+  const battleWatchdogTimer = setInterval(() => {
+    try { checkBattlePerformanceWatchdog(); } catch {}
+  }, BATTLE_WATCHDOG_INTERVAL_MS);
+  addCleanup(() => clearInterval(battleWatchdogTimer));
   addCleanup(() => {
     window.removeEventListener('resize', resizeHandler);
     window.visualViewport?.removeEventListener('resize', resizeHandler);
