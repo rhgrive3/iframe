@@ -485,6 +485,9 @@
   const WORKFLOW_HANDOFF_TTL_MS = 5 * 60_000;
   const WORKFLOW_HANDOFF_READY_TIMEOUT_MS = 45_000;
   const WORKFLOW_HANDOFF_POLL_MS = 100;
+  const WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS = 30_000;
+  const GESTURE_HANDOFF_REMINDER_MS = 2400;
+  const GESTURE_HANDOFF_EVENTS = Object.freeze(['pointerup', 'touchend', 'click']);
   const MAX_REPEAT_COUNT = 10_000;
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
@@ -7053,7 +7056,7 @@
     if (fragmentOnly) setTimeout(() => { try { location.reload(); } catch {} }, 0);
   }
 
-  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null, level = 'warn') {
+  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null) {
     const fallback = {
       ...handoff,
       targetName: `${handoff.targetName}-same-${nowId('tab')}`,
@@ -7067,7 +7070,7 @@
       throw new FlowError(`同一タブ用の進行内容を保存できませんでした${detail}`, 'HANDOFF_FALLBACK_SAVE_FAILED');
     }
     window.name = fallback.targetName;
-    appendLog(reason, level, '親ページ再起動');
+    appendLog(reason, 'warn', '親ページ再起動');
     setStatus('進行を保存して親ページを再起動');
     try { replaceParentLocation(fallback.parentUrl); }
     catch (error) {
@@ -7076,6 +7079,69 @@
       throw new FlowError(`親ページを再起動できませんでした: ${error.message}`, 'HANDOFF_NAVIGATION_FAILED');
     }
     return new Promise(() => {});
+  }
+
+  function openWorkflowHandoffTab(handoff) {
+    try { return window.open(handoff.parentUrl, handoff.targetName) || null; }
+    catch { return null; }
+  }
+
+  function scriptedTabOpenAllowed() {
+    // Only WebKit puts a confirmation sheet in front of a scripted pop-up. Android and
+    // desktop open it silently, so never gate the direct call there.
+    if (!isIosLikeBrowser()) return true;
+    const activation = navigator.userActivation;
+    return typeof activation?.isActive === 'boolean' ? activation.isActive : false;
+  }
+
+  function gestureHandoffTargets() {
+    const targets = [window];
+    try {
+      const frameWindow = iframe.contentWindow;
+      if (frameWindow && frameWindow !== window && new URL(frameWindow.location.href).origin === location.origin) {
+        targets.push(frameWindow);
+      }
+    } catch {}
+    return targets;
+  }
+
+  function awaitGestureHandoffTab(handoff, signal) {
+    return new Promise(resolve => {
+      const targets = gestureHandoffTargets();
+      let settled = false;
+      let timer = null;
+      let reminder = null;
+      const settle = value => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearInterval(reminder);
+        signal?.removeEventListener('abort', onAbort);
+        for (const target of targets) {
+          for (const type of GESTURE_HANDOFF_EVENTS) {
+            try { target.removeEventListener(type, onGesture, true); } catch {}
+          }
+        }
+        resolve(value);
+      };
+      const onGesture = event => {
+        if (!event?.isTrusted) return;
+        const opened = openWorkflowHandoffTab(handoff);
+        if (opened) settle(opened);
+      };
+      const onAbort = () => settle(null);
+      const remind = () => toast('新しいタブへ移ります。コントローラーを1回タップしてください');
+      for (const target of targets) {
+        for (const type of GESTURE_HANDOFF_EVENTS) {
+          try { target.addEventListener(type, onGesture, true); } catch {}
+        }
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+      setStatus('タップ待ち（新しいタブを開きます）');
+      remind();
+      reminder = setInterval(remind, GESTURE_HANDOFF_REMINDER_MS);
+      timer = setTimeout(() => settle(null), WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS);
+    });
   }
 
   async function beginWorkflowParentRestart(context) {
@@ -7089,19 +7155,14 @@
       throw new FlowError('進行内容を保存できないため、親ページを再起動しませんでした', 'HANDOFF_SAVE_FAILED');
     }
 
-    // iOS/iPadOS ask the user to allow every scripted pop-up, and that prompt stalls
-    // the run until somebody taps it. Restart in place instead of asking.
-    if (isIosLikeBrowser()) {
-      return continueWorkflowInCurrentTab(
-        handoff,
-        'iOSではポップアップ確認が挟まるため、新規タブを使わず同じタブを完全再起動します',
-        null,
-        ''
-      );
+    let opened = scriptedTabOpenAllowed() ? openWorkflowHandoffTab(handoff) : null;
+    if (!opened && isIosLikeBrowser()) {
+      // iOS/iPadOS confirm every pop-up a script opens without user activation, and the
+      // run sits behind that sheet until somebody taps it. Never make that call blind:
+      // window.open from inside a trusted tap opens the tab with no confirmation at all.
+      opened = await awaitGestureHandoffTab(handoff, context.signal);
+      throwIfAborted(context.signal);
     }
-
-    let opened = null;
-    try { opened = window.open(handoff.parentUrl, handoff.targetName); } catch {}
     if (!opened) {
       return continueWorkflowInCurrentTab(
         handoff,
