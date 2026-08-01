@@ -1117,13 +1117,14 @@
         height:var(--dock-height,38vh);height:var(--dock-height,38dvh);
         max-width:82vw;max-width:82dvw;max-height:48vh;max-height:48dvh;border-radius:14px
       }
-      #dock.androidCompact{font-size:12.3px}
+      #dock.compact.androidCompact{width:124px;height:58px;border-radius:29px}
+      #dock.androidCompact{font-size:7.4px}
       #dock.androidCompact #dockHeader{gap:5px;min-height:41px;padding:6px 8px}
-      #dock.androidCompact .title strong{font-size:11.7px}
-      #dock.androidCompact .title small{font-size:9.2px}
-      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:29px;height:29px;min-height:29px;font-size:14.5px}
+      #dock.androidCompact .title strong{font-size:7px}
+      #dock.androidCompact .title small{font-size:5.5px}
+      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:17px;height:17px;min-height:17px;font-size:8.7px}
       #dock.androidCompact #mainTabs{gap:3px;padding:6px 8px}
-      #dock.androidCompact .tabIcon{width:15px;height:15px;font-size:12px}
+      #dock.androidCompact .tabIcon{width:9px;height:9px;font-size:7.2px}
       @media(forced-colors:active){
         #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
         .blockCard::before,.paletteButton::after{width:5px}
