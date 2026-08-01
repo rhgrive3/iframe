@@ -1468,6 +1468,14 @@
     const mobileHint = navigator.userAgentData?.mobile === true || /\bMobile\b/i.test(userAgent);
     return /\bAndroid\b/i.test(userAgent) && mobileHint;
   }
+  function isIosLikeBrowser() {
+    const userAgent = String(navigator.userAgent || '');
+    if (/\b(iPhone|iPod)\b/i.test(userAgent)) return true;
+    if (/\biPad\b/i.test(userAgent)) return true;
+    const touchPoints = Number(navigator.maxTouchPoints || 0);
+    if (/\bMacintosh\b/i.test(userAgent) && touchPoints > 1) return true;
+    return /\b(iPhone|iPad|iPod)\b/i.test(String(navigator.platform || ''));
+  }
   function isNarrowViewport() {
     if (isAndroidPhone()) return true;
     if (window.matchMedia?.('(max-width: 620px)').matches) return true;
@@ -7032,7 +7040,20 @@
     };
   }
 
-  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null) {
+  function replaceParentLocation(targetUrl) {
+    const next = new URL(targetUrl, location.href);
+    const current = new URL(location.href);
+    const fragmentOnly = current.origin === next.origin
+      && current.pathname === next.pathname
+      && current.search === next.search;
+    location.replace(next.href);
+    // A replace that only changes the fragment never reloads the document, so the
+    // parent page would keep its old memory. Force the reload on the next task,
+    // once the fragment navigation has settled.
+    if (fragmentOnly) setTimeout(() => { try { location.reload(); } catch {} }, 0);
+  }
+
+  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null, level = 'warn') {
     const fallback = {
       ...handoff,
       targetName: `${handoff.targetName}-same-${nowId('tab')}`,
@@ -7046,9 +7067,9 @@
       throw new FlowError(`同一タブ用の進行内容を保存できませんでした${detail}`, 'HANDOFF_FALLBACK_SAVE_FAILED');
     }
     window.name = fallback.targetName;
-    appendLog(reason, 'warn', '親ページ再起動');
+    appendLog(reason, level, '親ページ再起動');
     setStatus('進行を保存して親ページを再起動');
-    try { location.replace(fallback.parentUrl); }
+    try { replaceParentLocation(fallback.parentUrl); }
     catch (error) {
       clearWorkflowHandoff(handoff.id);
       window.name = '';
@@ -7066,6 +7087,17 @@
     const handoff = createWorkflowHandoff(context);
     if (!writeWorkflowHandoff(handoff)) {
       throw new FlowError('進行内容を保存できないため、親ページを再起動しませんでした', 'HANDOFF_SAVE_FAILED');
+    }
+
+    // iOS/iPadOS ask the user to allow every scripted pop-up, and that prompt stalls
+    // the run until somebody taps it. Restart in place instead of asking.
+    if (isIosLikeBrowser()) {
+      return continueWorkflowInCurrentTab(
+        handoff,
+        'iOSではポップアップ確認が挟まるため、新規タブを使わず同じタブを完全再起動します',
+        null,
+        ''
+      );
     }
 
     let opened = null;
