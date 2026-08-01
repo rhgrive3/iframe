@@ -674,3 +674,86 @@ test('nested repeat and conditional frames retain exact in-progress state', () =
   assert.ok(source.includes('context.executionState = createWorkflowExecutionState()'));
 });
 
+
+function loadElementPickerTargeting() {
+  const constants = source.slice(
+    source.indexOf('const ELEMENT_PICKER_TARGET_SELECTOR'),
+    source.indexOf('function cssIdentifier')
+  );
+  const helpers = source.slice(
+    source.indexOf('function pickerEventPoint'),
+    source.indexOf('function pickerTargetLabel')
+  );
+  return new Function(
+    'finite',
+    `${constants}\n${helpers}\nreturn { resolvePickerTarget, preferredPickerTarget };`
+  )((value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback));
+}
+
+function fakePickerDocument(width = 360, height = 640) {
+  const doc = {
+    nodeType: 9,
+    defaultView: { innerWidth: width, innerHeight: height },
+    stack: [],
+    elementsFromPoint: () => doc.stack
+  };
+  doc.documentElement = fakePickerElement({ id: 'html', width, height });
+  doc.body = fakePickerElement({ id: 'body', width, height, parent: doc.documentElement });
+  return doc;
+}
+
+function fakePickerElement({ id, width, height, interactive = false, parent = null }) {
+  return {
+    nodeType: 1,
+    id,
+    parentElement: parent,
+    matches: () => interactive,
+    getBoundingClientRect: () => ({ width, height })
+  };
+}
+
+test('element picker keeps the tapped element instead of a screen-sized wrapper', () => {
+  const { preferredPickerTarget } = loadElementPickerTargeting();
+  const doc = fakePickerDocument();
+  const wrapper = fakePickerElement({ id: 'prt-button-list', width: 360, height: 480, interactive: true, parent: doc.body });
+  const leaf = fakePickerElement({ id: 'txt-name', width: 80, height: 24, parent: wrapper });
+  assert.equal(preferredPickerTarget(leaf, doc), leaf);
+});
+
+test('element picker still promotes an inner label to its own button', () => {
+  const { preferredPickerTarget } = loadElementPickerTargeting();
+  const doc = fakePickerDocument();
+  const button = fakePickerElement({ id: 'btn-usual-ok', width: 120, height: 44, interactive: true, parent: doc.body });
+  const label = fakePickerElement({ id: 'label', width: 60, height: 20, parent: button });
+  assert.equal(preferredPickerTarget(label, doc), button);
+});
+
+test('element picker looks past a full-screen overlay to the button under the tap', () => {
+  const { resolvePickerTarget } = loadElementPickerTargeting();
+  const doc = fakePickerDocument();
+  const mask = fakePickerElement({ id: 'mask', width: 360, height: 640, parent: doc.body });
+  const button = fakePickerElement({ id: 'btn-usual-ok', width: 120, height: 44, interactive: true, parent: doc.body });
+  doc.stack = [mask, button, doc.body, doc.documentElement];
+  const event = { clientX: 100, clientY: 420, target: mask };
+  assert.equal(resolvePickerTarget(event, doc), button);
+});
+
+test('element picker resolves touch taps by their touch point', () => {
+  const { resolvePickerTarget } = loadElementPickerTargeting();
+  const doc = fakePickerDocument();
+  const mask = fakePickerElement({ id: 'mask', width: 360, height: 640, parent: doc.body });
+  const row = fakePickerElement({ id: 'lis-raid', width: 360, height: 80, interactive: true, parent: doc.body });
+  doc.stack = [mask, row, doc.body];
+  const event = { touches: [{ clientX: 40, clientY: 90 }], target: mask };
+  assert.equal(resolvePickerTarget(event, doc), row);
+});
+
+test('element picker falls back to the tightest element when everything is oversized', () => {
+  const { resolvePickerTarget } = loadElementPickerTargeting();
+  const doc = fakePickerDocument();
+  const mask = fakePickerElement({ id: 'mask', width: 360, height: 640, parent: doc.body });
+  const panel = fakePickerElement({ id: 'panel', width: 360, height: 400, parent: doc.body });
+  doc.stack = [mask, panel, doc.body, doc.documentElement];
+  const event = { clientX: 300, clientY: 500, target: mask };
+  assert.equal(resolvePickerTarget(event, doc), panel);
+});
