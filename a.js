@@ -3513,6 +3513,10 @@
     'active', 'selected', 'show', 'hide', 'hidden', 'display-on', 'display-off',
     'on', 'off', 'enabled', 'disabled', 'focus', 'hover', 'touch', 'se'
   ]);
+  const ELEMENT_PICKER_MAX_ANCESTOR_CLIMB = 6;
+  const ELEMENT_PICKER_MAX_VIEWPORT_RATIO = 0.55;
+  const ELEMENT_PICKER_MIN_TAP_AREA = 44 * 44;
+  const ELEMENT_PICKER_MAX_AREA_GROWTH = 24;
 
   function cssIdentifier(value, doc = document) {
     const escape = doc.defaultView?.CSS?.escape || window.CSS?.escape;
@@ -3595,9 +3599,71 @@
     throw new FlowError('選択した要素を一意に識別できませんでした', 'PICKER_SELECTOR_NOT_UNIQUE');
   }
 
-  function preferredPickerTarget(raw) {
+  function pickerEventPoint(event) {
+    const source = event?.touches?.[0] || event?.changedTouches?.[0] || event;
+    const x = finite(source?.clientX, NaN);
+    const y = finite(source?.clientY, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x, y };
+  }
+
+  function pickerElementArea(element) {
+    const rect = element?.getBoundingClientRect?.();
+    if (!rect) return 0;
+    return Math.max(0, finite(rect.width, 0)) * Math.max(0, finite(rect.height, 0));
+  }
+
+  function pickerViewportArea(doc) {
+    const view = doc?.defaultView;
+    const width = finite(view?.innerWidth, 0) || finite(doc?.documentElement?.clientWidth, 0);
+    const height = finite(view?.innerHeight, 0) || finite(doc?.documentElement?.clientHeight, 0);
+    return Math.max(1, width * height);
+  }
+
+  function pickerElementIsOversized(element, doc) {
+    return pickerElementArea(element) > pickerViewportArea(doc) * ELEMENT_PICKER_MAX_VIEWPORT_RATIO;
+  }
+
+  function pickerEventTarget(event) {
+    const path = event?.composedPath?.();
+    const composed = Array.isArray(path) ? path.find(node => node?.nodeType === 1) : null;
+    const target = composed || event?.target;
+    return target?.nodeType === 1 ? target : null;
+  }
+
+  function pickerHitTarget(doc, point, fallback = null) {
+    if (!doc || !point || typeof doc.elementsFromPoint !== 'function') return fallback;
+    let stack;
+    try { stack = doc.elementsFromPoint(point.x, point.y); } catch { return fallback; }
+    const candidates = [...(stack || [])].filter(node =>
+      node?.nodeType === 1 && node !== doc.body && node !== doc.documentElement
+    );
+    if (!candidates.length) return fallback;
+    const precise = candidates.find(node => !pickerElementIsOversized(node, doc));
+    if (precise) return precise;
+    return candidates.reduce((smallest, node) =>
+      pickerElementArea(node) < pickerElementArea(smallest) ? node : smallest
+    );
+  }
+
+  function preferredPickerTarget(raw, doc = raw?.ownerDocument) {
     if (!raw || raw.nodeType !== 1) return null;
-    return raw.closest?.(ELEMENT_PICKER_TARGET_SELECTOR) || raw;
+    if (raw.matches?.(ELEMENT_PICKER_TARGET_SELECTOR)) return raw;
+    const baseArea = Math.max(pickerElementArea(raw), ELEMENT_PICKER_MIN_TAP_AREA);
+    let current = raw.parentElement;
+    for (let depth = 0; current?.nodeType === 1 && depth < ELEMENT_PICKER_MAX_ANCESTOR_CLIMB; depth++) {
+      if (current === doc?.body || current === doc?.documentElement) break;
+      if (pickerElementIsOversized(current, doc)) break;
+      if (pickerElementArea(current) > baseArea * ELEMENT_PICKER_MAX_AREA_GROWTH) break;
+      if (current.matches?.(ELEMENT_PICKER_TARGET_SELECTOR)) return current;
+      current = current.parentElement;
+    }
+    return raw;
+  }
+
+  function resolvePickerTarget(event, doc) {
+    const raw = pickerHitTarget(doc, pickerEventPoint(event), pickerEventTarget(event));
+    return preferredPickerTarget(raw, doc);
   }
 
   function pickerTargetLabel(target) {
@@ -3684,7 +3750,7 @@
 
     const preview = event => {
       if (picker.finishing || state.elementPicker !== picker) return;
-      const target = preferredPickerTarget(event.target);
+      const target = resolvePickerTarget(event, doc);
       if (!target) return;
       highlightElementPickerTarget(target, picker);
       ui.elementPickerHint.textContent = `選択候補: ${pickerTargetLabel(target)}`;
@@ -3692,7 +3758,7 @@
     const choose = event => {
       suppressElementPickerEvent(event);
       if (picker.finishing || state.elementPicker !== picker) return;
-      const target = preferredPickerTarget(event.target);
+      const target = resolvePickerTarget(event, doc);
       if (!target) {
         ui.elementPickerHint.textContent = 'HTML要素を選択できませんでした。別の位置をタップしてください。';
         return;
@@ -3709,6 +3775,7 @@
         }
         const label = pickerTargetLabel(target);
         picker.finishing = true;
+        highlightElementPickerTarget(target, picker);
         updateBlockConfig(location.block, config => {
           config.selector = selector;
           config.targetLabel = label;
