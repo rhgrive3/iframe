@@ -17,7 +17,7 @@ const SELECTORS = Object.freeze({
   popupOk: '.prt-popup-footer > .btn-usual-ok',
   unclaimedList: '#prt-unclaimed-list',
   unclaimedRows: '#prt-unclaimed-list > .btn-multi-raid.lis-raid[data-href^="result_multi/"]',
-  battleScreen: '.cnt-raid-stage.multi',
+  battleScreen: '.cnt-raid-stage',
   battleResult: '.prt-command-end .btn-result',
   battleEndNotice: '#pop .prt-rematch-fail, #pop-force .prt-rematch-fail, .txt-rematch-fail',
   fullAuto: '.btn-auto',
@@ -268,8 +268,12 @@ const state = {
   expectedBattleRaidId: ''
 };
 
+const battleResultUrlPattern = source.match(/const BATTLE_RESULT_URL_PATTERN = (\/.+\/[a-z]*);/);
+assert.ok(battleResultUrlPattern, 'missing production constant: BATTLE_RESULT_URL_PATTERN');
+
 const sandbox = vm.createContext({
   SELECTORS,
+  BATTLE_RESULT_URL_PATTERN: vm.runInNewContext(battleResultUrlPattern[1]),
   state,
   BATTLE_END_MESSAGE: '敵が倒されたため、このバトルは終了しました。',
   DEFAULT_STABLE_MS: 140,
@@ -288,6 +292,7 @@ for (const name of [
   'computedVisible',
   'hiddenOrAbsent',
   'popupInfo',
+  'isBattleResultUrl',
   'detectScreenState',
   'safeDetectScreenState',
   'expectedScreenMatches',
@@ -547,4 +552,57 @@ test('a different raid/status object cannot inherit the armed identity of the pr
   setFrame(nextDoc, `https://game.granbluefantasy.jp/#raid_multi/${fixture.raids.next}`);
   assert.equal(sandbox.battleRuntimeState(nextDoc).available, false);
   assert.equal(sandbox.detectBattleEndState(nextDoc), null);
+});
+
+test('single battles are classified and recovered exactly like multi battles', () => {
+  const singleRaidId = fixture.raids.selected;
+  const singleBattleUrl = `https://game.granbluefantasy.jp/#raid/${singleRaidId}`;
+  const singleResultUrl = `https://game.granbluefantasy.jp/#result/${singleRaidId}`;
+
+  resetRuntime(singleRaidId);
+  const doc = battleDocument({
+    raidId: singleRaidId,
+    status: clone(fixture.status.ready),
+    autoClasses: [],
+    attackClasses: ['display-on']
+  });
+  setFrame(doc, singleBattleUrl);
+  // ここが .cnt-raid-stage.multi のままだと BATTLE にならず、読込待ちが永遠に終わらない。
+  assert.equal(sandbox.detectScreenState(doc).type, 'BATTLE');
+  assert.equal(sandbox.expectedScreenMatches('battle', doc), true);
+  assert.equal(sandbox.expectedScreenMatches('any', doc), true);
+
+  const resultDoc = new FakeDocument();
+  setFrame(resultDoc, singleResultUrl);
+  assert.equal(sandbox.detectScreenState(resultDoc).type, 'RESULT');
+  assert.equal(sandbox.expectedScreenMatches('result', resultDoc), true);
+  assert.equal(sandbox.recoverableBattleEndState()?.type, 'RESULT');
+
+  // raid_id を取らない result/* ルートは戦闘結果ではない
+  for (const url of [
+    'https://game.granbluefantasy.jp/#result/quest/',
+    'https://game.granbluefantasy.jp/#result/scene/1234/0',
+    `https://game.granbluefantasy.jp/#result/detail/${singleRaidId}/1`,
+    `https://game.granbluefantasy.jp/#result_multi/detail/${singleRaidId}/1`
+  ]) {
+    assert.equal(sandbox.isBattleResultUrl(url), false, url);
+  }
+  for (const url of [
+    singleResultUrl,
+    fixture.urls.result,
+    `https://game.granbluefantasy.jp/#result/${singleRaidId}/1`,
+    `https://game.granbluefantasy.jp/#result_multi/${singleRaidId}/1/0`
+  ]) {
+    assert.equal(sandbox.isBattleResultUrl(url), true, url);
+  }
+
+  // 結果URLへ遷移した後は、ステージ要素が残っていてもBATTLEとは見なさない
+  const lingering = battleDocument({
+    raidId: singleRaidId,
+    status: clone(fixture.status.staleFinished),
+    autoClasses: [],
+    attackClasses: []
+  });
+  setFrame(lingering, singleResultUrl);
+  assert.equal(sandbox.detectScreenState(lingering).type, 'RESULT');
 });
