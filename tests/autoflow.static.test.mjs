@@ -653,9 +653,29 @@ test('parent-page restart handoff persists ownership and safe fallbacks', () => 
   assert.ok(handoff.includes('handoff.claimedBy && handoff.claimedBy !== instanceId'));
   assert.ok(handoff.includes('window.open(handoff.parentUrl, handoff.targetName)'));
   assert.ok(handoff.includes("phase: 'committed',\n      mode: 'same-tab'"));
-  assert.ok(handoff.includes('location.replace(fallback.parentUrl)'));
+  assert.ok(handoff.includes('replaceParentLocation(fallback.parentUrl)'));
   assert.ok(handoff.includes("location.replace('about:blank')"));
   assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
+});
+
+test('iOS restarts the parent in place instead of triggering the pop-up prompt', () => {
+  const detect = source.slice(source.indexOf('function isIosLikeBrowser'), source.indexOf('function isNarrowViewport'));
+  assert.ok(detect.includes('/\\b(iPhone|iPod)\\b/i.test(userAgent)'));
+  assert.ok(detect.includes('/\\biPad\\b/i.test(userAgent)'));
+  assert.ok(detect.includes("/\\bMacintosh\\b/i.test(userAgent) && touchPoints > 1"));
+
+  const restart = source.slice(source.indexOf('async function beginWorkflowParentRestart'), source.indexOf('async function resumeClaimedWorkflowHandoff'));
+  assert.ok(restart.includes('if (isIosLikeBrowser()) {'));
+  assert.ok(restart.indexOf('isIosLikeBrowser()') < restart.indexOf('window.open(handoff.parentUrl'));
+  assert.ok(restart.includes('continueWorkflowInCurrentTab('));
+});
+
+test('same-tab parent restart forces a reload when only the fragment changes', () => {
+  const replace = source.slice(source.indexOf('function replaceParentLocation'), source.indexOf('async function continueWorkflowInCurrentTab'));
+  assert.ok(replace.includes('current.pathname === next.pathname'));
+  assert.ok(replace.includes('current.search === next.search'));
+  assert.ok(replace.includes('location.replace(next.href)'));
+  assert.ok(replace.includes('if (fragmentOnly) setTimeout(() => { try { location.reload(); } catch {} }, 0)'));
 });
 
 test('workflow cursor resumes after the restart block without replaying it', () => {
