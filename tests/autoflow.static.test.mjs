@@ -68,10 +68,13 @@ test('Granblue screen and action selectors remain stable', () => {
     '#prt-search-list > .btn-multi-raid.lis-raid.search',
     '#cnt-quest.cnt-quest.supporter_raid',
     '.pop-deck.supporter_raid .prt-btn-deck > .btn-usual-ok.se-quest-start',
-    '.cnt-raid-stage.multi',
+    '.cnt-raid-stage',
     '.btn-auto',
     '.btn-attack-start'
   ]) assert.ok(source.includes(selector), `missing selector: ${selector}`);
+  // シングルバトルも同じステージ要素なので、種別クラスで絞ってはいけない
+  assert.ok(!source.includes('.cnt-raid-stage.multi'));
+  assert.ok(source.includes("battleScreen: '.cnt-raid-stage',"));
 });
 
 test('known Granblue failure states retain explicit messages', () => {
@@ -157,7 +160,7 @@ test('runtime hot paths avoid redundant document scans', () => {
   assert.ok(!running.includes("querySelectorAll('.blockCard.running')"));
   assert.ok(!running.includes("querySelectorAll('.progressBadge')"));
   const battleEnd = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
-  assert.ok(battleEnd.includes("url.includes('result_multi/')"));
+  assert.ok(battleEnd.includes('isBattleResultUrl(url)'));
   assert.ok(!battleEnd.includes('detectScreenState(doc)'));
 });
 
@@ -318,7 +321,7 @@ test('battle result redirects recover from attack waits and explicit reload bloc
     source.indexOf('function visibleMyPageButton')
   );
   assert.ok(recovery.includes('state.expectedBattleRaidId'));
-  assert.ok(recovery.includes("url.includes('result_multi/')"));
+  assert.ok(recovery.includes('isBattleResultUrl(url)'));
 
   const attackWait = source.slice(source.indexOf('async function waitForAutoAttack'));
   assert.ok(attackWait.includes('rememberBattleRecoveryConfig(config)'));
@@ -362,7 +365,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 67'));
+  assert.ok(source.includes('const APP_VERSION = 68'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -599,7 +602,7 @@ test('every battle-end surface is gated by an armed live battle session', () => 
   assert.ok(assistTap.includes('resetBattleEndDetection({ expectedRaidId: raidId })'));
   const gateIndex = detector.indexOf('if (!battleEndDetectionMatches(runtime)) return null;');
   assert.ok(gateIndex >= 0);
-  assert.ok(gateIndex < detector.indexOf("url.includes('result_multi/')"));
+  assert.ok(gateIndex < detector.indexOf('isBattleResultUrl(url)'));
   assert.ok(gateIndex < detector.indexOf('runtime.finished'));
   assert.ok(gateIndex < detector.indexOf('const notice ='));
   assert.ok(gateIndex < detector.indexOf('const resultButton ='));

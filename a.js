@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 67;
+  const APP_VERSION = 68;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -530,7 +530,9 @@
     unclaimedList: '#prt-unclaimed-list',
     unclaimedRows: '#prt-unclaimed-list > .btn-multi-raid.lis-raid[data-href^="result_multi/"]',
     assistReturn: '#btn-link-quest-assist',
-    battleScreen: '.cnt-raid-stage.multi',
+    // マルチ（救援）だけでなくシングル・semiのバトルも同じステージ要素を使うため、
+    // .multi のような種別クラスは条件に含めない。
+    battleScreen: '.cnt-raid-stage',
     battleResult: '.prt-command-end .btn-result',
     battleEndNotice: '#pop .prt-rematch-fail, #pop-force .prt-rematch-fail, .txt-rematch-fail',
     fullAuto: '.btn-auto',
@@ -4213,6 +4215,14 @@
     return { type, text, rawText: String(body?.textContent || '').trim(), popup, ok: popup.querySelector(SELECTORS.popupOk) };
   }
 
+  // 戦闘結果は #result/<raid_id>（シングル）と #result_multi/<raid_id>（マルチ）の2種類。
+  // result/scene・result/quest・result/detail などraid_idを取らないルートは対象外。
+  const BATTLE_RESULT_URL_PATTERN = /(?:#|\/)result(?:_multi)?\/\d+/i;
+
+  function isBattleResultUrl(url = currentFrameUrl()) {
+    return BATTLE_RESULT_URL_PATTERN.test(String(url || ''));
+  }
+
   function detectScreenState(doc = frameDocument()) {
     const popup = popupInfo(doc);
     if (popup) return { ...popup, document: doc };
@@ -4225,10 +4235,10 @@
     const assist = doc.querySelector(SELECTORS.assistScreen);
     if (assist) return { type: 'ASSIST_LIST', element: assist, document: doc };
     const battle = doc.querySelector(SELECTORS.battleScreen);
-    if (battle) return { type: 'BATTLE', element: battle, document: doc };
+    if (battle && !isBattleResultUrl()) return { type: 'BATTLE', element: battle, document: doc };
     const myPage = doc.querySelector(SELECTORS.myPageScreen);
     if (myPage) return { type: 'MYPAGE', element: myPage, document: doc };
-    if (currentFrameUrl().includes('result_multi/')) return { type: 'RESULT', document: doc };
+    if (isBattleResultUrl()) return { type: 'RESULT', document: doc };
     return { type: 'UNKNOWN', document: doc };
   }
 
@@ -4283,7 +4293,7 @@
     if (expected === 'supporter') return stateInfo.type === 'SUPPORTER' || stateInfo.type === 'DECK_CONFIRM';
     if (expected === 'unclaimed') return stateInfo.type === 'UNCLAIMED_LIST';
     if (expected === 'battle') return stateInfo.type === 'BATTLE';
-    if (expected === 'result') return stateInfo.type === 'RESULT' || currentFrameUrl().includes('result_multi/');
+    if (expected === 'result') return stateInfo.type === 'RESULT' || isBattleResultUrl();
     if (expected === 'mypage') return stateInfo.type === 'MYPAGE';
     return false;
   }
@@ -5960,7 +5970,7 @@
     if (!battleEndDetectionMatches(runtime)) return null;
 
     const url = currentFrameUrl();
-    if (url.includes('result_multi/')) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
+    if (isBattleResultUrl(url)) return { type: 'RESULT', reason: 'リザルト画面を検出', url };
 
     if (
       runtime.finished
@@ -6014,7 +6024,7 @@
     if (!hasBattleIdentity) return null;
     try {
       const url = currentFrameUrl();
-      if (url.includes('result_multi/')) {
+      if (isBattleResultUrl(url)) {
         return { type: 'RESULT', reason: '戦闘後のリザルト画面を検出', url };
       }
       const screen = safeDetectScreenState();
