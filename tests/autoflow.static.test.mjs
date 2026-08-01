@@ -757,3 +757,101 @@ test('element picker falls back to the tightest element when everything is overs
   const event = { clientX: 300, clientY: 500, target: mask };
   assert.equal(resolvePickerTarget(event, doc), panel);
 });
+
+function loadTapGeometryHelpers() {
+  const constants = source.slice(
+    source.indexOf('const ELEMENT_PICKER_TARGET_SELECTOR'),
+    source.indexOf('function cssIdentifier')
+  );
+  const viability = source.slice(
+    source.indexOf('function pickerTapViability'),
+    source.indexOf('function configuredTargetStatusText')
+  );
+  const computedVisible = source.slice(
+    source.indexOf('function computedVisible'),
+    source.indexOf('function hiddenOrAbsent')
+  );
+  const probe = source.slice(
+    source.indexOf('const TARGET_PROBE_STEPS'),
+    source.indexOf('function pointForTarget')
+  );
+  return new Function(
+    'finite',
+    `${constants}\n${computedVisible}\n${probe}\n${viability}\nreturn { probeTargetRect, pickerTapViability };`
+  )((value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback));
+}
+
+// A GranBlue-style button: the div has no width of its own and paints its face
+// through ::after, so hit testing resolves to the div well outside its own box.
+function fakePaintedButton() {
+  const face = { left: 204, right: 324, top: 561, bottom: 603 };
+  const rect = (left, top, right, bottom) => ({
+    left, top, right, bottom, x: left, y: top, width: right - left, height: bottom - top
+  });
+  const doc = {
+    defaultView: {
+      innerWidth: 360,
+      innerHeight: 640,
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' })
+    },
+    elementFromPoint: (x, y) =>
+      (x >= face.left && x <= face.right && y >= face.top && y <= face.bottom ? doc.button : doc.row)
+  };
+  doc.row = {
+    nodeType: 1,
+    isConnected: true,
+    ownerDocument: doc,
+    parentElement: null,
+    contains: node => node === doc.row || node === doc.button,
+    getBoundingClientRect: () => rect(0, 560, 360, 604),
+    getClientRects: () => [rect(0, 560, 360, 604)]
+  };
+  doc.button = {
+    nodeType: 1,
+    isConnected: true,
+    ownerDocument: doc,
+    parentElement: doc.row,
+    style: {},
+    contains: node => node === doc.button,
+    getBoundingClientRect: () => rect(200, 560, 200, 604),
+    getClientRects: () => [rect(200, 560, 200, 604)]
+  };
+  return doc;
+}
+
+test('tap geometry is recovered for buttons that paint outside their own box', () => {
+  const { probeTargetRect } = loadTapGeometryHelpers();
+  const doc = fakePaintedButton();
+  assert.equal(doc.button.getBoundingClientRect().width, 0);
+  const probed = probeTargetRect(doc.button);
+  assert.ok(probed, 'expected the painted area to be recovered');
+  assert.ok(probed.width > 100 && probed.height > 30, `unexpected probe size: ${probed.width}x${probed.height}`);
+  assert.ok(probed.left >= 204 && probed.right <= 324, `probe drifted outside the painted face: ${probed.left}-${probed.right}`);
+});
+
+test('picker reports a painted button as tappable instead of size zero', () => {
+  const { pickerTapViability } = loadTapGeometryHelpers();
+  const doc = fakePaintedButton();
+  const viability = pickerTapViability(doc.button);
+  assert.equal(viability.ok, true);
+  assert.match(viability.reason, /推定/);
+});
+
+test('picker refuses to promote to a zero-area ancestor', () => {
+  assert.ok(source.includes('if (pickerElementArea(current) > 0 && current.matches?.(ELEMENT_PICKER_TARGET_SELECTOR)) return current;'));
+});
+
+test('tap target waiting reports why the button never became tappable', () => {
+  const runtime = source.slice(
+    source.indexOf('function configuredElementState'),
+    source.indexOf('function randomUniform')
+  );
+  assert.ok(runtime.includes("return pending('一致する要素がありません')"));
+  assert.ok(runtime.includes("return pending('要素が非表示です')"));
+  assert.ok(runtime.includes("return pending('要素が無効化されています')"));
+  assert.ok(runtime.includes('if (!probeTargetRect(target)) return pending('));
+  assert.ok(runtime.includes('${label}待ちがタイムアウトしました（${diagnostics.reason}）'));
+  assert.ok(runtime.includes("if (error?.code === 'TIMEOUT') throw timeoutError()"));
+  assert.ok(source.includes('rect = probeTargetRect(target);'));
+  assert.ok(source.includes('現在の画面での状態: ${configuredTargetStatusText(block.config)}'));
+});
