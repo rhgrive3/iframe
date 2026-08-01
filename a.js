@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 66;
+  const APP_VERSION = 67;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -1410,6 +1410,8 @@
     paletteQuery: '',
     dragBlockId: null,
     running: null,
+    handoffResumeId: null,
+    handoffResumeAbandoned: false,
     blockProgress: new Map(),
     collapsed: new Set(),
     legacy: null,
@@ -1799,7 +1801,9 @@
     const workflow = currentWorkflow();
     const screen = safeDetectScreenState();
     const message = error?.message || String(error);
-    const code = String(error?.code || 'UNEXPECTED_ERROR');
+    const code = typeof error?.code === 'string' && error.code
+      ? error.code
+      : (error?.name && error.name !== 'Error' ? error.name : 'UNEXPECTED_ERROR');
     ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / コード: ${code} / 理由: ${message}`;
     ui.error.classList.add('show');
     appendLog(`[${code}] ${workflow?.name || '不明'} / ${screen.type}: ${message}`, 'error', block ? blockLabel(block.type) : '実行');
@@ -1929,11 +1933,11 @@
         return { selector: '', targetLabel: '', timeoutSec: 30 };
       case 'iframeReload':
       case 'iframeBack':
-        return { timeoutSec: 30, expectedScreen: 'auto' };
+        return { timeoutSec: 30 };
       case 'iframeRoute':
-        return { route: '#quest/assist/multi/0', timeoutSec: 30, expectedScreen: 'assist' };
+        return { route: '#quest/assist/multi/0', timeoutSec: 30 };
       case 'iframeReady':
-        return { timeoutSec: 30, expectedScreen: 'auto' };
+        return { timeoutSec: 30 };
       default:
         return {};
     }
@@ -2095,15 +2099,13 @@
       case 'iframeBack':
       case 'iframeReady':
         block.config = {
-          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600),
-          expectedScreen: normalizeExpectedScreen(config.expectedScreen)
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600)
         };
         break;
       case 'iframeRoute':
         block.config = {
           route: String(config.route || '#quest/assist/multi/0').trim(),
-          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600),
-          expectedScreen: normalizeExpectedScreen(config.expectedScreen)
+          timeoutSec: clamp(finite(config.timeoutSec, 30), 1, 600)
         };
         break;
     }
@@ -2928,10 +2930,6 @@
       case 'iframeBack':
       case 'iframeReady': {
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
-        const expected = selectInput(config.expectedScreen, [
-          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面'], ['mypage', 'MyPage']
-        ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
-        grid.append(field('目的画面', expected));
         break;
       }
       case 'iframeRoute': {
@@ -2943,11 +2941,11 @@
         );
         grid.append(field('ゲーム内ルート', route));
         addNumber('タイムアウト（秒）', 'timeoutSec', 1, 600, 1);
-        const expected = selectInput(config.expectedScreen, [
-          ['auto', '自動判定'], ['assist', '救援一覧'], ['supporter', 'サポーター'], ['unclaimed', '未確認'], ['battle', 'バトル'], ['result', '結果画面'], ['mypage', 'MyPage']
-        ], input => updateBlockConfig(block, next => { next.expectedScreen = input.value; }));
-        grid.append(field('目的画面', expected));
-        break;
+        container.append(grid, element('div', {
+          className: 'hint',
+          text: '読込完了だけを待つため、一覧にない画面へ移動しても次のブロックへ進みます。'
+        }));
+        return;
       }
     }
     container.append(grid);
@@ -4279,6 +4277,7 @@
   }
 
   function expectedScreenMatches(expected, doc, stateInfo = detectScreenState(doc)) {
+    if (expected === 'any') return true;
     if (!expected || expected === 'auto') return ['ASSIST_LIST', 'SUPPORTER', 'DECK_CONFIRM', 'UNCLAIMED_LIST', 'BATTLE', 'RESULT', 'MYPAGE'].includes(stateInfo.type);
     if (expected === 'assist') return stateInfo.type === 'ASSIST_LIST';
     if (expected === 'supporter') return stateInfo.type === 'SUPPORTER' || stateInfo.type === 'DECK_CONFIRM';
@@ -5427,6 +5426,15 @@
 
   const MAX_RECENT_RAID_IDS = 128;
   const ASSIST_HANDOFF_POLL_MS = 50;
+  const ASSIST_SLOT_SETTLE_MS = 700;
+  const ASSIST_RETRY_ROUTE = '#quest/assist/multi/0';
+  const MAX_ASSIST_RECOVERY_RELOADS = 10;
+  const ASSIST_SLOT_SETTLE_POLL_MS = 120;
+  const ASSIST_RECOVERABLE_CODES = Object.freeze([
+    'TIMEOUT', 'TARGET_OCCLUDED', 'TARGET_UNSTABLE', 'STALE_TARGET', 'TAP_BUSY',
+    'TARGET_MISSING', 'ASSIST_LIST_MISSING', 'ASSIST_SLOT_MISSING', 'REFRESH_MISSING',
+    'FRAME_UNAVAILABLE', 'NAVIGATION_FAILED'
+  ]);
 
   function recentRaidIdSet(context = state.running) {
     const target = context || state.running;
@@ -5463,14 +5471,33 @@
     ) || null;
   }
 
+  // 一覧が押下直前に差し替わると、押そうとした行が古いDOMのままになったり
+  // ローディング幕に覆われたりして TARGET_OCCLUDED / TARGET_UNSTABLE になる。
+  // その場合は最新のDOMから同じraidIdを取り直して押し直す。
+  const ASSIST_ROW_REBIND_CODES = Object.freeze(['STALE_TARGET', 'TARGET_OCCLUDED', 'TARGET_UNSTABLE', 'TARGET_MISSING']);
+
+  async function waitAssistListPaintable(signal, timeoutMs = 1500) {
+    const deadline = performance.now() + Math.max(0, timeoutMs);
+    while (performance.now() < deadline) {
+      throwIfAborted(signal);
+      let doc;
+      try { doc = frameDocument(); } catch { return false; }
+      if (pageBaseReady(doc)) return true;
+      await abortableDelay(60, signal);
+    }
+    return false;
+  }
+
   async function tapCurrentAssistRow(selected, context, { maxRebinds = 20, fast = false, handoff = false } = {}) {
     const { signal } = context;
     const raidId = String(selected?.raidId || '');
     const label = `救援 ${raidId || selected?.index + 1 || ''}`.trim();
     let target = selected?.row || null;
+    let rebound = false;
 
     for (let rebind = 0; rebind <= maxRebinds; rebind++) {
       throwIfAborted(signal);
+      if (rebound) await waitAssistListPaintable(signal);
       const latest = raidId ? findAssistRowByRaidId(raidId) : null;
       if (latest) target = latest;
       if (!target || !target.isConnected) return false;
@@ -5480,7 +5507,8 @@
         resetBattleEndDetection({ expectedRaidId: raidId });
         return true;
       } catch (error) {
-        if (error?.code !== 'STALE_TARGET') throw error;
+        if (!ASSIST_ROW_REBIND_CODES.includes(error?.code)) throw error;
+        rebound = true;
         target = raidId ? findAssistRowByRaidId(raidId) : null;
         if (!target) return false;
       }
@@ -5518,6 +5546,7 @@
     let sawMutation = false;
     let sawLoading = false;
     let loadingEnded = false;
+    let slotActiveSince = null;
     const observer = new MutationObserver(() => { sawMutation = true; });
     if (!lightweightMode) {
       observer.observe(observationRoot, {
@@ -5538,16 +5567,23 @@
           if (sawLoading && !loadingVisible) loadingEnded = true;
           const reconstructed = Boolean(listNow && listNow !== beforeList);
           const changedSignature = Boolean(!sawMutation && listNow && assistListSignature(listNow) !== beforeSignature);
-          const completed = reconstructed || changedSignature || loadingEnded || sawMutation;
           const slotReady = expectedSlot == null || activeAssistSlot(docNow) === expectedSlot;
+          if (!slotReady || loadingVisible) slotActiveSince = null;
+          else if (slotActiveSince == null) slotActiveSince = performance.now();
+          // 切替先の救援番号にも一覧にも1件も救援が無いと、DOMは何も変化しないため
+          // 「タブが切り替わって読込も終わった」状態が続いたら完了とみなす。
+          const slotSettled = Boolean(expectedSlot != null && slotActiveSince != null
+            && performance.now() - slotActiveSince >= ASSIST_SLOT_SETTLE_MS);
+          const completed = reconstructed || changedSignature || loadingEnded || sawMutation || slotSettled;
           if (!slotReady || !completed || !listNow || loadingVisible) return false;
-          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation };
+          return { list: listNow, reconstructed, changedSignature, loadingEnded, sawMutation, slotSettled };
         }, {
           signal: waitSignal,
           timeoutMs: config.timeoutSec * 1000,
           stableMs: 0,
           description,
-          observeRoots: []
+          observeRoots: [],
+          intervalMs: expectedSlot == null ? null : ASSIST_SLOT_SETTLE_POLL_MS
         }),
         action,
         { signal, cancelMessage }
@@ -6540,23 +6576,39 @@
     const selectedSlots = normalizeAssistSlots(config.assistSlots);
     const cyclesAssistSlots = selectedSlots.length > 1;
     let slotCursor = 0;
+    let consecutiveReloads = 0;
     for (let attempt = 1; attempt <= config.maxAttempts; attempt++) {
       throwIfAborted(signal);
       context.setProgress(`${attempt}回目`);
+      try {
+        const result = await runAssistSelectAttempt(attempt);
+        consecutiveReloads = 0;
+        if (result) return { ...result, attempts: attempt };
+      } catch (error) {
+        if (!isRecoverableAssistError(error)) throw error;
+        if (consecutiveReloads >= MAX_ASSIST_RECOVERY_RELOADS) throw error;
+        consecutiveReloads += 1;
+        if (!await reloadAssistListForRetry(config, context, error)) consecutiveReloads = 0;
+      }
+    }
+    throw new FlowError('救援参加の最大再試行回数に達しました', 'ASSIST_MAX_ATTEMPTS');
+
+    // 1回分の試行。参戦できたときだけ結果を返し、やり直したいときは null を返す。
+    async function runAssistSelectAttempt(attempt) {
       const current = detectScreenState();
       if (current.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
       if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(current.type)) {
         await recoverKnownPopup(current, refreshConfig, context);
-        continue;
+        return null;
       }
       if (current.type === 'UNCLAIMED_LIST') {
         await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
-        continue;
+        return null;
       }
       if (current.type === 'BATTLE') {
         const runtime = battleRuntimeState();
         rememberRecentRaidId(context, runtime.raidId || state.expectedBattleRaidId);
-        return { attempts: attempt, alreadyInBattle: true };
+        return { alreadyInBattle: true };
       }
       if (current.type !== 'ASSIST_LIST') {
         await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist' });
@@ -6567,35 +6619,39 @@
       const rows = [...doc.querySelectorAll(SELECTORS.assistRows)];
       const ranked = rankAssistRows(rows, hpThreshold, hpComparison)
         .filter(item => !wasRecentRaidId(context, item.raidId));
-      if (cyclesAssistSlots && !selectedSlots.includes(activeAssistSlot(doc))) {
+      const activeSlot = activeAssistSlot(doc);
+      // 再読み込み直後などで選択外の救援番号が開いていたら、まず選んだ番号へ戻す。
+      const needsSlotCorrection = activeSlot == null ? cyclesAssistSlots : !selectedSlots.includes(activeSlot);
+      if (needsSlotCorrection) {
         const slot = selectedSlots[slotCursor % selectedSlots.length];
         slotCursor = (slotCursor + 1) % selectedSlots.length;
         context.setProgress(`${attempt}回目・救援${slot}へ切替`);
         await switchAssistSlot(slot, refreshConfig, context);
-        continue;
+        return null;
       }
       if (!ranked.length) {
         if (cyclesAssistSlots) {
-          const currentSlot = activeAssistSlot(doc);
           let slot = selectedSlots[slotCursor % selectedSlots.length];
-          if (slot === currentSlot) {
+          if (slot === activeSlot) {
             slotCursor = (slotCursor + 1) % selectedSlots.length;
             slot = selectedSlots[slotCursor % selectedSlots.length];
           }
           slotCursor = (slotCursor + 1) % selectedSlots.length;
           context.setProgress(`${attempt}回目・救援${slot}へ切替`);
-          await switchAssistSlot(slot, refreshConfig, context);
+          const switched = await switchAssistSlot(slot, refreshConfig, context);
+          // 切替先が現在地と同じで一度も押せなかったときは、一覧更新で必ず前進させる。
+          if (switched.alreadyActive) await refreshAssistList(refreshConfig, context, { waitForCompletion: false });
         } else {
           await refreshAssistList(refreshConfig, context, { waitForCompletion: false });
         }
-        continue;
+        return null;
       }
 
       const selected = cyclesAssistSlots
         ? [...ranked].sort((a, b) => a.index - b.index)[0]
         : ranked[0];
       const tapped = await tapCurrentAssistRow(selected, context, { fast: true, handoff: true });
-      if (!tapped) continue;
+      if (!tapped) return null;
 
       let next = await waitForGbfState([
         'MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR',
@@ -6609,15 +6665,15 @@
       if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
       if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
         await recoverKnownPopup(next, refreshConfig, context);
-        continue;
+        return null;
       }
       if (next.type === 'UNCLAIMED_LIST') {
         await confirmAllUnclaimed({ timeoutSec: config.timeoutSec, maxItems: 10000 }, context);
-        continue;
+        return null;
       }
       if (next.type === 'BATTLE') {
         rememberRecentRaidId(context, selected.raidId);
-        return { attempts: attempt };
+        return {};
       }
 
       if (next.type === 'SUPPORTER') {
@@ -6630,7 +6686,7 @@
         if (next.type === 'UNKNOWN_ERROR') assertNoUnknownPopup();
         if (['MAX_ASSIST_ERROR', 'UNCLAIMED_ERROR', 'RAID_FULL_ERROR'].includes(next.type)) {
           await recoverKnownPopup(next, refreshConfig, context);
-          continue;
+          return null;
         }
       }
 
@@ -6641,14 +6697,39 @@
           refreshJitterSec: config.jitterSec,
           fastTap: true
         }, context);
-        if (deckResult.retry) continue;
+        if (deckResult.retry) return null;
         if (deckResult.battle) {
           rememberRecentRaidId(context, selected.raidId);
-          return { attempts: attempt };
+          return {};
         }
       }
+      return null;
     }
-    throw new FlowError('救援参加の最大再試行回数に達しました', 'ASSIST_MAX_ATTEMPTS');
+  }
+
+  function isRecoverableAssistError(error) {
+    if (!error || error instanceof FlowRestart || error instanceof FlowStop) return false;
+    if (error.name === 'AbortError') return false;
+    return ASSIST_RECOVERABLE_CODES.includes(error.code);
+  }
+
+  // 一覧の取り違え・ガウス座標の遮蔽・切替待ちのタイムアウトなどで止まらないよう、
+  // 救援一覧を読み込み直してこのブロックの先頭から再開する。
+  async function reloadAssistListForRetry(config, context, error) {
+    const screen = safeDetectScreenState();
+    if (screen.type === 'BATTLE') return false;
+    appendLog(`${error.message} のため救援一覧を読み込み直して再開します`, 'warn', '救援評価');
+    context.setProgress('再読み込みして再開');
+    const before = captureFrameState({ includeDocument: false });
+    await replaceFrame(gameRouteUrl(ASSIST_RETRY_ROUTE));
+    await waitForFrameReady({
+      signal: context.signal,
+      timeoutMs: config.timeoutSec * 1000,
+      expectedScreen: 'any',
+      before,
+      requireChange: true
+    });
+    return true;
   }
 
   function evaluateWorkflowCondition(condition) {
@@ -6856,6 +6937,34 @@
     }
   }
 
+  const SOFT_HANDOFF_FAILURE_CODES = Object.freeze([
+    'HANDOFF_INVALID', 'HANDOFF_CLAIM_LOST', 'HANDOFF_LOST',
+    'HANDOFF_COMMIT_TIMEOUT', 'HANDOFF_WORKFLOW_INVALID'
+  ]);
+
+  function reportWorkflowHandoffFailure(error) {
+    if (SOFT_HANDOFF_FAILURE_CODES.includes(error?.code)) {
+      appendLog(`保存済みの進行は復元しませんでした（${error.message}）`, 'warn', '進行復元');
+      setStatus('準備完了');
+      return;
+    }
+    showWorkflowError(error, null);
+    setStatus('進行復元に失敗');
+  }
+
+  function abandonWorkflowHandoffResume(reason) {
+    if (!state.handoffResumeId || state.handoffResumeAbandoned) return false;
+    state.handoffResumeAbandoned = true;
+    clearWorkflowHandoff(state.handoffResumeId);
+    window.name = '';
+    if (reason) appendLog(reason, '', '進行復元');
+    return true;
+  }
+
+  function workflowHandoffResumeAbandoned() {
+    return state.handoffResumeAbandoned || Boolean(state.running) || Boolean(state.legacyRunning);
+  }
+
   function claimPendingWorkflowHandoff() {
     const handoff = readWorkflowHandoff();
     if (!handoff) return null;
@@ -7009,6 +7118,8 @@
   }
 
   async function resumeClaimedWorkflowHandoff(handoff) {
+    state.handoffResumeId = handoff.id;
+    state.handoffResumeAbandoned = false;
     try {
       setStatus('保存した画面を復元中');
       await waitForFrameReady({
@@ -7016,6 +7127,7 @@
         expectedScreen: 'auto',
         requireChange: false
       });
+      if (workflowHandoffResumeAbandoned()) return;
       let current = readWorkflowHandoff();
       if (current?.id !== handoff.id || current.claimedBy !== instanceId) {
         throw new FlowError('進行引継ぎの所有権を確認できませんでした', 'HANDOFF_CLAIM_LOST');
@@ -7026,6 +7138,7 @@
         setStatus('旧タブの終了待ち');
         while (Date.now() < current.expiresAt) {
           await new Promise(resolve => setTimeout(resolve, WORKFLOW_HANDOFF_POLL_MS));
+          if (workflowHandoffResumeAbandoned()) return;
           const next = readWorkflowHandoff();
           if (next?.id !== handoff.id || next.claimedBy !== instanceId) {
             throw new FlowError('進行引継ぎデータが失われました', 'HANDOFF_LOST');
@@ -7038,7 +7151,9 @@
         }
       }
       if (current.phase !== 'committed') throw new FlowError('旧タブから引継ぎ確定を受信できませんでした', 'HANDOFF_COMMIT_TIMEOUT');
+      if (workflowHandoffResumeAbandoned()) return;
       window.name = '';
+      state.handoffResumeId = null;
       const runPromise = startWorkflow(current);
       if (state.running) clearWorkflowHandoff(current.id);
       await runPromise;
@@ -7048,8 +7163,14 @@
         writeWorkflowHandoff({ ...current, phase: 'failed', error: error.message, failedAt: Date.now() });
       }
       window.name = '';
-      showWorkflowError(error, null);
-      setStatus('進行復元に失敗');
+      if (workflowHandoffResumeAbandoned()) {
+        appendLog(`自動復元を中止しました（${error.message}）`, '', '進行復元');
+        return;
+      }
+      reportWorkflowHandoffFailure(error);
+    } finally {
+      if (state.handoffResumeId === handoff.id) state.handoffResumeId = null;
+      state.handoffResumeAbandoned = false;
     }
   }
 
@@ -7203,7 +7324,7 @@
               await waitForFrameReady({
                 signal: context.signal,
                 timeoutMs: block.config.timeoutSec * 1000,
-                expectedScreen: block.config.expectedScreen,
+                expectedScreen: 'any',
                 before,
                 requireChange: true
               });
@@ -7226,7 +7347,7 @@
           await performFrameOperation(() => frameWindow().history.back(), {
             signal: context.signal,
             timeoutMs: block.config.timeoutSec * 1000,
-            expectedScreen: block.config.expectedScreen,
+            expectedScreen: 'any',
             requireChange: true
           });
           break;
@@ -7236,7 +7357,7 @@
           await waitForFrameReady({
             signal: context.signal,
             timeoutMs: block.config.timeoutSec * 1000,
-            expectedScreen: block.config.expectedScreen,
+            expectedScreen: 'any',
             before,
             requireChange: true
           });
@@ -7246,7 +7367,7 @@
           await waitForFrameReady({
             signal: context.signal,
             timeoutMs: block.config.timeoutSec * 1000,
-            expectedScreen: block.config.expectedScreen,
+            expectedScreen: 'any',
             requireChange: false
           });
           break;
@@ -7260,6 +7381,7 @@
 
   async function startWorkflow(resumeHandoff = null) {
     if (state.running || state.legacyRunning || state.elementPicker) return;
+    if (!resumeHandoff) abandonWorkflowHandoffResume('手動実行のため保存済み進行の自動復元を取りやめました');
     const restoreRunFocus = !resumeHandoff && (shadow.activeElement === byId('compactRun') || byId('page-workflow').contains(shadow.activeElement));
     let workflow;
     let resumeRuntime = null;
@@ -7274,8 +7396,7 @@
         resumeRuntime = resumeHandoff.runtime;
       } catch (error) {
         clearWorkflowHandoff(resumeHandoff?.id);
-        showWorkflowError(error, null);
-        setStatus('進行復元に失敗');
+        reportWorkflowHandoffFailure(error);
         return;
       }
     } else {
@@ -7363,7 +7484,7 @@
       appendLog(`ワークフロー「${workflow.name}」が${cycle}周完了`, 'success');
       setStatus('ワークフロー完了');
     } catch (error) {
-      if (error?.name === 'AbortError') {
+      if (error?.name === 'AbortError' && (controller.signal.aborted || state.destroyed)) {
         appendLog('ユーザー操作で停止', 'warn');
         setStatus('停止しました');
       } else if (error instanceof FlowStop) {
@@ -7387,6 +7508,7 @@
   }
 
   function stopWorkflow(reason = '停止ボタン') {
+    abandonWorkflowHandoffResume('手動停止のため保存済み進行の自動復元を取りやめました');
     if (!state.running) return;
     state.running.controller.abort(new DOMException(reason, 'AbortError'));
   }
