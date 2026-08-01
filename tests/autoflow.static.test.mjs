@@ -658,16 +658,34 @@ test('parent-page restart handoff persists ownership and safe fallbacks', () => 
   assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
 });
 
-test('iOS restarts the parent in place instead of triggering the pop-up prompt', () => {
+test('iOS opens the new tab from a trusted tap instead of a blind window.open', () => {
   const detect = source.slice(source.indexOf('function isIosLikeBrowser'), source.indexOf('function isNarrowViewport'));
   assert.ok(detect.includes('/\\b(iPhone|iPod)\\b/i.test(userAgent)'));
   assert.ok(detect.includes('/\\biPad\\b/i.test(userAgent)'));
-  assert.ok(detect.includes("/\\bMacintosh\\b/i.test(userAgent) && touchPoints > 1"));
+  assert.ok(detect.includes('/\\bMacintosh\\b/i.test(userAgent) && touchPoints > 1'));
+
+  const allowed = source.slice(source.indexOf('function scriptedTabOpenAllowed'), source.indexOf('function gestureHandoffTargets'));
+  // Android and desktop keep the plain window.open path they already work with.
+  assert.ok(allowed.includes('if (!isIosLikeBrowser()) return true'));
+  assert.ok(allowed.includes("typeof activation?.isActive === 'boolean' ? activation.isActive : false"));
 
   const restart = source.slice(source.indexOf('async function beginWorkflowParentRestart'), source.indexOf('async function resumeClaimedWorkflowHandoff'));
-  assert.ok(restart.includes('if (isIosLikeBrowser()) {'));
-  assert.ok(restart.indexOf('isIosLikeBrowser()') < restart.indexOf('window.open(handoff.parentUrl'));
-  assert.ok(restart.includes('continueWorkflowInCurrentTab('));
+  assert.ok(restart.includes('let opened = scriptedTabOpenAllowed() ? openWorkflowHandoffTab(handoff) : null'));
+  assert.ok(restart.includes('if (!opened && isIosLikeBrowser()) {'));
+  assert.ok(restart.includes('opened = await awaitGestureHandoffTab(handoff, context.signal)'));
+  // The same-tab restart stays the last resort, never the iOS default.
+  assert.ok(restart.indexOf('awaitGestureHandoffTab') < restart.indexOf('continueWorkflowInCurrentTab'));
+});
+
+test('the gesture wait opens the tab synchronously and always releases the run', () => {
+  const wait = source.slice(source.indexOf('function awaitGestureHandoffTab'), source.indexOf('async function beginWorkflowParentRestart'));
+  assert.ok(wait.includes('if (!event?.isTrusted) return'));
+  assert.ok(wait.includes('const opened = openWorkflowHandoffTab(handoff)'));
+  assert.ok(wait.includes('if (opened) settle(opened)'));
+  assert.ok(wait.includes("signal?.addEventListener('abort', onAbort, { once: true })"));
+  assert.ok(wait.includes('timer = setTimeout(() => settle(null), WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS)'));
+  assert.ok(source.includes('const WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS = 30_000'));
+  assert.ok(source.includes("const GESTURE_HANDOFF_EVENTS = Object.freeze(['pointerup', 'touchend', 'click'])"));
 });
 
 test('same-tab parent restart forces a reload when only the fragment changes', () => {
