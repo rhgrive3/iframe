@@ -2919,6 +2919,7 @@
         pick.addEventListener('click', () => startElementPicker(block.id));
         container.append(
           element('div', { className: 'toolbar compactActions' }, [pick]),
+          element('div', { className: 'hint', text: `現在の画面での状態: ${configuredTargetStatusText(block.config)}` }),
           element('div', { className: 'hint', text: '選択中はゲーム側のタップ処理を止め、選んだ要素の一意なCSSセレクタだけを保存します。' })
         );
         return;
@@ -3655,10 +3656,46 @@
       if (current === doc?.body || current === doc?.documentElement) break;
       if (pickerElementIsOversized(current, doc)) break;
       if (pickerElementArea(current) > baseArea * ELEMENT_PICKER_MAX_AREA_GROWTH) break;
-      if (current.matches?.(ELEMENT_PICKER_TARGET_SELECTOR)) return current;
+      if (pickerElementArea(current) > 0 && current.matches?.(ELEMENT_PICKER_TARGET_SELECTOR)) return current;
       current = current.parentElement;
     }
     return raw;
+  }
+
+  function pickerTapViability(target) {
+    if (!target?.isConnected) return { ok: false, reason: '画面から消えています' };
+    const own = target.getBoundingClientRect?.();
+    const width = Math.round(finite(own?.width, 0));
+    const height = Math.round(finite(own?.height, 0));
+    if (own && width > 0 && height > 0 && !computedVisible(target)) return { ok: false, reason: '非表示です' };
+    const usable = own && width > 0 && height > 0 ? own : probeTargetRect(target);
+    if (!usable) return { ok: false, reason: `大きさが0です（${width}×${height}）` };
+    const hit = target.ownerDocument?.elementFromPoint?.(
+      usable.left + (usable.width / 2),
+      usable.top + (usable.height / 2)
+    );
+    if (hit && hit !== target && !target.contains(hit)) return { ok: false, reason: '他の要素に覆われています' };
+    const usableWidth = Math.round(usable.width);
+    const usableHeight = Math.round(usable.height);
+    return {
+      ok: true,
+      reason: usable === own
+        ? `${usableWidth}×${usableHeight}px`
+        : `約${usableWidth}×${usableHeight}px・描画位置から推定`
+    };
+  }
+
+  function configuredTargetStatusText(config) {
+    const selector = String(config?.selector || '').trim();
+    if (!selector) return '未選択';
+    let doc;
+    try { doc = frameDocument(); } catch { return '対象ページを開くと確認できます'; }
+    let matches;
+    try { matches = [...doc.querySelectorAll(selector)]; } catch { return 'セレクタ書式が不正です'; }
+    if (!matches.length) return '一致0件（この画面には存在しません）';
+    if (matches.length > 1) return `一致${matches.length}件（選び直してください）`;
+    const viability = pickerTapViability(matches[0]);
+    return viability.ok ? `一致1件・タップ可能（${viability.reason}）` : `一致1件・タップ不可（${viability.reason}）`;
   }
 
   function resolvePickerTarget(event, doc) {
@@ -3758,10 +3795,19 @@
     const choose = event => {
       suppressElementPickerEvent(event);
       if (picker.finishing || state.elementPicker !== picker) return;
-      const target = resolvePickerTarget(event, doc);
+      let target = resolvePickerTarget(event, doc);
       if (!target) {
         ui.elementPickerHint.textContent = 'HTML要素を選択できませんでした。別の位置をタップしてください。';
         return;
+      }
+      let viability = pickerTapViability(target);
+      if (!viability.ok) {
+        const touched = pickerHitTarget(doc, pickerEventPoint(event), pickerEventTarget(event));
+        const touchedViability = touched && touched !== target ? pickerTapViability(touched) : null;
+        if (touchedViability?.ok) {
+          target = touched;
+          viability = touchedViability;
+        }
       }
       try {
         const selector = uniqueElementSelector(target, doc);
@@ -3781,10 +3827,11 @@
           config.targetLabel = label;
         });
         renderWorkflowEditor();
-        ui.elementPickerHint.textContent = `${label} を保存しました`;
+        const warning = viability.ok ? '' : `この要素は今タップできません（${viability.reason}）`;
+        ui.elementPickerHint.textContent = warning || `${label} を保存しました（${viability.reason}）`;
         picker.finishTimer = setTimeout(() => {
-          stopElementPicker({ message: `「${label}」を選択しました` });
-        }, 350);
+          stopElementPicker({ message: warning || `「${label}」を選択しました` });
+        }, warning ? 1200 : 350);
       } catch (error) {
         ui.elementPickerHint.textContent = error.message;
         toast(error.message);
@@ -4918,10 +4965,54 @@
     }
   }
 
+  const TARGET_PROBE_STEPS = 15;
+
+  function probeTargetRect(target) {
+    const doc = target?.ownerDocument;
+    const view = doc?.defaultView;
+    if (!doc?.elementFromPoint || !view || !target.isConnected) return null;
+    const own = target.getBoundingClientRect?.();
+    const host = target.parentElement?.getBoundingClientRect?.() || own;
+    if (!host || !own) return null;
+    const left = Math.max(0, Math.min(host.left, own.left));
+    const top = Math.max(0, Math.min(host.top, own.top));
+    const right = Math.min(finite(view.innerWidth, 0), Math.max(host.right, own.right));
+    const bottom = Math.min(finite(view.innerHeight, 0), Math.max(host.bottom, own.bottom));
+    if (!(right > left) || !(bottom > top)) return null;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (let row = 0; row < TARGET_PROBE_STEPS; row++) {
+      const y = top + ((bottom - top) * ((row + 0.5) / TARGET_PROBE_STEPS));
+      for (let column = 0; column < TARGET_PROBE_STEPS; column++) {
+        const x = left + ((right - left) * ((column + 0.5) / TARGET_PROBE_STEPS));
+        const hit = doc.elementFromPoint(x, y);
+        if (!hit || (hit !== target && !target.contains(hit))) continue;
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    if (!Number.isFinite(minX) || maxX <= minX || maxY <= minY) return null;
+    return {
+      left: minX,
+      top: minY,
+      right: maxX,
+      bottom: maxY,
+      x: minX,
+      y: minY,
+      width: maxX - minX,
+      height: maxY - minY
+    };
+  }
+
   function pointForTarget(target, fractions) {
-    const rect = target.getBoundingClientRect();
+    let rect = target.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
-      throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
+      rect = probeTargetRect(target);
+      if (!rect) throw new FlowError('押下対象の大きさを取得できません', 'TARGET_HAS_NO_AREA');
     }
     if (!Number.isFinite(fractions?.x) || !Number.isFinite(fractions?.y)
       || fractions.x <= 0 || fractions.x >= 1
@@ -5157,7 +5248,11 @@
     });
   }
 
-  function configuredElementState(config) {
+  function configuredElementState(config, diagnostics = null) {
+    const pending = reason => {
+      if (diagnostics) diagnostics.reason = reason;
+      return false;
+    };
     const selector = String(config.selector || '').trim();
     if (!selector) throw new FlowError('押すボタンのセレクタが空です', 'TARGET_SELECTOR_EMPTY');
     const doc = frameDocument();
@@ -5171,13 +5266,22 @@
       throw new FlowError(`押すボタンが${matches.length}件一致しました。画面から選び直してください`, 'TARGET_AMBIGUOUS');
     }
     const target = matches[0] || null;
-    if (!target || !computedVisible(target)) return false;
+    if (!target) return pending('一致する要素がありません');
+    if (!computedVisible(target)) {
+      const rect = target.getBoundingClientRect?.();
+      const width = Math.round(finite(rect?.width, 0));
+      const height = Math.round(finite(rect?.height, 0));
+      if (width > 0 && height > 0) return pending('要素が非表示です');
+      if (!probeTargetRect(target)) return pending(`要素の大きさが0です（${width}×${height}）`);
+    }
     const disabled = Boolean(
       ('disabled' in target && target.disabled)
       || target.getAttribute('aria-disabled') === 'true'
       || target.classList.contains('disabled')
     );
-    return disabled ? false : { target, selector };
+    if (disabled) return pending('要素が無効化されています');
+    if (diagnostics) diagnostics.reason = '';
+    return { target, selector };
   }
 
   async function tapConfiguredElement(config, context) {
@@ -5185,17 +5289,30 @@
     const label = String(config.targetLabel || '').trim() || selector || '指定ボタン';
     const timeoutMs = clamp(finite(config.timeoutSec, 30), 1, 600) * 1000;
     const deadline = performance.now() + timeoutMs;
+    const diagnostics = { reason: '' };
+    const timeoutError = () => new FlowError(
+      diagnostics.reason
+        ? `${label}待ちがタイムアウトしました（${diagnostics.reason}）`
+        : `${label}待ちがタイムアウトしました`,
+      'TIMEOUT'
+    );
     while (true) {
       throwIfAborted(context.signal);
       const remaining = deadline - performance.now();
-      if (remaining <= 0) throw new FlowError(`${label}待ちがタイムアウトしました`, 'TIMEOUT');
-      const found = await monitorFrame(() => configuredElementState(config), {
-        signal: context.signal,
-        timeoutMs: remaining,
-        stableMs: 0,
-        description: `${label}待ち`,
-        observeCharacterData: false
-      });
+      if (remaining <= 0) throw timeoutError();
+      let found;
+      try {
+        found = await monitorFrame(() => configuredElementState(config, diagnostics), {
+          signal: context.signal,
+          timeoutMs: remaining,
+          stableMs: 0,
+          description: `${label}待ち`,
+          observeCharacterData: false
+        });
+      } catch (error) {
+        if (error?.code === 'TIMEOUT') throw timeoutError();
+        throw error;
+      }
       try {
         await jqTapStrict(found.target, { signal: context.signal, label });
         return { selector, label };
