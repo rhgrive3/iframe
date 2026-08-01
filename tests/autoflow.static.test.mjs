@@ -101,13 +101,14 @@ test('assist slot switching waits for the new list before rescanning', () => {
   assert.ok(shared.includes('const observer = new MutationObserver'));
   assert.ok(shared.includes('observeRoots: []'));
   assert.ok(shared.includes('expectedSlot == null || activeAssistSlot(docNow) === expectedSlot'));
-  assert.ok(shared.includes('reconstructed || changedSignature || loadingEnded || sawMutation'));
+  assert.ok(shared.includes('reconstructed || changedSignature || loadingEnded || sawMutation || slotSettled'));
+  assert.ok(shared.includes('ASSIST_SLOT_SETTLE_MS'));
   const body = source.slice(source.indexOf('async function switchAssistSlot'), source.indexOf('function activeAssistSlot'));
   assert.ok(body.includes('const beforeList = currentDoc.querySelector(SELECTORS.assistList)'));
   assert.ok(body.includes('runAssistListTransition'));
   assert.ok(body.includes('expectedSlot: normalized'));
   const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function evaluateWorkflowCondition'));
-  assert.ok(flow.includes('if (slot === currentSlot)'));
+  assert.ok(flow.includes('if (slot === activeSlot)'));
 });
 
 test('multi-slot evaluation enters the first eligible row', () => {
@@ -361,7 +362,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 66'));
+  assert.ok(source.includes('const APP_VERSION = 67'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -854,4 +855,75 @@ test('tap target waiting reports why the button never became tappable', () => {
   assert.ok(runtime.includes("if (error?.code === 'TIMEOUT') throw timeoutError()"));
   assert.ok(source.includes('rect = probeTargetRect(target);'));
   assert.ok(source.includes('現在の画面での状態: ${configuredTargetStatusText(block.config)}'));
+});
+
+test('assist slot switching completes even when both slots hold no raids', () => {
+  const shared = source.slice(source.indexOf('async function runAssistListTransition'), source.indexOf('async function refreshAssistList'));
+  assert.ok(shared.includes('let slotActiveSince = null'));
+  assert.ok(shared.includes('if (!slotReady || loadingVisible) slotActiveSince = null'));
+  assert.ok(shared.includes('performance.now() - slotActiveSince >= ASSIST_SLOT_SETTLE_MS'));
+  assert.ok(shared.includes('intervalMs: expectedSlot == null ? null : ASSIST_SLOT_SETTLE_POLL_MS'));
+  assert.ok(source.includes('const ASSIST_SLOT_SETTLE_MS = 700'));
+});
+
+test('assist evaluation reloads the list and resumes instead of stopping', () => {
+  assert.ok(source.includes("const ASSIST_RETRY_ROUTE = '#quest/assist/multi/0'"));
+  assert.ok(source.includes('const MAX_ASSIST_RECOVERY_RELOADS = 10'));
+  const codes = source.slice(source.indexOf('const ASSIST_RECOVERABLE_CODES'), source.indexOf('const ASSIST_ROW_REBIND_CODES'));
+  for (const code of ['TIMEOUT', 'TARGET_OCCLUDED', 'TARGET_UNSTABLE', 'STALE_TARGET']) {
+    assert.ok(codes.includes(`'${code}'`));
+  }
+  const recovery = source.slice(source.indexOf('function isRecoverableAssistError'), source.indexOf('function evaluateWorkflowCondition'));
+  assert.ok(recovery.includes('error instanceof FlowRestart || error instanceof FlowStop'));
+  assert.ok(recovery.includes("if (error.name === 'AbortError') return false"));
+  assert.ok(recovery.includes("if (screen.type === 'BATTLE') return false"));
+  assert.ok(recovery.includes('await replaceFrame(gameRouteUrl(ASSIST_RETRY_ROUTE))'));
+  const flow = source.slice(source.indexOf('async function assistSelectFullFlow'), source.indexOf('function isRecoverableAssistError'));
+  assert.ok(flow.includes('if (!isRecoverableAssistError(error)) throw error'));
+  assert.ok(flow.includes('if (consecutiveReloads >= MAX_ASSIST_RECOVERY_RELOADS) throw error'));
+  assert.ok(flow.includes('await reloadAssistListForRetry(config, context, error)'));
+});
+
+test('occluded assist rows are rebound instead of failing the block', () => {
+  assert.ok(source.includes("const ASSIST_ROW_REBIND_CODES = Object.freeze(['STALE_TARGET', 'TARGET_OCCLUDED', 'TARGET_UNSTABLE', 'TARGET_MISSING'])"));
+  const tap = source.slice(source.indexOf('async function tapCurrentAssistRow'), source.indexOf('function assistListSignature'));
+  assert.ok(tap.includes('if (rebound) await waitAssistListPaintable(signal)'));
+  assert.ok(tap.includes('if (!ASSIST_ROW_REBIND_CODES.includes(error?.code)) throw error'));
+  const wait = source.slice(source.indexOf('async function waitAssistListPaintable'), source.indexOf('async function tapCurrentAssistRow'));
+  assert.ok(wait.includes('if (pageBaseReady(doc)) return true'));
+});
+
+test('iframe navigation blocks no longer ask for a destination screen', () => {
+  assert.ok(!source.includes("grid.append(field('目的画面', expected))"));
+  assert.ok(!source.includes('expectedScreen: block.config.expectedScreen'));
+  assert.ok(source.includes("case 'iframeRoute':\n        return { route: '#quest/assist/multi/0', timeoutSec: 30 };"));
+  assert.ok(source.includes("if (expected === 'any') return true;"));
+  const execute = source.slice(source.indexOf('async function executeWorkflowBlock'), source.indexOf('async function startWorkflow'));
+  assert.equal(execute.split("expectedScreen: 'any'").length - 1, 4);
+  // 戻り先の目的画面（敵撃破後の復帰）は別設定なので残す
+  assert.ok(source.includes("battleEndExpectedScreen: 'assist'"));
+});
+
+test('manual runs never surface stale handoff resume failures', () => {
+  assert.ok(source.includes('function abandonWorkflowHandoffResume(reason)'));
+  assert.ok(source.includes('function workflowHandoffResumeAbandoned()'));
+  assert.ok(source.includes('const SOFT_HANDOFF_FAILURE_CODES'));
+  const report = source.slice(source.indexOf('function reportWorkflowHandoffFailure'), source.indexOf('function abandonWorkflowHandoffResume'));
+  assert.ok(report.includes('SOFT_HANDOFF_FAILURE_CODES.includes(error?.code)'));
+  assert.ok(report.includes('保存済みの進行は復元しませんでした'));
+  const start = source.slice(source.indexOf('async function startWorkflow'), source.indexOf('function stopWorkflow'));
+  assert.ok(start.includes('if (!resumeHandoff) abandonWorkflowHandoffResume('));
+  assert.ok(start.includes('reportWorkflowHandoffFailure(error)'));
+  assert.ok(!start.includes("setStatus('進行復元に失敗')"));
+  const stop = source.slice(source.indexOf('function stopWorkflow'), source.indexOf('const LEGACY_CONDITION_TYPES'));
+  assert.ok(stop.includes('abandonWorkflowHandoffResume('));
+  const resume = source.slice(source.indexOf('async function resumeClaimedWorkflowHandoff'), source.indexOf('async function runBlockList'));
+  assert.equal(resume.split('if (workflowHandoffResumeAbandoned()) return;').length - 1, 3);
+});
+
+test('internal aborts are reported instead of masquerading as a user stop', () => {
+  const start = source.slice(source.indexOf('async function startWorkflow'), source.indexOf('function stopWorkflow'));
+  assert.ok(start.includes("if (error?.name === 'AbortError' && (controller.signal.aborted || state.destroyed))"));
+  const show = source.slice(source.indexOf('function showWorkflowError'), source.indexOf('function clearWorkflowError'));
+  assert.ok(show.includes("typeof error?.code === 'string' && error.code"));
 });

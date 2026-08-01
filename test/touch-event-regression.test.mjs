@@ -231,14 +231,14 @@ test('assist selection rebinds a replaced row by raid id instead of stopping', (
   const tapStart = source.indexOf('async function tapCurrentAssistRow');
   const tapEnd = source.indexOf('function assistListSignature', tapStart);
   const tapBlock = source.slice(tapStart, tapEnd);
-  assert.match(tapBlock, /error\?\.code !== 'STALE_TARGET'/);
+  assert.match(tapBlock, /ASSIST_ROW_REBIND_CODES\.includes\(error\?\.code\)/);
   assert.match(tapBlock, /target = raidId \? findAssistRowByRaidId\(raidId\) : null/);
 
   const flowStart = source.indexOf('async function assistSelectFullFlow');
   const flowEnd = source.indexOf('function evaluateWorkflowCondition', flowStart);
   const flowBlock = source.slice(flowStart, flowEnd);
   assert.match(flowBlock, /const tapped = await tapCurrentAssistRow\(selected, context, \{ fast: true, handoff: true \}\)/);
-  assert.match(flowBlock, /if \(!tapped\) continue/);
+  assert.match(flowBlock, /if \(!tapped\) return null/);
 });
 
 test('battle-end waits navigate to a configurable route and restart at the first block', () => {
