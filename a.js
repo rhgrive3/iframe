@@ -882,8 +882,6 @@
       .blockCard:hover{border-color:var(--line-strong)}
       .blockCard.running{border-color:rgba(70,212,149,.56);outline:2px solid rgba(70,212,149,.24);outline-offset:1px;box-shadow:none}
       .blockCard.running::after{content:'';position:absolute;z-index:4;top:0;right:0;left:0;height:2px;background:linear-gradient(90deg,transparent,var(--green),transparent);animation:runSweep 1.8s linear infinite}
-      .blockCard.validation-error{border-color:rgba(255,107,120,.55);box-shadow:0 0 0 2px rgba(255,107,120,.08)}
-      .blockCard.validation-warning{border-color:rgba(240,182,92,.45)}
       .blockCard.dragging{opacity:.45;transform:scale(.99)}
       .blockHead{display:grid;grid-template-columns:38px minmax(0,1fr) auto;align-items:center;gap:8px;min-height:58px;padding:8px 9px 8px 10px;border-bottom:1px solid rgba(255,255,255,.065)}
       .blockHead button{min-height:34px;height:34px}
@@ -913,8 +911,6 @@
       .childLabel{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;padding:1px 2px 4px;color:var(--muted);font-size:9px;font-weight:740}
       .childLabel button{min-height:30px;height:30px;padding:0 9px;border-color:transparent;background:transparent;color:#bfc6ff;font-size:9px}
       .progressBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border:1px solid rgba(70,212,149,.18);border-radius:999px;background:var(--green-soft);color:#a6edc8;font-size:8.5px;white-space:nowrap}
-      .validationBadge{display:inline-flex;min-width:44px;justify-content:center;padding:3px 7px;border:1px solid rgba(240,182,92,.24);border-radius:999px;background:var(--amber-soft);color:#f2d29d;font-size:8.5px;white-space:nowrap}
-      .validationBadge.error{border-color:rgba(255,107,120,.24);background:var(--red-soft);color:#ffc0c6}
 
       #runBar{
         position:sticky;z-index:6;bottom:0;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;
@@ -925,20 +921,6 @@
       #runWorkflow{border-color:rgba(70,212,149,.34);background:linear-gradient(180deg,#54dda1 0%,#35bf82 100%);color:#071d13}
       #runWorkflow:hover:not(:disabled){background:linear-gradient(180deg,#62e4aa 0%,#3dc98a 100%)}
       #stopWorkflow{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffc0c6}
-      #validationBar{
-        grid-column:1/-1;display:grid;grid-template-columns:9px minmax(0,1fr) auto auto;align-items:center;gap:9px;
-        min-height:44px;padding:7px 8px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.14)
-      }
-      #validationBar::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--muted)}
-      #validationBar[data-tone=success]::before{background:var(--green)}
-      #validationBar[data-tone=warning]::before{background:var(--amber)}
-      #validationBar[data-tone=error]::before{background:var(--red)}
-      .validationText{min-width:0}
-      .validationText strong,.validationText small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .validationText strong{color:var(--text-soft);font-size:10px}
-      .validationText small{margin-top:2px;color:var(--muted);font-size:9px}
-      #validationBar button{min-height:34px;height:34px;padding:0 10px;font-size:9.5px}
-      #validationFocus[hidden]{display:none}
 
       #legacyActionList{display:grid;gap:9px;padding-bottom:16px}
       .legacyRow{padding:12px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025)}
@@ -1069,9 +1051,6 @@
         .childArea{margin:0 6px 7px 15px;padding:5px}
         #runBar{margin:0 -9px;padding:10px 9px calc(9px + env(safe-area-inset-bottom))}
         #runBar button{min-height:43px}
-        #validationBar{grid-template-columns:8px minmax(0,1fr) auto;padding:7px}
-        #validationFocus{display:none!important}
-        #validateWorkflow{min-width:78px}
         .historyActions button{min-width:0;flex:1}
         .logEntry{grid-template-columns:50px 68px minmax(0,1fr);gap:5px;padding:7px 4px;font-size:9px}
       }
@@ -1110,7 +1089,6 @@
         .paletteFilter{min-height:34px;height:34px}
         .paletteButton{min-height:46px}
         #runBar button{min-height:40px;height:40px}
-        #validationBar button{min-height:32px;height:32px}
       }
       #dock.narrowViewport.androidCompact{
         width:var(--dock-width,72vw);width:var(--dock-width,72dvw);
@@ -1119,12 +1097,119 @@
       }
       #dock.compact.androidCompact{width:124px;height:58px;border-radius:29px}
       #dock.androidCompact{font-size:7.4px}
-      #dock.androidCompact #dockHeader{gap:5px;min-height:41px;padding:6px 8px}
+      #dock.androidCompact #dockHeader{grid-template-columns:20px minmax(0,1fr) 17px 17px;gap:5px;min-height:32px;padding:5px 7px}
+      #dock.androidCompact #dockGrip{width:20px;height:20px;min-height:20px;padding:0;border-radius:6px}
+      #dock.androidCompact #dockGrip::before{inset:6px}
       #dock.androidCompact .title strong{font-size:7px}
-      #dock.androidCompact .title small{font-size:5.5px}
-      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:17px;height:17px;min-height:17px;font-size:8.7px}
-      #dock.androidCompact #mainTabs{gap:3px;padding:6px 8px}
+      #dock.androidCompact .title small{gap:4px;margin-top:1px;font-size:5.5px}
+      #dock.androidCompact .title small::before{width:5px;height:5px}
+      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:17px;height:17px;min-height:17px;padding:0;font-size:8.7px}
+      #dock.androidCompact #mainTabs{gap:3px;padding:4px 7px}
+      #dock.androidCompact .mainTab{min-height:22px;height:22px;gap:4px;border-radius:6px;font-size:7px}
+      #dock.androidCompact .mainTab[aria-selected=true]::after{bottom:-4px;height:1.5px}
       #dock.androidCompact .tabIcon{width:9px;height:9px;font-size:7.2px}
+
+      /* --- Android: keep the whole panel body on the same small scale as the header --- */
+      #dock.androidCompact .page{padding:7px 6px 0}
+      #dock.androidCompact .pageIntro{margin:0 1px 6px}
+      #dock.androidCompact .pageIntro h2{font-size:9.5px}
+      #dock.androidCompact .eyebrow{margin-bottom:2px;font-size:5.5px;letter-spacing:.1em}
+      #dock.androidCompact .card{margin-bottom:6px;padding:7px;border-radius:8px}
+      #dock.androidCompact .cardHeader,#dock.androidCompact .cardTitle{gap:6px;margin-bottom:6px;font-size:7.6px}
+      #dock.androidCompact .cardTitleGroup{gap:5px}
+      #dock.androidCompact .sectionIcon{width:16px;height:16px;border-radius:5px;font-size:8px}
+      #dock.androidCompact .cardHeading strong{font-size:7.4px}
+      #dock.androidCompact .cardHeading small{margin-top:1px;font-size:6px}
+      #dock.androidCompact .hint{font-size:6.2px;line-height:1.45}
+      #dock.androidCompact .statsPill{min-height:14px;padding:0 5px;font-size:6px}
+      #dock.androidCompact .saveState::before{width:4px;height:4px}
+      #dock.androidCompact .workflowSettings>summary::after,#dock.androidCompact .paletteCard>summary::after{font-size:9px}
+
+      #dock.androidCompact .grid2,#dock.androidCompact .grid3{gap:5px}
+      #dock.androidCompact .field{gap:2px;font-size:6.4px}
+      #dock.androidCompact .field>span{min-height:9px}
+      #dock.androidCompact input,#dock.androidCompact select,#dock.androidCompact textarea{
+        min-height:22px;padding:2px 6px;border-radius:6px;font-size:8.4px;line-height:1.25
+      }
+      #dock.androidCompact textarea{min-height:44px}
+      #dock.androidCompact input[type=checkbox]{width:13px;min-height:13px;height:13px;margin:2px 0}
+      #dock.androidCompact button{min-height:22px;padding:0 7px;border-radius:6px;font-size:7.2px}
+      #dock.androidCompact .compactOnly button{min-height:100%;padding:0;border-radius:28px;font-size:11px}
+      #dock.androidCompact .compactOnly #compactRun{border-radius:0 28px 28px 0;font-size:15px}
+      #dock.androidCompact .toolbar{gap:4px;margin-top:6px}
+      #dock.androidCompact .toolbar>*{flex:1 1 auto}
+      #dock.androidCompact .toolbar button{min-height:22px;height:22px;padding:0 6px;font-size:6.8px;white-space:nowrap}
+      #dock.androidCompact .historyActions::after{height:14px;margin:0 2px}
+      
+      #dock.androidCompact .settingToggle{grid-template-columns:14px minmax(0,1fr);gap:7px;padding:8px}
+      #dock.androidCompact .settingToggleCopy{gap:2px}
+      #dock.androidCompact .settingToggleCopy strong{font-size:7.6px}
+      #dock.androidCompact .settingToggleCopy small,#dock.androidCompact .settingNote{font-size:6.2px;line-height:1.5}
+      #dock.androidCompact .settingNote{margin-top:6px;padding:6px 7px}
+
+      #dock.androidCompact .paletteCard>summary{padding:7px}
+      #dock.androidCompact .paletteContent{padding:7px}
+      #dock.androidCompact .paletteControls{gap:5px;margin-bottom:6px}
+      #dock.androidCompact .paletteSearchWrap::before{left:7px;font-size:10px}
+      #dock.androidCompact #paletteSearch{padding-left:20px}
+      #dock.androidCompact .paletteFilters{gap:3px}
+      #dock.androidCompact .paletteFilter{min-height:20px;height:20px;padding:0 4px;font-size:6px}
+      #dock.androidCompact .insertionNotice{gap:6px;margin-bottom:6px;padding:5px 6px;border-radius:6px}
+      #dock.androidCompact #clearInsertion{min-height:18px;height:18px;padding:0 6px}
+      #dock.androidCompact .paletteGrid{gap:4px}
+      #dock.androidCompact .paletteSection{gap:4px}
+      #dock.androidCompact .paletteSection+.paletteSection{margin-top:2px;padding-top:7px}
+      #dock.androidCompact .paletteSectionTitle{gap:5px;font-size:6.4px}
+      #dock.androidCompact .paletteSectionTitle::before{width:5px;height:5px}
+      #dock.androidCompact .paletteCount{font-size:5.8px}
+      #dock.androidCompact .paletteItems{gap:4px}
+      #dock.androidCompact .paletteButton{min-height:34px;padding:6px 7px 6px 9px;border-radius:7px}
+      #dock.androidCompact .paletteButton::before{top:5px;right:6px;font-size:9px}
+      #dock.androidCompact .paletteButton::after{top:6px;bottom:6px;width:2px}
+      #dock.androidCompact .paletteButton strong{padding-right:12px;font-size:6.8px}
+      #dock.androidCompact .paletteButton small{margin-top:2px;padding-right:6px;font-size:5.8px;line-height:1.35}
+      #dock.androidCompact .paletteEmpty{padding:12px 8px;border-radius:8px;font-size:6.6px}
+
+      #dock.androidCompact #workflowEditor{padding-bottom:52px}
+      #dock.androidCompact .empty{min-height:58px;padding:14px 10px;border-radius:8px;font-size:6.6px}
+      #dock.androidCompact .dropZone{height:7px;margin:0 4px}
+      #dock.androidCompact .dropZone.dragOver{height:16px}
+      #dock.androidCompact .blockCard{margin:2px 0;border-radius:8px}
+      #dock.androidCompact .blockCard::before{width:2px}
+      #dock.androidCompact .blockHead{grid-template-columns:20px minmax(0,1fr);gap:4px;min-height:30px;padding:4px 5px 4px 6px}
+      #dock.androidCompact .blockHead button{min-height:22px;height:22px}
+      #dock.androidCompact .collapseToggle{width:20px;padding:0;font-size:0}
+      #dock.androidCompact .collapseToggle::before{font-size:10px}
+      #dock.androidCompact .blockName{gap:4px}
+      #dock.androidCompact .blockTypeBadge{min-height:13px;padding:0 4px;border-radius:4px;font-size:5.4px}
+      #dock.androidCompact .blockName strong{font-size:7px}
+      #dock.androidCompact .blockName small{font-size:5.8px}
+      #dock.androidCompact .blockBody{padding:6px}
+      #dock.androidCompact .blockBody>.cardTitle{margin:8px 0 5px;padding-top:6px;font-size:6.6px}
+      #dock.androidCompact .blockTools{gap:2px;padding-left:24px}
+      #dock.androidCompact .blockTools button{min-width:22px;width:22px;min-height:22px;height:22px;padding:0;font-size:8px}
+      #dock.androidCompact .progressBadge{min-width:26px;padding:1px 4px;font-size:5.4px}
+      #dock.androidCompact .childArea{margin:0 5px 5px 12px;padding:4px;border-radius:7px}
+      #dock.androidCompact .childArea::before{top:-5px;bottom:5px;left:-8px}
+      #dock.androidCompact .childLabel{margin-bottom:1px;font-size:5.8px}
+      #dock.androidCompact .childLabel button{min-height:18px;height:18px;padding:0 6px;font-size:5.8px}
+
+      #dock.androidCompact #runBar{gap:5px;margin:0 -6px;padding:6px 6px calc(5px + env(safe-area-inset-bottom))}
+      #dock.androidCompact #runBar button{min-height:26px;height:26px;font-size:8.4px}
+
+      #dock.androidCompact #legacyActionList{gap:5px;padding-bottom:8px}
+      #dock.androidCompact .legacyRow{padding:7px;border-radius:8px}
+      #dock.androidCompact .legacyHead{gap:5px;margin-bottom:6px;padding-bottom:5px}
+      #dock.androidCompact .legacySelect{min-height:22px;height:22px;padding:0 5px;font-size:7px}
+      #dock.androidCompact .legacyTools button{min-width:22px;min-height:22px;height:22px;padding:0 5px;font-size:6.4px}
+
+      #dock.androidCompact .logEntry{grid-template-columns:34px 48px minmax(0,1fr);gap:4px;padding:5px 3px;font-size:6.2px}
+      #dock.androidCompact .errorBox{margin-bottom:6px;padding:7px;border-radius:8px;font-size:6.6px}
+      #dock.androidCompact .conflictBox strong{font-size:7px}
+      #dock.androidCompact .errorActions{gap:4px;margin-top:6px}
+      #dock.androidCompact .errorActions button{min-height:22px;padding:3px;font-size:6.4px}
+      #dock.androidCompact .resizeHandle{width:22px;min-height:22px;height:22px;padding:0;border-radius:0}
+      #dock.androidCompact .resizeHandle::before{right:5px;bottom:5px;width:8px;height:8px}
       @media(forced-colors:active){
         #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
         .blockCard::before,.paletteButton::after{width:5px}
@@ -1281,11 +1366,6 @@
             <div id="workflowEditor"></div>
           </article>
           <div id="runBar" role="group" aria-label="ワークフロー実行操作">
-            <div id="validationBar" data-tone="idle">
-              <div class="validationText"><strong id="validationTitle">実行前チェック</strong><small id="validationMessage">変更内容は実行時に自動確認されます</small></div>
-              <button id="validationFocus" class="ghost" hidden>問題を確認</button>
-              <button id="validateWorkflow" class="ghost">チェック</button>
-            </div>
             <button id="runWorkflow">▶ フローを実行</button>
             <button id="stopWorkflow" disabled>■ 停止</button>
           </div>
@@ -1382,9 +1462,8 @@
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
     elementPickerToolbar: byId('elementPickerToolbar'), elementPickerHint: byId('elementPickerHint'), elementPickerCancel: byId('elementPickerCancel'),
-    undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
-    validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
-    validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle')
+    undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'),
+    battlePerformanceToggle: byId('battlePerformanceToggle')
   };
 
   const state = {
@@ -1397,7 +1476,6 @@
     workflowUndo: [],
     workflowRedo: [],
     historyRestoring: false,
-    validationIssues: [],
     recoveredFromCheckpoint: false,
     externalWorkflowConflict: false,
     externalWorkflowStore: null,
@@ -2295,7 +2373,6 @@
       state.workflowUndo.push({ label, snapshot: before, bytes: fingerprint.length });
       trimWorkflowHistory(state.workflowUndo);
       state.workflowRedo.length = 0;
-      invalidateWorkflowValidation();
       syncWorkflowHistoryControls();
       if (state.externalWorkflowConflict) saveWorkflowCheckpoint('別タブ競合中のこのタブ');
     }
@@ -2311,7 +2388,6 @@
       state.collapsed.clear();
       resetInsertion();
       clearWorkflowError({ restoreFocus: false });
-      invalidateWorkflowValidation();
       saved = saveWorkflowStore({ immediate: true });
       renderWorkflowSelect();
       syncRunControls();
@@ -2430,7 +2506,6 @@
       state.workflowRedo.length = 0;
       state.collapsed.clear();
       resetInsertion();
-      invalidateWorkflowValidation();
       state.workflowStorageUpdatedAt = finite(incoming.updatedAt, Date.now());
       state.workflowStorageFingerprint = JSON.stringify(incoming);
       state.externalWorkflowConflict = false;
@@ -2989,12 +3064,6 @@
       card.dataset.depth = String(depth);
       card.setAttribute('role', 'group');
       card.setAttribute('aria-label', `${index + 1}. ${definition.label}`);
-      const validationIssues = state.validationIssues.filter(issue => issue.blockId === block.id);
-      const validationError = validationIssues.some(issue => issue.severity === 'error');
-      if (validationIssues.length) {
-        card.classList.add(validationError ? 'validation-error' : 'validation-warning');
-        card.setAttribute('aria-description', validationIssues.map(issue => issue.message).join('。'));
-      }
       if (state.running?.currentBlockId === block.id) card.setAttribute('aria-current', 'step');
       card.draggable = !state.running && supportsNativeBlockDrag;
       card.classList.toggle('running', state.running?.currentBlockId === block.id);
@@ -3035,13 +3104,6 @@
         element('small', { text: definition.description })
       ]);
       const badges = element('div', { className: 'blockBadges' });
-      if (validationIssues.length) {
-        badges.append(element('span', {
-          className: `validationBadge${validationError ? ' error' : ''}`,
-          text: validationError ? '要修正' : '注意',
-          title: validationIssues[0].message
-        }));
-      }
       const progress = state.blockProgress.get(block.id);
       if (progress) badges.append(element('span', { className: 'progressBadge', text: progress }));
       if (badges.childElementCount) name.append(badges);
@@ -3303,80 +3365,6 @@
     return issues;
   }
 
-  function invalidateWorkflowValidation() {
-    state.validationIssues = [];
-    ui.validationBar.dataset.tone = 'idle';
-    ui.validationTitle.textContent = '実行前チェック';
-    ui.validationMessage.textContent = '変更内容は実行時に自動確認されます';
-    ui.validationFocus.hidden = true;
-    shadow.querySelectorAll('.blockCard.validation-error,.blockCard.validation-warning').forEach(card => {
-      card.classList.remove('validation-error', 'validation-warning');
-      card.removeAttribute('aria-description');
-    });
-    shadow.querySelectorAll('.validationBadge').forEach(badge => badge.remove());
-  }
-
-  function firstActionableValidationIssue() {
-    return state.validationIssues.find(issue => issue.severity === 'error' && issue.blockId)
-      || state.validationIssues.find(issue => issue.blockId)
-      || state.validationIssues[0]
-      || null;
-  }
-
-  function focusWorkflowValidationIssue(issue = firstActionableValidationIssue()) {
-    if (!issue) return;
-    if (!issue.blockId) {
-      ui.validateWorkflow?.focus?.({ preventScroll: true });
-      return announce(issue.message);
-    }
-    let location = findBlockLocation(issue.blockId);
-    while (location?.parent) {
-      state.collapsed.delete(location.parent.id);
-      location = findBlockLocation(location.parent.id);
-    }
-    state.collapsed.delete(issue.blockId);
-    renderWorkflowEditor();
-    requestAnimationFrame(() => {
-      const card = blockCardById(issue.blockId);
-      card?.scrollIntoView({
-        block: 'center',
-        behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
-      });
-      focusBlockControl(issue.blockId, 'toggle', issue.message);
-    });
-  }
-
-  function runWorkflowValidation({ announceResult = true, focusFirstError = false } = {}) {
-    const workflow = currentWorkflow();
-    const issues = validateWorkflowDefinition(workflow);
-    state.validationIssues = issues;
-    const errors = issues.filter(issue => issue.severity === 'error');
-    const warnings = issues.filter(issue => issue.severity === 'warning');
-    ui.validationFocus.hidden = !issues.length;
-    if (errors.length) {
-      ui.validationBar.dataset.tone = 'error';
-      ui.validationTitle.textContent = `${errors.length}件のエラー`;
-      ui.validationMessage.textContent = errors[0].message;
-    } else if (warnings.length) {
-      ui.validationBar.dataset.tone = 'warning';
-      ui.validationTitle.textContent = `${warnings.length}件の注意`;
-      ui.validationMessage.textContent = warnings[0].message;
-    } else {
-      ui.validationBar.dataset.tone = 'success';
-      ui.validationTitle.textContent = '実行準備OK';
-      ui.validationMessage.textContent = `${countBlocks(workflow.blocks)}ブロックを確認しました`;
-    }
-    renderWorkflowEditor();
-    const summary = errors.length
-      ? `${errors.length}件のエラーがあります`
-      : warnings.length
-        ? `${warnings.length}件の注意があります。実行は可能です`
-        : '実行前チェックに問題はありません';
-    if (announceResult) toast(summary);
-    if (focusFirstError && errors.length) focusWorkflowValidationIssue(errors[0]);
-    return { issues, errors, warnings, valid: !errors.length };
-  }
-
   function commitActiveEditorInput() {
     const active = shadow.activeElement;
     if (active?.matches?.('input,select,textarea')) active.blur();
@@ -3384,11 +3372,6 @@
 
   function prepareWorkflowRun() {
     commitActiveEditorInput();
-    const result = runWorkflowValidation({ announceResult: false, focusFirstError: true });
-    if (!result.valid) {
-      toast(`${result.errors.length}件の設定エラーを修正してください`);
-      return null;
-    }
     if (!saveWorkflowStore({ immediate: true })) {
       toast('保存できないため実行を開始できません。JSONバックアップを取得してください');
       return null;
@@ -8212,7 +8195,6 @@
     state.selectedWorkflowId = id;
     state.workflows.currentId = id;
     resetInsertion();
-    invalidateWorkflowValidation();
     saveWorkflowStore({ immediate: true });
     renderWorkflowSelect();
   }
@@ -8451,7 +8433,7 @@
     'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
     'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset', 'paletteSearch',
     'clearInsertion', 'expandAllBlocks', 'collapseAllBlocks', 'undoWorkflow', 'redoWorkflow',
-    'restoreCheckpoint', 'validateWorkflow', 'validationFocus', 'loadExternalWorkflows', 'keepLocalWorkflows'
+    'restoreCheckpoint', 'loadExternalWorkflows', 'keepLocalWorkflows'
   ]);
 
   function syncRunControls() {
@@ -9064,8 +9046,6 @@
   byId('backupConflictWorkflows').addEventListener('click', exportAllWorkflows);
   ui.undoWorkflow.addEventListener('click', undoWorkflowChange);
   ui.redoWorkflow.addEventListener('click', redoWorkflowChange);
-  ui.validateWorkflow.addEventListener('click', () => runWorkflowValidation());
-  ui.validationFocus.addEventListener('click', () => focusWorkflowValidationIssue());
   ui.runWorkflow.addEventListener('click', startWorkflow);
   ui.stopWorkflow.addEventListener('click', () => stopWorkflow());
 
