@@ -1464,6 +1464,7 @@
     activeRecordPointers: new Map(),
     elementPicker: null,
     pendingAutoAttack: null,
+    pendingAutoAttackClearedReason: '',
     battleEndArmed: false,
     battleEndArmedAt: 0,
     activeBattleDocument: null,
@@ -1897,7 +1898,7 @@
     gbfDeckConfirm: { category: 'gbf', label: '編成確認OKを押す', description: '前面エラーを優先して編成開始を確認' },
     gbfUnclaimedAll: { category: 'gbf', label: '未確認バトルをすべて確認する', description: '1ページ目の最上段を0件まで処理' },
     gbfEnsureFullAuto: { category: 'gbf', label: 'フルオートをONにする', description: 'ONなら押さず、撃破時は指定ルートから先頭へ復帰' },
-    gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: '攻撃開始または敵撃破通知を低負荷で監視' },
+    gbfWaitAutoAttack: { category: 'gbf', label: 'フルオートによる攻撃開始を待つ', description: 'アビリティや召喚では終わらず、攻撃ボタンが押されるまで待機' },
     gbfRefreshAssist: { category: 'gbf', label: '救援一覧を更新する', description: '一覧更新完了をDOM変化で監視' },
     gbfMyPage: { category: 'gbf', label: 'MyPageボタンを押す', description: '即座にゲーム標準の完全再読込でMyPageへ戻る' },
     gbfReleaseResources: { category: 'gbf', label: 'Safariメモリを解放して戻る', description: '即座にMyPageを経由し、Canvas・音声・旧Viewを解放して指定画面へ戻る' },
@@ -5513,6 +5514,15 @@
   }
 
   const MAX_RECENT_RAID_IDS = 128;
+  // 攻撃のリクエスト（normal_attack_result 系）だけに一致させる。アビリティ(ability_result)や
+  // 召喚(summon_result)はフルオートでも攻撃の前に飛ぶため、絶対に含めない。
+  const ATTACK_REQUEST_PATTERN = /attack_result/i;
+  const ATTACK_REQUEST_INITIATORS = Object.freeze(['xmlhttprequest', 'fetch', 'other', '']);
+  const ATTACK_WAIT_POLL_MS = 160;
+  const BATTLE_ACTIVITY_CACHE_MS = 350;
+  // アビリティや召喚の演出で盤面が動き続けている間は「攻撃待ち」を打ち切らない。
+  const ATTACK_WAIT_ACTIVITY_GRACE_MS = 4_000;
+  const ATTACK_WAIT_MAX_EXTENSION_MS = 60_000;
   const ASSIST_HANDOFF_POLL_MS = 50;
   const ASSIST_SLOT_SETTLE_MS = 700;
   const ASSIST_RETRY_ROUTE = '#quest/assist/multi/0';
@@ -6392,11 +6402,11 @@
 
   const battleProgressCache = new WeakMap();
 
-  function battleProgressSignature(doc = frameDocument(), turn = turnSignature(doc)) {
-    if (lightweightMode) {
-      const cached = battleProgressCache.get(doc);
-      if (cached && performance.now() - cached.at < 350) return cached.value;
-    }
+  // 盤面が動いているかどうかだけを表す指紋。攻撃の判定には使わない。
+  function battleProgressSignature(doc = frameDocument()) {
+    const cached = battleProgressCache.get(doc);
+    if (cached && performance.now() - cached.at < BATTLE_ACTIVITY_CACHE_MS) return cached.value;
+    const turnValue = turnSignature(doc);
     const enemyHp = Array.from(doc.querySelectorAll('[id^="enemy-hp"]'), element =>
       normalizePopupText(element.textContent || '')
     ).join(',');
@@ -6406,9 +6416,43 @@
     const memberGauge = Array.from(doc.querySelectorAll('.prt-command .prt-member .prt-gauge-special-inner'), element =>
       element.style.width || element.getAttribute('style') || ''
     ).join(',');
-    const value = `${turn}|${enemyHp}|${memberHp}|${memberGauge}`;
-    if (lightweightMode) battleProgressCache.set(doc, { at: performance.now(), value });
+    const value = `${turnValue}|${enemyHp}|${memberHp}|${memberGauge}`;
+    battleProgressCache.set(doc, { at: performance.now(), value });
     return value;
+  }
+
+  function turnCountValue(doc = frameDocument()) {
+    const turn = doc.querySelector(SELECTORS.turn);
+    if (!turn) return NaN;
+    const digits = String(turn.textContent || '').replace(/[^0-9]/g, '');
+    return digits ? Number(digits) : NaN;
+  }
+
+  const attackRequestScanCache = new WeakMap();
+
+  // 通常攻撃のリクエストが飛んだ時刻（そのdocumentのタイムライン基準）を返す。
+  // アビリティや召喚のリクエストは一致しないので、フルオートが攻撃まで進んだ時だけ増える。
+  function latestAttackRequestAt(doc = frameDocument()) {
+    try {
+      const win = doc.defaultView || frameWindow();
+      const entries = win?.performance?.getEntriesByType?.('resource');
+      if (!entries) return 0;
+      const scan = attackRequestScanCache.get(doc) || { scanned: 0, latest: 0 };
+      if (entries.length < scan.scanned) scan.scanned = 0;
+      for (let index = scan.scanned; index < entries.length; index++) {
+        const entry = entries[index];
+        if (!ATTACK_REQUEST_PATTERN.test(entry?.name || '')) continue;
+        // 画像やスクリプトの名前がたまたま一致しても攻撃とは見なさない
+        if (!ATTACK_REQUEST_INITIATORS.includes(String(entry.initiatorType ?? ''))) continue;
+        const at = Number(entry.startTime) || 0;
+        if (at > scan.latest) scan.latest = at;
+      }
+      scan.scanned = entries.length;
+      attackRequestScanCache.set(doc, scan);
+      return scan.latest;
+    } catch {
+      return 0;
+    }
   }
 
   function attackSnapshot(doc = frameDocument()) {
@@ -6417,9 +6461,9 @@
     const start = doc.querySelector(SELECTORS.attackStart);
     const dummy = doc.querySelector(SELECTORS.attackDummy);
     const cancel = doc.querySelector(SELECTORS.attackCancel);
-    const turn = useDomFallback ? turnSignature(doc) : '';
     const domActorAttacking = useDomFallback && Boolean(doc.querySelector(SELECTORS.attackActor));
     return {
+      doc,
       start,
       dummy,
       cancel,
@@ -6429,82 +6473,139 @@
       runtime,
       runtimeAttacking: runtime.attacking,
       attackButtonPushed: runtime.attackButtonPushed,
+      domActorAttacking,
       actorAttacking: runtime.attacking || runtime.attackButtonPushed || domActorAttacking,
-      turn,
-      progress: useDomFallback ? battleProgressSignature(doc, turn) : ''
+      turnCount: turnCountValue(doc),
+      attackRequestAt: latestAttackRequestAt(doc),
+      // 攻撃判定には使わない。演出が続いているかどうか（待機を延長してよいか）の判断だけに使う。
+      activity: battleProgressSignature(doc)
     };
   }
 
   function isAttackInProgress(snapshot) {
+    // ダミー（.prt-attack-start-dummy）は「攻撃ボタンが押せない」状態を表すだけで、
+    // アビリティや召喚の演出中にも出る。攻撃の根拠にはしない。
     return Boolean(
       snapshot.runtimeAttacking
       || snapshot.attackButtonPushed
       || snapshot.cancelVisible
-      || snapshot.dummyVisible
-      || snapshot.actorAttacking
+      || snapshot.domActorAttacking
     );
   }
 
+  // フルオートは「アビリティ→召喚→攻撃」の順に動くため、盤面が動いた・攻撃ボタンが隠れた・
+  // 味方や敵のHPが変わったといった変化はアビリティでも（マルチでは他人の攻撃でも）起きる。
+  // ここでは攻撃ボタンが押されたと断定できる証拠だけを採用する。
+  function attackCommitEvidence(baseline, current) {
+    if (!baseline || !current || baseline.doc !== current.doc) return '';
+    if (current.attackRequestAt > baseline.attackRequestAt) return 'attack-request';
+    if (current.attackButtonPushed && !baseline.attackButtonPushed) return 'attack-button';
+    if (
+      Number.isFinite(baseline.turnCount)
+      && Number.isFinite(current.turnCount)
+      && current.turnCount > baseline.turnCount
+    ) return 'turn-advanced';
+    if (!current.runtime.available) {
+      if (current.cancelVisible && !baseline.cancelVisible) return 'attack-cancel';
+      if (current.domActorAttacking && !baseline.domActorAttacking) return 'attack-actor';
+    }
+    return '';
+  }
+
   function attackTransitionFromBaseline(baseline, current) {
-    const startReplaced = Boolean(baseline.start && current.start && baseline.start !== current.start);
-    const startBecameHidden = Boolean(baseline.startVisible && !current.startVisible);
-    const turnChanged = Boolean(baseline.turn && current.turn && baseline.turn !== current.turn);
-    const progressChanged = Boolean(baseline.progress && current.progress && baseline.progress !== current.progress);
-    const started = isAttackInProgress(current) || startReplaced || startBecameHidden || turnChanged || progressChanged;
-    return started ? { current, startReplaced, startBecameHidden, turnChanged, progressChanged } : false;
+    const evidence = attackCommitEvidence(baseline, current);
+    return evidence ? { current, snapshot: current, evidence, attackStarted: true } : false;
   }
 
+  // フルオート押下時点の基準を捨てる。基準を持たない＝待機ブロックはその場で基準を取り直す。
   function clearPendingAutoAttack(reason = 'フルオート攻撃監視を解除しました') {
-    const pending = state.pendingAutoAttack;
+    if (!state.pendingAutoAttack) return;
     state.pendingAutoAttack = null;
-    if (!pending || pending.controller.signal.aborted) return;
-    pending.controller.abort(new DOMException(reason, 'AbortError'));
+    state.pendingAutoAttackClearedReason = reason;
   }
 
+  // フルオートを押す直前の状態を記録しておく。押下から待機ブロック開始までの間に
+  // 攻撃が始まっても、攻撃リクエスト時刻とターン数は残るため取りこぼさない。
   function armPendingAutoAttack(timeoutMs, parentSignal) {
     clearPendingAutoAttack();
-    const controller = new AbortController();
-    const onParentAbort = () => controller.abort(abortException(parentSignal));
-    parentSignal?.addEventListener('abort', onParentAbort, { once: true });
-    const baseline = attackSnapshot();
-    const promise = monitorFrame(() => {
-      const doc = frameDocument();
-      const battleEnd = detectBattleEndState(doc);
-      if (battleEnd) return { battleEnd };
-      const current = attackSnapshot(doc);
-      const transition = attackTransitionFromBaseline(baseline, current);
-      if (!transition) return false;
-      const auto = fullAutoState(doc);
-      return auto.on || isAttackInProgress(current) ? transition : false;
-    }, {
-      signal: controller.signal,
+    const pending = {
+      baseline: attackSnapshot(),
+      createdAt: performance.now(),
       timeoutMs,
-      stableMs: 0,
-      description: 'フルオート押下後の攻撃開始待ち',
-      observeRoots: battleObservationRoots,
-      observeOnLightweight: false,
-      observeCharacterData: false,
-      intervalMs: 160
-    }).then(
-      result => ({ ok: true, result }),
-      error => ({ ok: false, error })
-    ).finally(() => parentSignal?.removeEventListener('abort', onParentAbort));
-    const pending = { controller, promise, baseline, createdAt: performance.now(), timeoutMs };
+      signal: parentSignal || null
+    };
     state.pendingAutoAttack = pending;
     return pending;
   }
 
   async function consumePendingAutoAttack(timeoutMs) {
     const pending = state.pendingAutoAttack;
-    if (!pending) return null;
     state.pendingAutoAttack = null;
-    if (performance.now() - pending.createdAt > Math.max(timeoutMs, pending.timeoutMs)) {
-      if (!pending.controller.signal.aborted) pending.controller.abort(new DOMException('フルオート攻撃監視が期限切れです', 'AbortError'));
+    if (!pending || pending.signal?.aborted) return null;
+    if (performance.now() - pending.createdAt > Math.max(timeoutMs, pending.timeoutMs)) return null;
+    let doc = null;
+    try {
+      doc = frameDocument();
+    } catch {
       return null;
     }
-    const outcome = await pending.promise;
-    if (!outcome.ok) throw outcome.error;
-    return { ...outcome.result, triggeredByFullAutoToggle: true };
+    if (!pending.baseline || pending.baseline.doc !== doc) return null;
+    return pending.baseline;
+  }
+
+  // 「フルオートが攻撃ボタンを押す」まで待つ。アビリティ・召喚・他人の攻撃では終わらない。
+  async function waitForAttackPress(initialBaseline, { signal, timeoutMs }) {
+    const startedAt = performance.now();
+    let baseline = initialBaseline;
+    // 基準時点ですでに攻撃中なら、それは前回の攻撃なので終わるまで数えない。
+    let settled = !isAttackInProgress(baseline);
+    let activity = baseline.activity;
+    let activityAt = startedAt;
+
+    while (true) {
+      try {
+        return await monitorFrame(({ lastMutation }) => {
+          const doc = frameDocument();
+          const battleEnd = detectBattleEndState(doc);
+          if (battleEnd) return { battleEnd };
+          const snapshot = attackSnapshot(doc);
+          if (snapshot.activity !== activity) {
+            activity = snapshot.activity;
+            activityAt = performance.now();
+          } else if (lastMutation > activityAt) {
+            activityAt = lastMutation;
+          }
+          if (snapshot.doc !== baseline.doc) {
+            baseline = snapshot;
+            settled = !isAttackInProgress(snapshot);
+            return false;
+          }
+          if (!settled) {
+            if (isAttackInProgress(snapshot)) return false;
+            baseline = snapshot;
+            settled = true;
+            return false;
+          }
+          return attackTransitionFromBaseline(baseline, snapshot);
+        }, {
+          signal,
+          timeoutMs,
+          stableMs: 0,
+          description: 'フルオート攻撃開始待ち',
+          observeRoots: battleObservationRoots,
+          observeOnLightweight: false,
+          observeCharacterData: false,
+          intervalMs: ATTACK_WAIT_POLL_MS
+        });
+      } catch (error) {
+        if (error?.code !== 'TIMEOUT') throw error;
+        const now = performance.now();
+        const stalled = now - activityAt >= ATTACK_WAIT_ACTIVITY_GRACE_MS;
+        const exhausted = now - startedAt >= timeoutMs + ATTACK_WAIT_MAX_EXTENSION_MS;
+        // 演出が続いている間だけ延長する。盤面が止まっていれば通常どおり復帰処理へ。
+        if (stalled || exhausted) throw error;
+      }
+    }
   }
 
   async function waitForAutoAttack(config, context) {
@@ -6521,62 +6622,19 @@
       const initialEnd = safeBattleEndState();
       if (initialEnd) return restartWorkflowAfterBattleEnd(config, context, initialEnd);
 
-      const pendingAttack = await consumePendingAutoAttack(timeoutMs);
-      if (pendingAttack?.battleEnd) return restartWorkflowAfterBattleEnd(config, context, pendingAttack.battleEnd);
-      if (pendingAttack) return pendingAttack;
-
-      const initial = attackSnapshot();
-      if (isAttackInProgress(initial)) return { alreadyAttacking: true, snapshot: initial };
+      // フルオートを押した直前の状態があればそれを基準にする（押下～ここまでの攻撃も拾える）。
+      let baseline = (await consumePendingAutoAttack(timeoutMs)) || attackSnapshot();
 
       const auto = fullAutoState();
       if (!auto.on) {
         await ensureFullAuto(config, context);
-        const enabledByThisBlock = await consumePendingAutoAttack(timeoutMs);
-        if (enabledByThisBlock?.battleEnd) return restartWorkflowAfterBattleEnd(config, context, enabledByThisBlock.battleEnd);
-        if (enabledByThisBlock) return enabledByThisBlock;
+        const armedBaseline = await consumePendingAutoAttack(timeoutMs);
+        if (armedBaseline) baseline = armedBaseline;
       }
 
-      const armed = await monitorFrame(() => {
-        const doc = frameDocument();
-        const battleEnd = detectBattleEndState(doc);
-        if (battleEnd) return { battleEnd };
-        const snapshot = attackSnapshot(doc);
-        const transition = attackTransitionFromBaseline(initial, snapshot);
-        if (transition) return { snapshot, alreadyAttacking: true, transition };
-        if (isAttackInProgress(snapshot)) return { snapshot, alreadyAttacking: true };
-        const attackReady = snapshot.startVisible && !snapshot.cancelVisible && !snapshot.dummyVisible;
-        return attackReady ? { snapshot, alreadyAttacking: false } : false;
-      }, {
-        signal,
-        timeoutMs,
-        stableMs: 0,
-        description: 'フルオート攻撃受付待ち',
-        observeRoots: battleObservationRoots,
-        observeOnLightweight: false,
-        observeCharacterData: false,
-        intervalMs: 160
-      });
-      if (armed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, armed.battleEnd);
-      if (armed.alreadyAttacking) return armed;
-
-      const baseline = armed.snapshot;
-      const transition = await monitorFrame(() => {
-        const doc = frameDocument();
-        const battleEnd = detectBattleEndState(doc);
-        if (battleEnd) return { battleEnd };
-        return attackTransitionFromBaseline(baseline, attackSnapshot(doc));
-      }, {
-        signal,
-        timeoutMs,
-        stableMs: 0,
-        description: 'フルオート攻撃開始待ち',
-        observeRoots: battleObservationRoots,
-        observeOnLightweight: false,
-        observeCharacterData: false,
-        intervalMs: 160
-      });
-      if (transition.battleEnd) return restartWorkflowAfterBattleEnd(config, context, transition.battleEnd);
-      return transition;
+      const pressed = await waitForAttackPress(baseline, { signal, timeoutMs });
+      if (pressed.battleEnd) return restartWorkflowAfterBattleEnd(config, context, pressed.battleEnd);
+      return pressed;
     } catch (error) {
       if (error instanceof FlowRestart || error?.name === 'AbortError') throw error;
       const navigatedEnd = recoverableBattleEndState();

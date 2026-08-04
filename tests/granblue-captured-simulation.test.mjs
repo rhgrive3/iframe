@@ -192,8 +192,12 @@ class FakeDocument extends FakeElement {
     super();
     this.readyState = readyState;
     this.body = { childElementCount: 1 };
+    this.resources = [];
     this.defaultView = {
       stage,
+      performance: {
+        getEntriesByType: type => (type === 'resource' ? this.resources : [])
+      },
       getComputedStyle: element => ({
         display: element.style.display || 'block',
         visibility: element.style.visibility || 'visible',
@@ -201,6 +205,11 @@ class FakeDocument extends FakeElement {
       })
     };
     this.ownerDocument = this;
+  }
+
+  request(name, startTime) {
+    this.resources.push({ name, startTime, initiatorType: 'xmlhttprequest' });
+    return this;
   }
 
   attach(selector, element) {
@@ -247,13 +256,28 @@ function popupDocument(message) {
   return doc;
 }
 
-function battleDocument({ raidId, status, autoClasses = [], attackClasses = [], dummyClasses = ['display-off'], cancelClasses = ['display-off'] }) {
+function battleDocument({
+  raidId,
+  status,
+  autoClasses = [],
+  attackClasses = [],
+  dummyClasses = ['display-off'],
+  cancelClasses = ['display-off'],
+  turnCount = null,
+  enemyHp = null,
+  memberHp = null
+}) {
   const doc = new FakeDocument({ stage: stageFor(raidId, status) });
   doc.attach(SELECTORS.battleScreen, new FakeElement());
   doc.attach(SELECTORS.fullAuto, control(autoClasses, { display: 'block' }));
   doc.attach(SELECTORS.attackStart, control(attackClasses));
   doc.attach(SELECTORS.attackDummy, control(dummyClasses));
   doc.attach(SELECTORS.attackCancel, control(cancelClasses));
+  if (turnCount != null) doc.attach(SELECTORS.turn, new FakeElement({ textContent: String(turnCount) }));
+  if (enemyHp != null) doc.attach('[id^="enemy-hp"]', new FakeElement({ textContent: String(enemyHp) }));
+  if (memberHp != null) {
+    doc.attach('.prt-command .prt-member .txt-hp-value', new FakeElement({ textContent: String(memberHp) }));
+  }
   return doc;
 }
 
@@ -270,10 +294,16 @@ const state = {
 
 const battleResultUrlPattern = source.match(/const BATTLE_RESULT_URL_PATTERN = (\/.+\/[a-z]*);/);
 assert.ok(battleResultUrlPattern, 'missing production constant: BATTLE_RESULT_URL_PATTERN');
+const attackRequestPattern = source.match(/const ATTACK_REQUEST_PATTERN = (\/.+\/[a-z]*);/);
+assert.ok(attackRequestPattern, 'missing production constant: ATTACK_REQUEST_PATTERN');
 
 const sandbox = vm.createContext({
   SELECTORS,
   BATTLE_RESULT_URL_PATTERN: vm.runInNewContext(battleResultUrlPattern[1]),
+  ATTACK_REQUEST_PATTERN: vm.runInNewContext(attackRequestPattern[1]),
+  ATTACK_REQUEST_INITIATORS: ['xmlhttprequest', 'fetch', 'other', ''],
+  BATTLE_ACTIVITY_CACHE_MS: 350,
+  attackRequestScanCache: new WeakMap(),
   state,
   BATTLE_END_MESSAGE: '敵が倒されたため、このバトルは終了しました。',
   DEFAULT_STABLE_MS: 140,
@@ -315,8 +345,11 @@ for (const name of [
   'elementDisplayOn',
   'turnSignature',
   'battleProgressSignature',
+  'turnCountValue',
+  'latestAttackRequestAt',
   'attackSnapshot',
   'isAttackInProgress',
+  'attackCommitEvidence',
   'attackTransitionFromBaseline'
 ]) {
   sandbox[name] = vm.runInContext(`(${extractFunction(name)})`, sandbox);
@@ -447,6 +480,115 @@ test('full-auto and attack controls follow the captured loading-ready-attacking 
   assert.equal(sandbox.fullAutoState(doc).on, true);
   assert.equal(sandbox.isAttackInProgress(current), true);
   assert.ok(sandbox.attackTransitionFromBaseline(baseline, current));
+});
+
+test('full-auto ability and summon activity never end the attack wait', () => {
+  resetRuntime(fixture.raids.selected);
+  const status = clone(fixture.status.ready);
+  status.auto_attack = 1;
+  const doc = battleDocument({
+    raidId: fixture.raids.selected,
+    status,
+    autoClasses: ['on'],
+    attackClasses: ['display-on'],
+    turnCount: 3,
+    enemyHp: '100',
+    memberHp: '1500'
+  });
+  setFrame(doc, fixture.urls.battle);
+  doc.request('https://game.granbluefantasy.jp/rest/multiraid/start.json', 10);
+
+  const baseline = sandbox.attackSnapshot(doc);
+  assert.equal(sandbox.isAttackInProgress(baseline), false);
+
+  // アビリティ発動: 攻撃ボタンが隠れてダミーが出て、味方と敵のHPが動く
+  clock.now = 500;
+  doc.querySelector(SELECTORS.attackStart).classList = { contains: name => name === 'display-off' };
+  doc.querySelector(SELECTORS.attackDummy).classList = { contains: name => name === 'display-on' };
+  doc.querySelector('[id^="enemy-hp"]').textContent = '92';
+  doc.querySelector('.prt-command .prt-member .txt-hp-value').textContent = '1320';
+  doc.request('https://game.granbluefantasy.jp/rest/multiraid/ability_result.json', 520);
+  const duringAbility = sandbox.attackSnapshot(doc);
+  assert.notEqual(duringAbility.activity, baseline.activity);
+  assert.equal(duringAbility.dummyVisible, true);
+  assert.equal(duringAbility.startVisible, false);
+  assert.equal(sandbox.isAttackInProgress(duringAbility), false);
+  assert.equal(sandbox.attackCommitEvidence(baseline, duringAbility), '');
+  assert.equal(sandbox.attackTransitionFromBaseline(baseline, duringAbility), false);
+
+  // 召喚も攻撃ではない
+  clock.now = 1200;
+  doc.request('https://game.granbluefantasy.jp/rest/multiraid/summon_result.json', 1220);
+  const duringSummon = sandbox.attackSnapshot(doc);
+  assert.equal(sandbox.attackTransitionFromBaseline(baseline, duringSummon), false);
+
+  // 攻撃リクエストが飛んで初めて待機が終わる
+  clock.now = 2000;
+  doc.request('https://game.granbluefantasy.jp/rest/multiraid/normal_attack_result.json', 2010);
+  const attacking = sandbox.attackSnapshot(doc);
+  assert.equal(attacking.attackRequestAt, 2010);
+  assert.equal(sandbox.attackCommitEvidence(baseline, attacking), 'attack-request');
+  assert.ok(sandbox.attackTransitionFromBaseline(baseline, attacking));
+
+  // 同じ攻撃を次の待機がもう一度拾わない
+  clock.now = 2400;
+  const nextBaseline = sandbox.attackSnapshot(doc);
+  assert.equal(sandbox.attackTransitionFromBaseline(nextBaseline, sandbox.attackSnapshot(doc)), false);
+});
+
+test('the attack button being pushed by full auto is an edge, not a level', () => {
+  resetRuntime(fixture.raids.selected);
+  const status = clone(fixture.status.ready);
+  status.auto_attack = 1;
+  const doc = battleDocument({
+    raidId: fixture.raids.selected,
+    status,
+    autoClasses: ['on'],
+    attackClasses: ['display-on'],
+    turnCount: 5
+  });
+  setFrame(doc, fixture.urls.battle);
+
+  const baseline = sandbox.attackSnapshot(doc);
+  status.attackQueue.attackButtonPushed = 1;
+  clock.now = 400;
+  const pushed = sandbox.attackSnapshot(doc);
+  assert.equal(sandbox.attackCommitEvidence(baseline, pushed), 'attack-button');
+
+  // 押されたままの状態を基準にした次の待機は、その攻撃で終わってはいけない
+  clock.now = 800;
+  const stillPushed = sandbox.attackSnapshot(doc);
+  assert.equal(sandbox.attackCommitEvidence(pushed, stillPushed), '');
+});
+
+test('without the game runtime the attack is recognised by the turn counter, not by board activity', () => {
+  resetRuntime();
+  const doc = battleDocument({
+    raidId: '',
+    status: null,
+    autoClasses: ['on'],
+    attackClasses: ['display-on'],
+    turnCount: 7,
+    enemyHp: '80',
+    memberHp: '1200'
+  });
+  doc.defaultView.stage = null;
+  setFrame(doc, fixture.urls.battle);
+
+  const baseline = sandbox.attackSnapshot(doc);
+  assert.equal(baseline.runtime.available, false);
+
+  // 他人の攻撃や自分のアビリティでHPが動いてもターンは進まない
+  clock.now = 600;
+  doc.querySelector('[id^="enemy-hp"]').textContent = '61';
+  doc.querySelector('.prt-command .prt-member .txt-hp-value').textContent = '900';
+  const moved = sandbox.attackSnapshot(doc);
+  assert.notEqual(moved.activity, baseline.activity);
+  assert.equal(sandbox.attackCommitEvidence(baseline, moved), '');
+
+  clock.now = 1200;
+  doc.querySelector(SELECTORS.turn).textContent = '8';
+  assert.equal(sandbox.attackCommitEvidence(baseline, sandbox.attackSnapshot(doc)), 'turn-advanced');
 });
 
 test('same live status object becomes a valid runtime finish only after the battle was armed', () => {

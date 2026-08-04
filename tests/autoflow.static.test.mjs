@@ -531,7 +531,15 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   assert.ok(attack.includes('runtimeAttacking: runtime.attacking'));
   assert.ok(attack.includes('attackButtonPushed: runtime.attackButtonPushed'));
   assert.ok(attack.includes('const useDomFallback = !runtime.available'));
-  assert.ok(attack.includes("progress: useDomFallback ? battleProgressSignature(doc, turn) : ''"));
+  assert.ok(attack.includes('attackRequestAt: latestAttackRequestAt(doc)'));
+  assert.ok(attack.includes('turnCount: turnCountValue(doc)'));
+  // 通常攻撃のリクエストだけを攻撃の証拠にする（アビリティ・召喚は別エンドポイント）
+  assert.ok(source.includes('const ATTACK_REQUEST_PATTERN = /attack_result/i'));
+  assert.ok(!/ATTACK_REQUEST_PATTERN = \/[^\n]*(ability|summon)/.test(source));
+  const requests = source.slice(source.indexOf('function latestAttackRequestAt'), source.indexOf('function attackSnapshot'));
+  assert.ok(requests.includes("win?.performance?.getEntriesByType?.('resource')"));
+  assert.ok(requests.includes('ATTACK_REQUEST_PATTERN.test(entry?.name'));
+  assert.ok(requests.includes('ATTACK_REQUEST_INITIATORS.includes(String(entry.initiatorType ?? \'\'))'));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
   assert.ok(end.includes('armBattleEndDetection(doc, runtime)'));
   assert.ok(end.includes('battleEndDetectionMatches(runtime)'));
