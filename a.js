@@ -500,6 +500,8 @@
   const DOCK_VIEWPORT_MARGIN = 8;
   const DOCK_KEEP_VISIBLE_X = 76;
   const DOCK_KEEP_VISIBLE_Y = 46;
+  // Widest first. Each step keeps every rule of the steps before it and tightens further.
+  const DOCK_DENSITY_STEPS = Object.freeze(['lg', 'md', 'sm', 'xs', 'xxs']);
   const MAX_LOGS = 20;
   const MAX_WORKFLOW_HISTORY = 40;
   const MAX_WORKFLOW_HISTORY_BYTES = 12_000_000;
@@ -596,7 +598,8 @@
         --blue:#66b8ff;--blue-soft:rgba(102,184,255,.13);--radius-xs:8px;--radius-sm:11px;
         --radius-md:15px;--radius-lg:20px;--shadow-lg:0 24px 70px rgba(0,0,0,.52),0 2px 12px rgba(0,0,0,.32);
         color-scheme:dark;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI","Helvetica Neue",sans-serif;
-        font-size:14px;line-height:1.45;color:var(--text)
+        font-size:14px;line-height:1.45;color:var(--text);
+        --field-height:44px;--field-font:14px;--field-pad:9px 11px;--field-gap:6px;--label-font:10px
       }
       button,input,select,textarea{font:inherit;color:var(--text)}
       button{min-height:44px;border:1px solid var(--line);border-radius:var(--radius-sm);padding:0 14px;
@@ -614,15 +617,15 @@
       button.ghost{border-color:transparent;background:transparent;color:var(--muted)}
       button.ghost:hover:not(:disabled){color:var(--text);background:var(--surface)}
       input,select,textarea{
-        width:100%;min-height:44px;border:1px solid #5c6377;border-radius:var(--radius-sm);padding:9px 11px;
-        background:#0e1017;font-size:14px;line-height:1.35;outline:none;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease
+        width:100%;min-height:var(--field-height);border:1px solid #5c6377;border-radius:var(--radius-sm);padding:var(--field-pad);
+        background:#0e1017;font-size:var(--field-font);line-height:1.35;outline:none;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease
       }
       input:hover:not(:disabled),select:hover:not(:disabled),textarea:hover:not(:disabled){border-color:#737c92}
       input:focus,select:focus,textarea:focus{border-color:rgba(124,140,255,.72);background:#10131c;box-shadow:0 0 0 3px rgba(124,140,255,.12)}
       input[aria-invalid=true],select[aria-invalid=true],textarea[aria-invalid=true]{border-color:#d95867;box-shadow:0 0 0 3px rgba(255,107,120,.1)}
       input::placeholder,textarea::placeholder{color:#7c8498;opacity:1}
       input[type=checkbox]{width:20px;min-height:20px;height:20px;margin:4px 0;padding:0;accent-color:var(--accent);cursor:pointer}
-      input[type=number]{font-variant-numeric:tabular-nums}
+      input[type=number]{font-variant-numeric:tabular-nums;text-align:right}
       select{cursor:pointer}
       textarea{min-height:78px;resize:vertical}
       button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{
@@ -635,6 +638,10 @@
       .srOnly{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
       #frame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#fff}
       :host(.ui-dragging) #frame{pointer-events:none}
+      /* Give the panel its own compositor layer for the length of a drag so the phone moves
+         a texture instead of repainting the whole dock every frame. */
+      :host(.ui-dragging) #dock{will-change:transform;transition:none}
+      :host(.ui-dragging) #dock *{transition:none!important;animation:none!important}
 
       #browserBar{
         position:fixed;z-index:150;top:max(8px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);
@@ -731,7 +738,7 @@
       .title small[data-tone=error]::before{background:var(--red)}
 
       #mainTabs{
-        flex:0 0 auto;position:relative;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:7px 10px;
+        flex:0 0 auto;position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:7px 10px;
         border-bottom:1px solid var(--line);background:rgba(9,11,16,.34)
       }
       .mainTab{
@@ -799,16 +806,17 @@
         border-radius:9px;background:var(--surface);color:#c9ceff;font-size:13px
       }
       .cardHeading{min-width:0}
-      .cardHeading strong{display:block;font-size:12.5px;line-height:1.3}
-      .cardHeading small{display:block;margin-top:2px;color:var(--muted);font-size:9.5px;font-weight:520}
+      .cardHeading strong,.cardHeading small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+      .cardHeading strong{font-size:12.5px;line-height:1.3}
+      .cardHeading small{margin-top:2px;color:var(--muted);font-size:9.5px;font-weight:520}
       .hint{color:var(--muted);font-size:10.5px;font-weight:500;line-height:1.55}
       .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
       .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
-      .field{display:flex;min-width:0;flex-direction:column;gap:6px;color:#a8afc0;font-size:10px;font-weight:670;letter-spacing:.01em}
+      .field{display:flex;min-width:0;flex-direction:column;gap:var(--field-gap);color:#a8afc0;font-size:var(--label-font);font-weight:670;letter-spacing:.01em}
       .field:focus-within{color:#ccd1e1}
       .field>span{display:flex;align-items:center;min-height:15px}
-      .field:has(input[type=checkbox]){justify-content:flex-end}
-      .field:has(input[type=checkbox])>span{min-height:auto}
+      .field:has(input[type=checkbox]){flex-direction:row-reverse;align-items:center;justify-content:flex-end;gap:9px}
+      .field:has(input[type=checkbox])>span{flex:1 1 auto;min-height:auto}
       .span2{grid-column:1/-1}
       .toolbar{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}
       .toolbar>*{flex:1 1 108px;min-width:0}
@@ -878,7 +886,7 @@
 
       .editorCard{padding-bottom:4px}
       .editorCard>.cardHeader{margin-bottom:7px}
-      .statsPill{display:inline-flex;align-items:center;min-height:24px;padding:0 8px;border:1px solid var(--line);border-radius:999px;background:rgba(0,0,0,.12);font-size:9.5px}
+      .statsPill{display:inline-flex;align-items:center;min-height:24px;max-width:100%;padding:0 8px;border:1px solid var(--line);border-radius:999px;background:rgba(0,0,0,.12);font-size:9.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       #workflowEditor{position:relative;padding:1px 0 94px}
       .empty{display:grid;min-height:122px;place-items:center;padding:26px 16px;border:1px dashed rgba(124,140,255,.28);border-radius:13px;background:rgba(124,140,255,.035);color:var(--muted);font-size:10.5px;line-height:1.6;text-align:center}
       .dropZone{position:relative;height:12px;margin:0 7px;border-radius:7px;transition:height .14s ease,background-color .14s ease}
@@ -886,7 +894,7 @@
       .dropZone.dragOver{height:28px;background:rgba(124,140,255,.08)}
       .dropZone.dragOver::after{transform:translateY(-50%) scaleX(1);background:var(--accent)}
       .blockCard{
-        position:relative;margin:3px 0;border:1px solid var(--line);border-radius:14px;background:#12151d;
+        position:relative;margin:3px 0;border:1px solid var(--line);border-radius:14px;background:#12151d;contain:layout style;
         box-shadow:0 6px 18px rgba(0,0,0,.12);overflow:hidden;transition:border-color .16s ease,opacity .16s ease,transform .16s ease
       }
       .blockCard::before{content:'';position:absolute;z-index:2;top:0;bottom:0;left:0;width:4px;background:var(--accent)}
@@ -934,7 +942,7 @@
         margin:0 -16px;padding:12px 34px calc(12px + env(safe-area-inset-bottom));
         border-top:1px solid rgba(255,255,255,.08);background:#0e1016
       }
-      #runBar button{min-height:46px;font-size:12px}
+      #runBar button{min-height:46px;font-size:12px;white-space:nowrap}
       #runWorkflow{border-color:rgba(70,212,149,.34);background:linear-gradient(180deg,#54dda1 0%,#35bf82 100%);color:#071d13}
       #runWorkflow:hover:not(:disabled){background:linear-gradient(180deg,#62e4aa 0%,#3dc98a 100%)}
       #stopWorkflow{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffc0c6}
@@ -1045,6 +1053,7 @@
       /* Panel density. syncDockDensity() measures the dock itself and adds d-md / d-sm /
          d-xs cumulatively, so a narrower panel keeps every rule of the wider steps and
          only tightens further. Nothing here looks at the screen. */
+      #dock.d-md{--field-height:38px;--field-font:13.5px;--field-pad:7px 10px;--field-gap:5px}
       #dock.d-md .shortcutHint{display:none}
       #dock.d-md .page{padding:14px 13px 0}
       #dock.d-md .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1052,10 +1061,10 @@
       #dock.d-md .paletteFilters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
       #dock.d-md .paletteFilter{padding:0 5px}
       #dock.d-md .blockHead{grid-template-columns:38px minmax(0,1fr)}
-      #dock.d-md .blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:46px}
+      #dock.d-md .blockTools{grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start;padding-left:46px}
       #dock.d-md #runBar{margin:0 -13px;padding:12px 32px calc(11px + env(safe-area-inset-bottom))}
 
-      #dock.d-sm{font-size:12.5px}
+      #dock.d-sm{font-size:12.5px;--field-height:34px;--field-font:13px;--field-pad:6px 9px;--field-gap:4px;--label-font:9.5px}
       #dock.d-sm #dockHeader{grid-template-columns:36px minmax(0,1fr) 36px 36px 36px;gap:4px;min-height:52px;padding:5px 7px}
       #dock.d-sm #dockGrip,#dock.d-sm #toggleCompact,#dock.d-sm #toggleMaximize,#dock.d-sm #closeApp{width:36px;height:36px;min-height:36px}
       #dock.d-sm #dockGrip::before{inset:11px}
@@ -1076,7 +1085,6 @@
       #dock.d-sm .cardHeading strong{font-size:11.5px}
       #dock.d-sm .cardHeading small{font-size:9px}
       #dock.d-sm .grid2,#dock.d-sm .grid3{gap:7px}
-      #dock.d-sm input,#dock.d-sm select,#dock.d-sm textarea{min-height:38px;padding:7px 9px;font-size:16px}
       #dock.d-sm .toolbar{gap:5px;margin-top:8px}
       #dock.d-sm .toolbar>*{flex-basis:88px}
       #dock.d-sm .toolbar button{min-height:36px;height:36px;padding:0 9px;font-size:10px}
@@ -1107,19 +1115,18 @@
       #dock.d-sm .historyActions .btnLabel{display:none}
       #dock.d-sm .logEntry{grid-template-columns:52px 70px minmax(0,1fr);gap:6px;padding:7px 4px;font-size:9.5px}
 
-      #dock.d-xs{font-size:11.5px}
+      #dock.d-xs{font-size:11.5px;--field-height:32px;--field-font:12.5px;--field-pad:5px 8px}
       #dock.d-xs #dockHeader{grid-template-columns:32px minmax(0,1fr) 32px 32px 32px;gap:3px;min-height:46px;padding:4px 6px}
       #dock.d-xs #dockGrip,#dock.d-xs #toggleCompact,#dock.d-xs #toggleMaximize,#dock.d-xs #closeApp{width:32px;height:32px;min-height:32px}
       #dock.d-xs #dockGrip::before{inset:10px}
       #dock.d-xs .title strong{font-size:11px}
       #dock.d-xs .title small{font-size:9px;gap:5px}
       #dock.d-xs #mainTabs{gap:2px;padding:4px 5px}
-      #dock.d-xs .mainTab{height:34px;min-height:34px;gap:4px;font-size:9.5px}
+      #dock.d-xs .mainTab{height:34px;min-height:34px;gap:3px;padding:0 3px;font-size:9.5px}
       #dock.d-xs .tabIcon{width:13px;height:13px;font-size:11px}
       #dock.d-xs .page{padding:9px 8px 0}
       #dock.d-xs .card{padding:9px}
-      #dock.d-xs .grid2,#dock.d-xs .grid3{grid-template-columns:1fr}
-      #dock.d-xs .span2{grid-column:auto}
+      #dock.d-xs .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
       #dock.d-xs .toolbar>*{flex-basis:70px}
       #dock.d-xs .toolbar button{min-height:34px;height:34px;padding:0 7px;font-size:9.5px}
       #dock.d-xs .paletteFilters{grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
@@ -1129,6 +1136,19 @@
       #dock.d-xs .errorActions{grid-template-columns:1fr}
       #dock.d-xs #runBar button{min-height:40px}
       #dock.d-xs .logEntry{grid-template-columns:46px 62px minmax(0,1fr);gap:4px;padding:6px 3px;font-size:9px}
+
+      /* Under 300px two columns stop being readable, and the section glyphs cost more room
+         than they explain. */
+      #dock.d-xxs .grid2,#dock.d-xxs .grid3{grid-template-columns:1fr}
+      #dock.d-xxs .span2{grid-column:auto}
+      #dock.d-xxs .sectionIcon{display:none}
+      #dock.d-xxs .cardTitleGroup{gap:0}
+      #dock.d-xxs .paletteFilters{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+      /* Only iOS/iPadOS zoom the page into a focused field smaller than 16px. Everywhere
+         else that tax just makes every value in the panel oversized, so it is opt-in. */
+      #dock.ios{--field-font:16px}
+      #dock.ios input[type=checkbox]{font-size:initial}
 
       /* Short panels give the vertical budget back to the flow itself. */
       #dock.h-sm .pageIntro{display:none}
@@ -1491,6 +1511,7 @@
   }
   let narrowScreen = isNarrowViewport();
   dock.classList.toggle('narrowViewport', narrowScreen);
+  dock.classList.toggle('ios', isIosLikeBrowser());
   const dragLock = { active: false, pointerId: null, owner: null, restore: null, cancel: null };
 
 
@@ -1737,6 +1758,7 @@
 
   let logScrollFrame = 0;
   let validationRefreshTimer = 0;
+  let validationBadgeSignature = '';
   let dockRestoreBox = null;
 
   function scheduleLogScroll() {
@@ -3350,15 +3372,19 @@
       if (state.destroyed || state.running || state.legacyRunning) return;
       state.validationIssues = validateWorkflowDefinition(currentWorkflow());
       renderValidationChip();
-      // Repaint the per-block badges too, but never while a field is being typed into —
-      // a re-render there would take the caret away mid-word.
+      // Repaint the per-block badges only when they actually changed, and never while a
+      // field is being typed into — a rebuild there would take the caret away mid-word.
+      const signature = state.validationIssues.map(issue => `${issue.blockId}:${issue.severity}`).join('|');
       const typing = shadow.activeElement?.matches?.('#workflowEditor input,#workflowEditor select,#workflowEditor textarea');
-      if (!typing) renderWorkflowEditor();
+      if (signature === validationBadgeSignature || typing) return;
+      validationBadgeSignature = signature;
+      renderWorkflowEditor();
     }, VALIDATION_REFRESH_MS);
   }
 
   function invalidateWorkflowValidation() {
     state.validationIssues = [];
+    validationBadgeSignature = '';
     renderValidationChip([]);
     shadow.querySelectorAll('.blockCard.validation-error,.blockCard.validation-warning').forEach(card => {
       card.classList.remove('validation-error', 'validation-warning');
@@ -3405,6 +3431,7 @@
     state.validationIssues = issues;
     const errors = issues.filter(issue => issue.severity === 'error');
     const warnings = issues.filter(issue => issue.severity === 'warning');
+    validationBadgeSignature = issues.map(issue => `${issue.blockId}:${issue.severity}`).join('|');
     renderValidationChip(issues);
     renderWorkflowEditor();
     const summary = errors.length
@@ -8932,13 +8959,27 @@
     saveLegacyState();
   }
 
+  // What the user can actually see and touch. The host page decides the layout viewport
+  // through its own <meta viewport>, and pinch zoom moves the visual viewport inside it, so
+  // vw/dvw and window.innerWidth can each be wider than the screen. Taking the smallest
+  // credible measurement is the only way a fixed-position panel is guaranteed to fit.
+  function smallestPositive(values, fallback) {
+    let best = Infinity;
+    for (const value of values) {
+      const size = Number(value);
+      if (Number.isFinite(size) && size > 0 && size < best) best = size;
+    }
+    return best === Infinity ? fallback : best;
+  }
+
   function viewportBox() {
     const viewport = window.visualViewport;
+    const client = document.documentElement;
     return {
       left: finite(viewport?.offsetLeft, 0),
       top: finite(viewport?.offsetTop, 0),
-      width: finite(viewport?.width, window.innerWidth),
-      height: finite(viewport?.height, window.innerHeight)
+      width: smallestPositive([viewport?.width, client?.clientWidth, window.innerWidth], 360),
+      height: smallestPositive([viewport?.height, client?.clientHeight, window.innerHeight], 640)
     };
   }
 
@@ -8955,6 +8996,12 @@
 
   function narrowDockDefaultSize() {
     const box = viewportBox();
+    if (!dock.classList.contains('narrowViewport')) {
+      return {
+        width: Math.max(DOCK_MIN_WIDTH, Math.min(820, box.width - 20)),
+        height: Math.max(DOCK_MIN_HEIGHT, Math.min(860, box.height - 86))
+      };
+    }
     return {
       width: Math.max(DOCK_MIN_WIDTH, Math.min(460, box.width - 12)),
       height: Math.max(DOCK_MIN_HEIGHT, Math.min(800, box.height * 0.74))
@@ -8979,29 +9026,27 @@
   // Density is measured from the dock, never from the screen. A viewport media query cannot
   // see that a 280px panel is floating on a 412px phone, so every control kept being laid
   // out for the phone and overflowed the panel it lived in.
-  function syncDockDensity() {
+  function syncDockDensity(measured = null) {
     if (dock.classList.contains('compact')) return;
-    const rect = dock.getBoundingClientRect();
+    const rect = measured || dock.getBoundingClientRect();
     const width = rect.width || finite(state.dockWidth, 0) || viewportBox().width;
     const height = rect.height || finite(state.dockHeight, 0) || viewportBox().height;
-    const density = width < 380 ? 'xs' : width < 480 ? 'sm' : width < 640 ? 'md' : 'lg';
-    dock.classList.toggle('d-md', density !== 'lg');
-    dock.classList.toggle('d-sm', density === 'sm' || density === 'xs');
-    dock.classList.toggle('d-xs', density === 'xs');
+    const step = width < 300 ? 4 : width < 380 ? 3 : width < 480 ? 2 : width < 640 ? 1 : 0;
+    DOCK_DENSITY_STEPS.forEach((name, index) => dock.classList.toggle(`d-${name}`, index > 0 && index <= step));
     dock.classList.toggle('h-sm', height < 430);
-    dock.dataset.density = density;
+    dock.dataset.density = DOCK_DENSITY_STEPS[step];
   }
 
-  function dockFillsViewport() {
+  function dockFillsViewport(measured = null) {
     const box = viewportBox();
-    const rect = dock.getBoundingClientRect();
+    const rect = measured || dock.getBoundingClientRect();
     return rect.width >= box.width - DOCK_VIEWPORT_MARGIN - 2 && rect.height >= box.height - DOCK_VIEWPORT_MARGIN - 2;
   }
 
-  function syncMaximizeControl() {
+  function syncMaximizeControl(measured = null) {
     const button = byId('toggleMaximize');
     if (!button) return;
-    const maximized = Boolean(dockRestoreBox) || dockFillsViewport();
+    const maximized = Boolean(dockRestoreBox) || dockFillsViewport(measured);
     button.setAttribute('aria-pressed', String(maximized));
     button.textContent = maximized ? '⤡' : '⛶';
     button.title = maximized ? '元のサイズに戻す' : '画面いっぱいに広げる';
@@ -9042,21 +9087,42 @@
     const viewportTop = box.top;
     const viewportWidth = box.width;
     const viewportHeight = box.height;
-    if (Number.isFinite(state.dockWidth)) dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
-    else dock.style.removeProperty('--dock-width');
-    if (Number.isFinite(state.dockHeight)) dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
-    else dock.style.removeProperty('--dock-height');
-    const rect = dock.getBoundingClientRect();
+    const limit = narrowDockMaxSize();
+    if (dock.classList.contains('compact')) {
+      dock.style.removeProperty('--dock-width');
+      dock.style.removeProperty('--dock-height');
+    } else {
+      // Never let the stylesheet decide the size on its own. Its vw/dvw fallbacks measure
+      // the host page's layout viewport, which on a scaled or pinch-zoomed page is wider
+      // than the screen — that is how the panel came up larger than the phone it was on.
+      const size = narrowDockDefaultSize();
+      const savedWidth = Number.isFinite(state.dockWidth) ? state.dockWidth : size.width;
+      const savedHeight = Number.isFinite(state.dockHeight) ? state.dockHeight : size.height;
+      state.dockWidth = clamp(savedWidth, DOCK_MIN_WIDTH, limit.width);
+      state.dockHeight = clamp(savedHeight, DOCK_MIN_HEIGHT, limit.height);
+      dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
+      dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
+    }
+    let rect = dock.getBoundingClientRect();
+    if (!dock.classList.contains('compact') && (rect.width > limit.width + 1 || rect.height > limit.height + 1)) {
+      // Belt and braces: trust the measurement over the intent. If anything in the host
+      // page still stretched the panel past the screen, pull it back to what fits.
+      state.dockWidth = Math.min(state.dockWidth, limit.width);
+      state.dockHeight = Math.min(state.dockHeight, limit.height);
+      dock.style.maxWidth = `${limit.width}px`;
+      dock.style.maxHeight = `${limit.height}px`;
+      dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
+      dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
+      rect = dock.getBoundingClientRect();
+    } else {
+      dock.style.maxWidth = '';
+      dock.style.maxHeight = '';
+    }
     const width = rect.width || 780;
     const height = rect.height || 600;
     // The panel may hang off any edge. All that is guaranteed is a strip of the header
     // wide enough to grab, so a panel pushed aside can always be pulled back.
-    const keepX = Math.min(DOCK_KEEP_VISIBLE_X, width);
-    const keepY = Math.min(DOCK_KEEP_VISIBLE_Y, height);
-    let minX = viewportLeft + keepX - width;
-    let maxX = Math.max(minX, viewportLeft + viewportWidth - keepX);
-    let minY = viewportTop;
-    let maxY = Math.max(minY, viewportTop + viewportHeight - keepY);
+    let { minX, maxX, minY, maxY } = dockDragBounds({ width, height });
     if (keepInView) {
       // Growing the panel — leaving compact, maximising, a rotation — must not strand it
       // half off the screen. Only a deliberate drag may park it on an edge.
@@ -9073,14 +9139,43 @@
     dock.style.left = `${state.dockX}px`;
     dock.style.top = `${state.dockY}px`;
     dock.style.bottom = 'auto';
-    syncDockDensity();
-    syncMaximizeControl();
+    syncDockDensity(rect);
+    syncMaximizeControl(rect);
   }
 
-  function installDockDrag(handle) {
+  function dockDragBounds({ width, height }) {
+    const box = viewportBox();
+    const keepX = Math.min(DOCK_KEEP_VISIBLE_X, width);
+    const keepY = Math.min(DOCK_KEEP_VISIBLE_Y, height);
+    const minX = box.left + keepX - width;
+    const minY = box.top;
+    return {
+      minX,
+      maxX: Math.max(minX, box.left + box.width - keepX),
+      minY,
+      maxY: Math.max(minY, box.top + box.height - keepY)
+    };
+  }
+
+  // Dragging never touches layout. The bounds are measured once on pointerdown, pointermove
+  // only records a clamped target, and a single rAF paints it with a compositor transform.
+  // The real left/top is written once, on release. Measuring and reflowing the panel on
+  // every pointermove is what made the drag stutter on Android.
+  function installDockDrag(handle, { tapToExpand = false, skipControls = false, arrowKeys = false } = {}) {
     const drag = {
-      active: false, id: null, startX: 0, startY: 0,
-      baseX: 0, baseY: 0, moved: false, threshold: 3
+      active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0,
+      x: 0, y: 0, minX: 0, maxX: 0, minY: 0, maxY: 0,
+      moved: false, threshold: 3, frame: 0
+    };
+    const paint = () => {
+      drag.frame = 0;
+      if (!drag.active) return;
+      dock.style.transform = `translate3d(${drag.x - drag.baseX}px, ${drag.y - drag.baseY}px, 0)`;
+    };
+    const settle = () => {
+      if (drag.frame) cancelAnimationFrame(drag.frame);
+      drag.frame = 0;
+      dock.style.transform = '';
     };
     const detach = () => {
       window.removeEventListener('pointermove', move, true);
@@ -9094,13 +9189,14 @@
       const dy = event.clientY - drag.startY;
       if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
       drag.moved = true;
-      state.dockX = drag.baseX + dx;
-      state.dockY = drag.baseY + dy;
-      positionDock();
+      drag.x = clamp(drag.baseX + dx, drag.minX, drag.maxX);
+      drag.y = clamp(drag.baseY + dy, drag.minY, drag.maxY);
+      if (!drag.frame) drag.frame = requestAnimationFrame(paint);
     };
     const cancel = () => {
       if (!drag.active) return;
       drag.active = false;
+      settle();
       state.dockX = drag.baseX;
       state.dockY = drag.baseY;
       positionDock();
@@ -9113,13 +9209,20 @@
       consumeDragEvent(event, true);
       if (event.type === 'pointercancel') return cancel();
       drag.active = false;
+      settle();
+      if (drag.moved) {
+        state.dockX = drag.x;
+        state.dockY = drag.y;
+        positionDock();
+      }
       releaseDragLock(event, handle);
       detach();
-      if (!drag.moved && handle.id === 'compactGrip') setCompact(false);
+      if (!drag.moved && tapToExpand) setCompact(false);
       saveLegacyState();
     };
-    handle.addEventListener('pointerdown', event => {
+    const start = event => {
       if (event.button !== 0) return;
+      if (skipControls && event.target.closest?.('button,input,select,textarea,a')) return;
       cancelActiveDrag('replaced');
       const rect = dock.getBoundingClientRect();
       drag.active = true;
@@ -9128,15 +9231,19 @@
       drag.startY = event.clientY;
       drag.baseX = rect.left;
       drag.baseY = rect.top;
+      drag.x = rect.left;
+      drag.y = rect.top;
       drag.moved = false;
       drag.threshold = pointerDragThreshold(event);
+      Object.assign(drag, dockDragBounds(rect));
       acquireDragLock(event, handle, cancel);
       window.addEventListener('pointermove', move, { capture: true, passive: false });
       window.addEventListener('pointerup', finish, { capture: true, passive: false });
       window.addEventListener('pointercancel', finish, { capture: true, passive: false });
-    }, { passive: false });
+    };
+    handle.addEventListener('pointerdown', start, { passive: false });
     const keyMove = event => {
-      if (handle.id === 'compactGrip' && (event.key === 'Enter' || event.key === ' ')) {
+      if (tapToExpand && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
         setCompact(false);
         byId('tab-workflow').focus({ preventScroll: true });
@@ -9154,76 +9261,12 @@
       positionDock();
       saveLegacyState();
     };
-    handle.addEventListener('keydown', keyMove);
+    if (arrowKeys) handle.addEventListener('keydown', keyMove);
     addCleanup(() => {
       if (drag.active) cancel();
       detach();
-      handle.removeEventListener('keydown', keyMove);
-    });
-  }
-
-  function installDockHeaderDrag(header) {
-    const drag = {
-      active: false, id: null, startX: 0, startY: 0,
-      baseX: 0, baseY: 0, moved: false, threshold: 3
-    };
-    const detach = () => {
-      window.removeEventListener('pointermove', move, true);
-      window.removeEventListener('pointerup', finish, true);
-      window.removeEventListener('pointercancel', finish, true);
-    };
-    const move = event => {
-      if (!drag.active || event.pointerId !== drag.id) return;
-      consumeDragEvent(event, true);
-      const dx = event.clientX - drag.startX;
-      const dy = event.clientY - drag.startY;
-      if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
-      drag.moved = true;
-      state.dockX = drag.baseX + dx;
-      state.dockY = drag.baseY + dy;
-      positionDock();
-    };
-    const cancel = () => {
-      if (!drag.active) return;
-      drag.active = false;
-      state.dockX = drag.baseX;
-      state.dockY = drag.baseY;
-      positionDock();
-      detach();
-      releaseDragLock(null, header);
-      saveLegacyState();
-    };
-    const finish = event => {
-      if (!drag.active || event.pointerId !== drag.id) return;
-      consumeDragEvent(event, true);
-      if (event.type === 'pointercancel') return cancel();
-      drag.active = false;
-      releaseDragLock(event, header);
-      detach();
-      saveLegacyState();
-    };
-    const start = event => {
-      if (event.button !== 0 || event.target.closest?.('button,input,select,textarea,a')) return;
-      cancelActiveDrag('replaced');
-      const rect = dock.getBoundingClientRect();
-      drag.active = true;
-      drag.id = event.pointerId;
-      drag.startX = event.clientX;
-      drag.startY = event.clientY;
-      drag.baseX = rect.left;
-      drag.baseY = rect.top;
-      drag.moved = false;
-      drag.threshold = pointerDragThreshold(event);
-      acquireDragLock(event, header, cancel);
-      window.addEventListener('pointermove', move, { capture: true, passive: false });
-      window.addEventListener('pointerup', finish, { capture: true, passive: false });
-      window.addEventListener('pointercancel', finish, { capture: true, passive: false });
-    };
-    header.addEventListener('pointerdown', start, { passive: false });
-    addCleanup(() => {
-      if (drag.active) cancel();
-      header.removeEventListener('pointerdown', start);
-      detach();
+      handle.removeEventListener('pointerdown', start);
+      if (arrowKeys) handle.removeEventListener('keydown', keyMove);
     });
   }
 
@@ -9232,12 +9275,16 @@
       active: false, id: null, startX: 0, startY: 0,
       baseLeft: 0, baseTop: 0, baseWidth: 0, baseHeight: 0, baseRight: 0,
       initialX: null, initialY: null, initialWidth: null, initialHeight: null,
-      moved: false, threshold: 3
+      moved: false, threshold: 3, frame: 0, pendingWidth: 0, pendingHeight: 0
     };
     const detach = () => {
       window.removeEventListener('pointermove', move, true);
       window.removeEventListener('pointerup', finish, true);
       window.removeEventListener('pointercancel', finish, true);
+    };
+    const paint = () => {
+      drag.frame = 0;
+      if (drag.active) resizeTo(drag.pendingWidth, drag.pendingHeight);
     };
     const resizeTo = (desiredWidth, desiredHeight) => {
       const box = viewportBox();
@@ -9260,11 +9307,16 @@
       const dy = event.clientY - drag.startY;
       if (!drag.moved && Math.hypot(dx, dy) < drag.threshold) return;
       drag.moved = true;
-      resizeTo(drag.baseWidth + (side === 'left' ? -dx : dx), drag.baseHeight + dy);
+      // One relayout per frame instead of one per pointer sample.
+      drag.pendingWidth = drag.baseWidth + (side === 'left' ? -dx : dx);
+      drag.pendingHeight = drag.baseHeight + dy;
+      if (!drag.frame) drag.frame = requestAnimationFrame(paint);
     };
     const cancel = () => {
       if (!drag.active) return;
       drag.active = false;
+      if (drag.frame) cancelAnimationFrame(drag.frame);
+      drag.frame = 0;
       state.dockX = drag.initialX;
       state.dockY = drag.initialY;
       state.dockWidth = drag.initialWidth;
@@ -9278,6 +9330,9 @@
       if (!drag.active || event.pointerId !== drag.id) return;
       consumeDragEvent(event, true);
       if (event.type === 'pointercancel') return cancel();
+      if (drag.frame) cancelAnimationFrame(drag.frame);
+      drag.frame = 0;
+      if (drag.moved) resizeTo(drag.pendingWidth, drag.pendingHeight);
       drag.active = false;
       releaseDragLock(event, handle);
       detach();
@@ -9625,8 +9680,19 @@
     }
     renderLegacyMarkers();
   };
+  let viewportFollowFrame = 0;
+  const followViewport = () => {
+    if (viewportFollowFrame) return;
+    viewportFollowFrame = requestAnimationFrame(() => {
+      viewportFollowFrame = 0;
+      if (!dragLock.active) positionDock({ keepInView: true });
+    });
+  };
   window.addEventListener('resize', resizeHandler, { passive: true });
   window.visualViewport?.addEventListener('resize', resizeHandler, { passive: true });
+  // Pinch zoom pans the visual viewport without resizing anything, so the panel has to be
+  // told to stay inside the part of the page the user is actually looking at.
+  window.visualViewport?.addEventListener('scroll', followViewport, { passive: true });
   window.addEventListener('storage', handleExternalWorkflowUpdate);
   const pageHideHandler = () => {
     commitActiveEditorInput();
@@ -9638,17 +9704,31 @@
   addCleanup(() => {
     window.removeEventListener('resize', resizeHandler);
     window.visualViewport?.removeEventListener('resize', resizeHandler);
+    window.visualViewport?.removeEventListener('scroll', followViewport);
+    if (viewportFollowFrame) cancelAnimationFrame(viewportFollowFrame);
     window.removeEventListener('storage', handleExternalWorkflowUpdate);
     window.removeEventListener('pagehide', pageHideHandler);
   });
   if (typeof ResizeObserver === 'function') {
-    const densityObserver = new ResizeObserver(() => syncDockDensity());
+    // Coalesced to one measurement per frame: a resize drag fires this on every pointer
+    // sample, and re-measuring each time is exactly the kind of stutter we are removing.
+    let densityFrame = 0;
+    const densityObserver = new ResizeObserver(() => {
+      if (densityFrame) return;
+      densityFrame = requestAnimationFrame(() => {
+        densityFrame = 0;
+        syncDockDensity();
+      });
+    });
     densityObserver.observe(dock);
-    addCleanup(() => densityObserver.disconnect());
+    addCleanup(() => {
+      if (densityFrame) cancelAnimationFrame(densityFrame);
+      densityObserver.disconnect();
+    });
   }
-  installDockDrag(byId('dockGrip'));
-  installDockDrag(byId('compactGrip'));
-  installDockHeaderDrag(byId('dockHeader'));
+  installDockDrag(byId('dockGrip'), { arrowKeys: true });
+  installDockDrag(byId('compactGrip'), { tapToExpand: true, arrowKeys: true });
+  installDockDrag(byId('dockHeader'), { skipControls: true });
   installDockResize(byId('resizeDockLeft'), 'left');
   installDockResize(byId('resizeDockRight'), 'right');
 

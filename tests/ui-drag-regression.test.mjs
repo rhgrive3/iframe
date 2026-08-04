@@ -34,7 +34,7 @@ test('touch jitter remains a tap while intentional movement starts a drag', () =
   assert.match(source, /function pointerDragThreshold\(event\)/);
   assert.match(source, /event\?\.pointerType === 'touch'\) return 9/);
   assert.match(source, /if \(!drag\.moved && Math\.hypot\(dx, dy\) < drag\.threshold\) return/);
-  assert.match(source, /if \(!drag\.moved && handle\.id === 'compactGrip'\) setCompact\(false\)/);
+  assert.match(source, /if \(!drag\.moved && tapToExpand\) setCompact\(false\)/);
   assert.match(source, /if \(!drag\.moved\) selectMarker\(\)/);
 });
 
@@ -59,7 +59,7 @@ test('compact and expanded phone UI stay movable with header controls on-screen'
   assert.match(source, /function normalizeNarrowDockSize\(\)/);
   assert.match(source, /state\.dockWidth = size\.width/);
   assert.match(source, /state\.dockHeight = size\.height/);
-  assert.match(source, /installDockDrag\(byId\('dockGrip'\)\)/);
-  assert.match(source, /installDockHeaderDrag\(byId\('dockHeader'\)\)/);
+  assert.match(source, /installDockDrag\(byId\('dockGrip'\), \{ arrowKeys: true \}\)/);
+  assert.match(source, /installDockDrag\(byId\('dockHeader'\), \{ skipControls: true \}\)/);
   assert.doesNotMatch(source, /id="compactGrip"[^>]*>⠿<\/button>/);
 });
