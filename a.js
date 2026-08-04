@@ -4114,6 +4114,9 @@
     let frameDoc = null;
     try { frameDoc = frame.contentDocument; } catch {}
     try { if (frameDoc) battleProgressCache.delete(frameDoc); } catch {}
+    // 監視や基準スナップショットは前のdocumentを掴んだままにしない。
+    releaseAttackRequestTracker();
+    clearPendingAutoAttack('iframeを入れ替えるため攻撃基準を破棄しました');
     state.activeBattleDocument = null;
     state.activeBattleStatus = null;
   }
@@ -6428,30 +6431,63 @@
     return digits ? Number(digits) : NaN;
   }
 
-  const attackRequestScanCache = new WeakMap();
+  // 攻撃リクエストは監視（PerformanceObserver）で受け取る。毎回 getEntriesByType を
+  // 呼ぶと数百件の配列を作り直すことになり、iOSではこれだけでGCを圧迫する。
+  const attackRequestTracker = { doc: null, observer: null, scanned: 0, latest: 0, rescan: false };
+
+  function releaseAttackRequestTracker() {
+    try { attackRequestTracker.observer?.disconnect(); } catch {}
+    attackRequestTracker.doc = null;
+    attackRequestTracker.observer = null;
+    attackRequestTracker.scanned = 0;
+    attackRequestTracker.latest = 0;
+    attackRequestTracker.rescan = false;
+  }
+
+  function recordAttackRequests(entries) {
+    for (const entry of entries) {
+      if (!ATTACK_REQUEST_PATTERN.test(entry?.name || '')) continue;
+      // 画像やスクリプトの名前がたまたま一致しても攻撃とは見なさない
+      if (!ATTACK_REQUEST_INITIATORS.includes(String(entry.initiatorType ?? ''))) continue;
+      const at = Number(entry.startTime) || 0;
+      if (at > attackRequestTracker.latest) attackRequestTracker.latest = at;
+    }
+  }
 
   // 通常攻撃のリクエストが飛んだ時刻（そのdocumentのタイムライン基準）を返す。
   // アビリティや召喚のリクエストは一致しないので、フルオートが攻撃まで進んだ時だけ増える。
   function latestAttackRequestAt(doc = frameDocument()) {
     try {
-      const win = doc.defaultView || frameWindow();
-      const entries = win?.performance?.getEntriesByType?.('resource');
-      if (!entries) return 0;
-      const scan = attackRequestScanCache.get(doc) || { scanned: 0, latest: 0 };
-      if (entries.length < scan.scanned) scan.scanned = 0;
-      for (let index = scan.scanned; index < entries.length; index++) {
-        const entry = entries[index];
-        if (!ATTACK_REQUEST_PATTERN.test(entry?.name || '')) continue;
-        // 画像やスクリプトの名前がたまたま一致しても攻撃とは見なさない
-        if (!ATTACK_REQUEST_INITIATORS.includes(String(entry.initiatorType ?? ''))) continue;
-        const at = Number(entry.startTime) || 0;
-        if (at > scan.latest) scan.latest = at;
+      if (attackRequestTracker.doc !== doc) {
+        releaseAttackRequestTracker();
+        const win = doc.defaultView || frameWindow();
+        const performanceApi = win?.performance;
+        if (typeof performanceApi?.getEntriesByType !== 'function') return 0;
+        attackRequestTracker.doc = doc;
+        const existing = performanceApi.getEntriesByType('resource') || [];
+        attackRequestTracker.scanned = existing.length;
+        recordAttackRequests(existing);
+        if (typeof win.PerformanceObserver === 'function') {
+          // バッファ上限を超えても監視なら取りこぼさない
+          const observer = new win.PerformanceObserver(list => recordAttackRequests(list.getEntries()));
+          observer.observe({ type: 'resource', buffered: false });
+          attackRequestTracker.observer = observer;
+        } else {
+          attackRequestTracker.rescan = true;
+        }
+        return attackRequestTracker.latest;
       }
-      scan.scanned = entries.length;
-      attackRequestScanCache.set(doc, scan);
-      return scan.latest;
+      if (attackRequestTracker.rescan) {
+        const entries = doc.defaultView?.performance?.getEntriesByType?.('resource') || [];
+        if (entries.length < attackRequestTracker.scanned) attackRequestTracker.scanned = 0;
+        for (let index = attackRequestTracker.scanned; index < entries.length; index++) {
+          recordAttackRequests([entries[index]]);
+        }
+        attackRequestTracker.scanned = entries.length;
+      }
+      return attackRequestTracker.latest;
     } catch {
-      return 0;
+      return attackRequestTracker.doc === doc ? attackRequestTracker.latest : 0;
     }
   }
 
@@ -6476,9 +6512,7 @@
       domActorAttacking,
       actorAttacking: runtime.attacking || runtime.attackButtonPushed || domActorAttacking,
       turnCount: turnCountValue(doc),
-      attackRequestAt: latestAttackRequestAt(doc),
-      // 攻撃判定には使わない。演出が続いているかどうか（待機を延長してよいか）の判断だけに使う。
-      activity: battleProgressSignature(doc)
+      attackRequestAt: latestAttackRequestAt(doc)
     };
   }
 
@@ -6496,12 +6530,13 @@
   // フルオートは「アビリティ→召喚→攻撃」の順に動くため、盤面が動いた・攻撃ボタンが隠れた・
   // 味方や敵のHPが変わったといった変化はアビリティでも（マルチでは他人の攻撃でも）起きる。
   // ここでは攻撃ボタンが押されたと断定できる証拠だけを採用する。
-  function attackCommitEvidence(baseline, current) {
+  function attackCommitEvidence(baseline, current, { ignoreTurn = false } = {}) {
     if (!baseline || !current || baseline.doc !== current.doc) return '';
     if (current.attackRequestAt > baseline.attackRequestAt) return 'attack-request';
     if (current.attackButtonPushed && !baseline.attackButtonPushed) return 'attack-button';
     if (
-      Number.isFinite(baseline.turnCount)
+      !ignoreTurn
+      && Number.isFinite(baseline.turnCount)
       && Number.isFinite(current.turnCount)
       && current.turnCount > baseline.turnCount
     ) return 'turn-advanced';
@@ -6512,8 +6547,8 @@
     return '';
   }
 
-  function attackTransitionFromBaseline(baseline, current) {
-    const evidence = attackCommitEvidence(baseline, current);
+  function attackTransitionFromBaseline(baseline, current, options) {
+    const evidence = attackCommitEvidence(baseline, current, options);
     return evidence ? { current, snapshot: current, evidence, attackStarted: true } : false;
   }
 
@@ -6557,9 +6592,11 @@
   async function waitForAttackPress(initialBaseline, { signal, timeoutMs }) {
     const startedAt = performance.now();
     let baseline = initialBaseline;
-    // 基準時点ですでに攻撃中なら、それは前回の攻撃なので終わるまで数えない。
-    let settled = !isAttackInProgress(baseline);
-    let activity = baseline.activity;
+    // 前の待機が返した攻撃がまだ動いている状態から始まることがある。その攻撃の後始末
+    // （ターン送り）を新しい攻撃と数えないよう、終わるまでターン進行だけ見送る。
+    // 攻撃リクエストと押下エッジは見続けるので、次の攻撃は取りこぼさない。
+    let carryOver = isAttackInProgress(baseline);
+    let activity = '';
     let activityAt = startedAt;
 
     while (true) {
@@ -6569,24 +6606,26 @@
           const battleEnd = detectBattleEndState(doc);
           if (battleEnd) return { battleEnd };
           const snapshot = attackSnapshot(doc);
-          if (snapshot.activity !== activity) {
-            activity = snapshot.activity;
+          // 盤面スキャンは待機延長の判断だけに使うので、キャッシュ越しに間引いて読む。
+          const observedActivity = battleProgressSignature(doc);
+          if (observedActivity !== activity) {
+            activity = observedActivity;
             activityAt = performance.now();
           } else if (lastMutation > activityAt) {
             activityAt = lastMutation;
           }
           if (snapshot.doc !== baseline.doc) {
             baseline = snapshot;
-            settled = !isAttackInProgress(snapshot);
+            carryOver = isAttackInProgress(snapshot);
             return false;
           }
-          if (!settled) {
-            if (isAttackInProgress(snapshot)) return false;
+          if (carryOver && !isAttackInProgress(snapshot)) {
+            // 前の攻撃が終わった。進んだターンはその攻撃のものなので基準に取り込む。
+            carryOver = false;
             baseline = snapshot;
-            settled = true;
             return false;
           }
-          return attackTransitionFromBaseline(baseline, snapshot);
+          return attackTransitionFromBaseline(baseline, snapshot, { ignoreTurn: carryOver });
         }, {
           signal,
           timeoutMs,
@@ -7371,10 +7410,18 @@
     setRunningBlock(context, block);
     setStatus(definition.label);
     appendLog('開始', '', definition.label);
-    const blockContext = {
-      ...context,
-      setProgress: progress => updateBlockProgress(context, block, progress)
-    };
+    // 進捗表示だけを差し替えた「窓」を渡す。以前は浅いコピーを渡していたため、
+    // ブロック内で数えた周回数（completedBattles＝メモリ解放の判定に使う）が
+    // 実行中のコンテキストに戻らず、何戦回してもメモリ解放が発動しなかった。
+    const setProgress = progress => updateBlockProgress(context, block, progress);
+    const blockContext = new Proxy(context, {
+      get(target, key, receiver) {
+        return key === 'setProgress' ? setProgress : Reflect.get(target, key, receiver);
+      },
+      has(target, key) {
+        return key === 'setProgress' || Reflect.has(target, key);
+      }
+    });
     try {
       switch (block.type) {
         case 'gbfAssistSelect':

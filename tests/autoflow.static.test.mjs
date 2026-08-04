@@ -536,10 +536,12 @@ test('Granblue runtime flags are authoritative for full auto, attacks, and battl
   // 通常攻撃のリクエストだけを攻撃の証拠にする（アビリティ・召喚は別エンドポイント）
   assert.ok(source.includes('const ATTACK_REQUEST_PATTERN = /attack_result/i'));
   assert.ok(!/ATTACK_REQUEST_PATTERN = \/[^\n]*(ability|summon)/.test(source));
-  const requests = source.slice(source.indexOf('function latestAttackRequestAt'), source.indexOf('function attackSnapshot'));
-  assert.ok(requests.includes("win?.performance?.getEntriesByType?.('resource')"));
+  const requests = source.slice(source.indexOf('function releaseAttackRequestTracker'), source.indexOf('function attackSnapshot'));
+  assert.ok(requests.includes("observer.observe({ type: 'resource', buffered: false })"));
   assert.ok(requests.includes('ATTACK_REQUEST_PATTERN.test(entry?.name'));
   assert.ok(requests.includes('ATTACK_REQUEST_INITIATORS.includes(String(entry.initiatorType ?? \'\'))'));
+  const release = source.slice(source.indexOf('function releaseFrameParentReferences'), source.indexOf('function hideBackgroundRendering'));
+  assert.ok(release.includes('releaseAttackRequestTracker()'));
   const end = source.slice(source.indexOf('function detectBattleEndState'), source.indexOf('function safeBattleEndState'));
   assert.ok(end.includes('armBattleEndDetection(doc, runtime)'));
   assert.ok(end.includes('battleEndDetectionMatches(runtime)'));

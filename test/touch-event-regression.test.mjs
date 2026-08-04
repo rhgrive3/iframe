@@ -134,10 +134,10 @@ test('the attack wait only ends on attack evidence, never on ability or board ac
     source.indexOf('async function waitForAttackPress'),
     source.indexOf('async function waitForAutoAttack')
   );
-  // 基準時点で走っている攻撃は前回の攻撃なので数えない
-  assert.match(press, /let settled = !isAttackInProgress\(baseline\)/);
-  assert.match(press, /if \(isAttackInProgress\(snapshot\)\) return false;/);
-  assert.match(press, /return attackTransitionFromBaseline\(baseline, snapshot\);/);
+  // 基準時点で走っている攻撃は前回の攻撃なので、そのターン送りでは終わらせない
+  assert.match(press, /let carryOver = isAttackInProgress\(baseline\)/);
+  assert.match(press, /if \(carryOver && !isAttackInProgress\(snapshot\)\)/);
+  assert.match(press, /return attackTransitionFromBaseline\(baseline, snapshot, \{ ignoreTurn: carryOver \}\);/);
   // 演出が続く間はタイムアウトで打ち切らずに攻撃まで待つ
   assert.match(press, /ATTACK_WAIT_ACTIVITY_GRACE_MS/);
   assert.match(press, /ATTACK_WAIT_MAX_EXTENSION_MS/);
@@ -176,7 +176,7 @@ test('mobile attack waiting polls runtime state without observing animation chur
   const attackEnd = source.indexOf('async function recoverKnownPopup', attackStart);
   const attack = source.slice(attackStart, attackEnd);
   assert.match(attack, /const useDomFallback = !runtime\.available/);
-  assert.match(attack, /activity: battleProgressSignature\(doc\)/);
+  assert.match(attack, /const observedActivity = battleProgressSignature\(doc\)/);
   assert.match(attack, /performance\.now\(\) - cached\.at < BATTLE_ACTIVITY_CACHE_MS/);
   assert.equal((attack.match(/observeOnLightweight: false/g) || []).length, 1);
   assert.equal((attack.match(/observeCharacterData: false/g) || []).length, 1);

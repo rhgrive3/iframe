@@ -303,7 +303,7 @@ const sandbox = vm.createContext({
   ATTACK_REQUEST_PATTERN: vm.runInNewContext(attackRequestPattern[1]),
   ATTACK_REQUEST_INITIATORS: ['xmlhttprequest', 'fetch', 'other', ''],
   BATTLE_ACTIVITY_CACHE_MS: 350,
-  attackRequestScanCache: new WeakMap(),
+  attackRequestTracker: { doc: null, observer: null, scanned: 0, latest: 0, rescan: false },
   state,
   BATTLE_END_MESSAGE: '敵が倒されたため、このバトルは終了しました。',
   DEFAULT_STABLE_MS: 140,
@@ -346,6 +346,8 @@ for (const name of [
   'turnSignature',
   'battleProgressSignature',
   'turnCountValue',
+  'releaseAttackRequestTracker',
+  'recordAttackRequests',
   'latestAttackRequestAt',
   'attackSnapshot',
   'isAttackInProgress',
@@ -499,6 +501,7 @@ test('full-auto ability and summon activity never end the attack wait', () => {
   doc.request('https://game.granbluefantasy.jp/rest/multiraid/start.json', 10);
 
   const baseline = sandbox.attackSnapshot(doc);
+  const baselineActivity = sandbox.battleProgressSignature(doc);
   assert.equal(sandbox.isAttackInProgress(baseline), false);
 
   // アビリティ発動: 攻撃ボタンが隠れてダミーが出て、味方と敵のHPが動く
@@ -509,7 +512,7 @@ test('full-auto ability and summon activity never end the attack wait', () => {
   doc.querySelector('.prt-command .prt-member .txt-hp-value').textContent = '1320';
   doc.request('https://game.granbluefantasy.jp/rest/multiraid/ability_result.json', 520);
   const duringAbility = sandbox.attackSnapshot(doc);
-  assert.notEqual(duringAbility.activity, baseline.activity);
+  assert.notEqual(sandbox.battleProgressSignature(doc), baselineActivity);
   assert.equal(duringAbility.dummyVisible, true);
   assert.equal(duringAbility.startVisible, false);
   assert.equal(sandbox.isAttackInProgress(duringAbility), false);
@@ -576,6 +579,7 @@ test('without the game runtime the attack is recognised by the turn counter, not
   setFrame(doc, fixture.urls.battle);
 
   const baseline = sandbox.attackSnapshot(doc);
+  const baselineActivity = sandbox.battleProgressSignature(doc);
   assert.equal(baseline.runtime.available, false);
 
   // 他人の攻撃や自分のアビリティでHPが動いてもターンは進まない
@@ -583,7 +587,7 @@ test('without the game runtime the attack is recognised by the turn counter, not
   doc.querySelector('[id^="enemy-hp"]').textContent = '61';
   doc.querySelector('.prt-command .prt-member .txt-hp-value').textContent = '900';
   const moved = sandbox.attackSnapshot(doc);
-  assert.notEqual(moved.activity, baseline.activity);
+  assert.notEqual(sandbox.battleProgressSignature(doc), baselineActivity);
   assert.equal(sandbox.attackCommitEvidence(baseline, moved), '');
 
   clock.now = 1200;

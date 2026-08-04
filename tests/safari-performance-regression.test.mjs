@@ -47,11 +47,12 @@ test('mobile battle waits use runtime polling without animation observers', () =
   assert.doesNotMatch(body, /observeCharacterData: true/);
   const snapshot = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function isAttackInProgress'));
   assert.match(snapshot, /const useDomFallback = !runtime\.available/);
-  // 盤面スキャンはキャッシュ越しの活動判定だけに使う
-  assert.match(snapshot, /activity: battleProgressSignature\(doc\)/);
+  // 毎回の判定で盤面を舐めない。盤面スキャンは待機延長の判断だけに使う。
+  assert.doesNotMatch(snapshot, /battleProgressSignature/);
   const progress = source.slice(source.indexOf('function battleProgressSignature'), source.indexOf('function turnCountValue'));
   assert.match(progress, /performance\.now\(\) - cached\.at < BATTLE_ACTIVITY_CACHE_MS/);
-  // 攻撃リクエストの走査は追記分だけを見る
+  // 攻撃リクエストは監視で受け取り、毎回 getEntriesByType の配列を作らない
   const requests = source.slice(source.indexOf('function latestAttackRequestAt'), source.indexOf('function attackSnapshot'));
-  assert.match(requests, /for \(let index = scan\.scanned; index < entries\.length; index\+\+\)/);
+  assert.match(requests, /new win\.PerformanceObserver\(list => recordAttackRequests\(list\.getEntries\(\)\)\)/);
+  assert.match(requests, /if \(attackRequestTracker\.doc !== doc\)/);
 });

@@ -35,3 +35,8 @@ jobs:
         run: node --check a.js
       - name: Regression checks
         run: node --test tests/autoflow.static.test.mjs test/touch-event-regression.test.mjs
+      - name: Granblue simulation checks
+        run: node --test tests/granblue-captured-simulation.test.mjs tests/safari-performance-regression.test.mjs
+      # ブラウザ実機の周回テスト。Chromiumが無い環境では自動でスキップされる。
+      - name: Browser long-run checks
+        run: node --test tests/granblue-browser-longrun.test.mjs

@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Granblue battle simulator</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #101018; color: #fff; font-family: sans-serif; }
+  .display-off { display: none !important; }
+  .display-on { display: block !important; }
+  .cnt-raid-stage { position: relative; height: 200px; background: #202a3a; }
+  #canvas { width: 100%; height: 200px; display: block; }
+  #cnt-raid-information { padding: 8px; }
+  .btn-auto, .btn-attack-start, .prt-attack-start-dummy, .btn-attack-cancel,
+  .btn-footer-mypage, .btn-multi-raid, .btn-result {
+    display: block; width: 200px; height: 52px; margin: 6px 0; line-height: 52px;
+    text-align: center; background: #2f6bd8; border-radius: 6px; user-select: none;
+  }
+  .prt-attack-start-dummy { background: #444; }
+  .btn-auto.on { background: #d8a02f; }
+  .prt-command { display: flex; gap: 8px; }
+  .prt-member { width: 64px; }
+  .prt-gauge-special-inner { height: 6px; background: #4cf; }
+</style>
+</head>
+<body>
+<div id="loading" style="display:none"></div>
+<div id="ready" style="display:none"></div>
+<div id="wrapper"></div>
+
+<template id="tpl-raid">
+  <div class="cnt-raid">
+    <div class="cnt-raid-stage">
+      <canvas id="canvas" width="1024" height="512"></canvas>
+      <div class="prt-bg-stage-distant"></div>
+    </div>
+    <div id="cnt-raid-information">
+      <div class="prt-turn">TURN <span id="js-turn-num-count">1</span></div>
+      <div id="enemy-hp-1">100</div>
+      <div class="btn-auto">AUTO</div>
+      <div class="btn-attack-start display-on">ATTACK</div>
+      <div class="prt-attack-start-dummy display-off">wait</div>
+      <div class="btn-attack-cancel display-off">cancel</div>
+      <div class="prt-command">
+        <div class="prt-member"><span class="txt-hp-value">1500</span><div class="prt-gauge-special-inner" style="width:0%"></div></div>
+        <div class="prt-member"><span class="txt-hp-value">1400</span><div class="prt-gauge-special-inner" style="width:0%"></div></div>
+        <div class="prt-member"><span class="txt-hp-value">1300</span><div class="prt-gauge-special-inner" style="width:0%"></div></div>
+        <div class="prt-member"><span class="txt-hp-value">1200</span><div class="prt-gauge-special-inner" style="width:0%"></div></div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<template id="tpl-result">
+  <div class="cnt-result"><div class="prt-command-end"><div class="btn-result">RESULT</div></div></div>
+</template>
+
+<template id="tpl-assist">
+  <div id="prt-assist-search" class="prt-assist-contents active">
+    <div id="prt-search-list">
+      <div class="btn-multi-raid lis-raid search" data-raid-id="900001">
+        <div class="prt-raid-gauge-inner" style="width:70%"></div>
+        <div class="prt-flees-in">12</div>
+      </div>
+    </div>
+    <div class="btn-search-refresh">refresh</div>
+  </div>
+</template>
+
+<template id="tpl-mypage">
+  <div class="cnt-mypage">
+    <div class="btn-footer-mypage" data-href="mypage">MyPage</div>
+  </div>
+</template>
+
+<script>
+(() => {
+  'use strict';
+  const params = new URLSearchParams(location.search);
+  const abilityMs = Number(params.get('abilityMs') || 200);
+  const attackMs = Number(params.get('attackMs') || 240);
+  const resolveMs = Number(params.get('resolveMs') || 200);
+  const turnsPerBattle = Number(params.get('turns') || 2);
+  const assetChunks = Number(params.get('assetChunks') || 8);
+  const ASSET_CHUNK = 1 << 20; // 1MB
+
+  let raidSeed = Number(params.get('raid') || 0) || Math.floor(Math.random() * 100000);
+  let timers = [];
+  const later = (fn, ms) => { const id = setTimeout(fn, ms); timers.push(id); return id; };
+  const clearTimers = () => { for (const id of timers) clearTimeout(id); timers = []; };
+
+  const $ = selector => document.querySelector(selector);
+  const wrapper = $('#wrapper');
+
+  // 何がいつ起きたかを残す。待機ブロックがアビリティで抜けたのか攻撃で抜けたのかを
+  // テスト側で突き合わせるために使う。
+  window.__simEvents = [];
+  const mark = type => window.__simEvents.push({ type, at: Date.now(), turn: Number($('#js-turn-num-count')?.textContent || 0) });
+
+  // 1バトルぶんのアセットをdocumentに紐付けて保持する。documentが解放されない限り
+  // このメモリも残るので、パネル側の保持漏れがそのままヒープに出る。
+  function allocateBattleAssets() {
+    const assets = [];
+    for (let index = 0; index < assetChunks; index++) {
+      const buffer = new Uint8Array(ASSET_CHUNK);
+      buffer[index] = index + 1;
+      assets.push(buffer);
+      // JSヒープにも実物を積む（ArrayBufferだけだとヒープ計測に現れない）
+      assets.push(Array.from({ length: 4000 }, (_, item) => ({ id: `${index}-${item}`, hp: item })));
+    }
+    const canvas = $('#canvas');
+    if (canvas) {
+      const context = canvas.getContext('2d');
+      context.fillStyle = '#123';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      assets.push(context.getImageData(0, 0, canvas.width, canvas.height));
+    }
+    document.__battleAssets = assets;
+  }
+
+  function rest(name) {
+    // 実機と同じく戦闘操作はXHRで飛ぶ。攻撃だけが normal_attack_result。
+    const url = `/rest/multiraid/${name}.json?_=${Date.now()}_${Math.random()}`;
+    try { fetch(url, { cache: 'no-store' }).catch(() => {}); } catch {}
+  }
+
+  function render(name) {
+    const template = document.getElementById(`tpl-${name}`);
+    wrapper.replaceChildren(template.content.cloneNode(true));
+  }
+
+  function setAttackButtons({ start, dummy, cancel }) {
+    const startButton = $('.btn-attack-start');
+    if (!startButton) return;
+    startButton.className = `btn-attack-start ${start ? 'display-on' : 'display-off'}`;
+    $('.prt-attack-start-dummy').className = `prt-attack-start-dummy ${dummy ? 'display-on' : 'display-off'}`;
+    $('.btn-attack-cancel').className = `btn-attack-cancel ${cancel ? 'display-on' : 'display-off'}`;
+  }
+
+  function bumpBoard(step) {
+    const enemy = $('#enemy-hp-1');
+    if (!enemy) return;
+    enemy.textContent = String(Math.max(0, 100 - step * 7));
+    document.querySelectorAll('.prt-command .prt-member .txt-hp-value').forEach((element, index) => {
+      element.textContent = String(1500 - index * 100 - step * 13);
+    });
+    document.querySelectorAll('.prt-command .prt-member .prt-gauge-special-inner').forEach((element, index) => {
+      element.style.width = `${Math.min(100, step * 17 + index * 5)}%`;
+    });
+  }
+
+  function startBattle() {
+    clearTimers();
+    raidSeed += 1;
+    const raidId = String(46000000000 + raidSeed);
+    render('raid');
+    window.stage = {
+      pJsnData: { raid_id: raidId },
+      gGameStatus: {
+        enable_auto_button: 0,
+        auto_attack: 0,
+        attacking: 0,
+        finish: 0,
+        battle_end: 0,
+        already_finish: 0,
+        attackQueue: { attackButtonPushed: 0 }
+      }
+    };
+    window.Game = window.Game || { setting: { sound_flag: 1 } };
+    setAttackButtons({ start: false, dummy: true, cancel: false });
+    bumpBoard(0);
+    allocateBattleAssets();
+    mark('battle-start');
+    later(() => {
+      window.stage.gGameStatus.enable_auto_button = 1;
+      setAttackButtons({ start: true, dummy: false, cancel: false });
+    }, 150);
+  }
+
+  function fullAutoTurn(turn) {
+    const status = window.stage?.gGameStatus;
+    if (!status || !status.auto_attack || status.battle_end) return;
+    // 1) アビリティ: 攻撃ボタンが消えてダミーが出る。盤面も動く。
+    setAttackButtons({ start: false, dummy: true, cancel: false });
+    mark('ability');
+    rest('ability_result');
+    bumpBoard(turn * 2 - 1);
+    later(() => {
+      // 2) 召喚: さらに盤面が動く。まだ攻撃ではない。
+      mark('summon');
+      rest('summon_result');
+      bumpBoard(turn * 2);
+      later(() => {
+        // 3) 攻撃: ここで初めて攻撃ボタンが押される。
+        mark('attack');
+        rest('normal_attack_result');
+        status.attackQueue.attackButtonPushed = 1;
+        status.attacking = 1;
+        setAttackButtons({ start: false, dummy: false, cancel: true });
+        later(() => {
+          status.attackQueue.attackButtonPushed = 0;
+          status.attacking = 0;
+          mark('resolved');
+          const turnLabel = $('#js-turn-num-count');
+          if (turnLabel) turnLabel.textContent = String(turn + 1);
+          if (turn >= turnsPerBattle) {
+            status.finish = 1;
+            status.battle_end = 1;
+            later(() => location.replace(`#result_multi/${window.stage.pJsnData.raid_id}`), 120);
+            return;
+          }
+          setAttackButtons({ start: true, dummy: false, cancel: false });
+          later(() => fullAutoTurn(turn + 1), 120);
+        }, resolveMs);
+      }, attackMs);
+    }, abilityMs);
+  }
+
+  function onAutoTap() {
+    const status = window.stage?.gGameStatus;
+    if (!status || status.auto_attack || !status.enable_auto_button) return;
+    status.auto_attack = 1;
+    $('.btn-auto').className = 'btn-auto on';
+    later(() => fullAutoTurn(1), 120);
+  }
+
+  function route() {
+    const hash = location.hash || '';
+    if (/^#result(_multi)?\//.test(hash)) { clearTimers(); return render('result'); }
+    if (/^#mypage/.test(hash)) { clearTimers(); window.stage = null; return render('mypage'); }
+    if (/^#quest\/assist/.test(hash)) { clearTimers(); window.stage = null; return render('assist'); }
+    return startBattle();
+  }
+
+  const tap = (selector, handler) => {
+    for (const type of ['touchend', 'click']) {
+      document.addEventListener(type, event => {
+        const target = event.target.closest?.(selector);
+        if (target) handler(target, event);
+      });
+    }
+  };
+
+  tap('.btn-auto', onAutoTap);
+  tap('.btn-footer-mypage', () => location.replace('#mypage'));
+  tap('.btn-multi-raid', () => location.replace(`#raid_multi/${raidSeed + 1}`));
+
+  window.addEventListener('hashchange', route);
+  route();
+})();
+</script>
+</body>
+</html>
