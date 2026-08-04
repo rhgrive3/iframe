@@ -840,6 +840,10 @@
       .saveState[data-state=conflict]{color:#f2d29d}
       .saveState[data-state=conflict]::before{background:var(--amber)}
 
+      .report{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:0;font-size:10.5px}
+      .report dt{color:var(--muted);white-space:nowrap}
+      .report dd{margin:0;color:var(--text-soft);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+
       .paletteCard{padding:0;overflow:hidden}
       .paletteCard>summary{position:relative;z-index:1;margin:0;padding:14px 15px;list-style:none;cursor:pointer}
       .paletteCard>summary::-webkit-details-marker{display:none}
@@ -1132,7 +1136,7 @@
       #dock.d-xs .paletteFilters{grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
       #dock.d-xs .paletteFilter{padding:0 2px;font-size:8.5px}
       #dock.d-xs .blockTools button,#dock.d-xs .legacyTools button{min-width:32px;width:32px;min-height:32px;height:32px}
-      #dock.d-xs .blockTools{padding-left:0;justify-content:space-between}
+      #dock.d-xs .blockTools{gap:6px;padding-left:0;justify-content:flex-start}
       #dock.d-xs .errorActions{grid-template-columns:1fr}
       #dock.d-xs #runBar button{min-height:40px}
       #dock.d-xs .logEntry{grid-template-columns:46px 62px minmax(0,1fr);gap:4px;padding:6px 3px;font-size:9px}
@@ -1379,6 +1383,14 @@
               <span class="settingToggleCopy"><strong>バトル軽量化・高速化</strong><small>CJS画像と背景画像を透明データへ置換し、CreateJSの描画走査とバトル音声を止め、表示専用演出を最短化します。Ticker・バトルロジック・Tween・タイムラインは維持します。</small></span>
             </label>
             <div class="settingNote">設定をONにすると、フローの実行ボタンを押していなくても常時有効です。現在のiframeへ即時反映し、次回のページ読込では画像取得前から適用します。OFFにした時、すでに省略済みの画像は次の再読込から復元されます。</div>
+          </article>
+          <article class="card">
+            <div class="cardHeader">
+              <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">▦</span><div class="cardHeading" role="heading" aria-level="3"><strong>表示領域</strong><small>パネルの大きさの決まり方</small></div></div>
+              <button id="resetDockLayout" class="ghost">既定サイズに戻す</button>
+            </div>
+            <dl id="viewportReport" class="report"></dl>
+            <div class="settingNote">パネルは「表示できる範囲」に必ず収まるよう自動で縮みます。想定と違う場合はこの数値を報告してください。</div>
           </article>
         </section>
       </div>
@@ -8854,6 +8866,7 @@
       section.hidden = !active;
     });
     if (state.page === 'logs') renderLogs();
+    if (state.page === 'settings') renderViewportReport();
     renderLegacyMarkers();
     if (focusedPage && focusedPage.id !== `page-${state.page}`) {
       requestAnimationFrame(() => byId(`tab-${state.page}`).focus({ preventScroll: true }));
@@ -8959,10 +8972,6 @@
     saveLegacyState();
   }
 
-  // What the user can actually see and touch. The host page decides the layout viewport
-  // through its own <meta viewport>, and pinch zoom moves the visual viewport inside it, so
-  // vw/dvw and window.innerWidth can each be wider than the screen. Taking the smallest
-  // credible measurement is the only way a fixed-position panel is guaranteed to fit.
   function smallestPositive(values, fallback) {
     let best = Infinity;
     for (const value of values) {
@@ -8972,15 +8981,34 @@
     return best === Infinity ? fallback : best;
   }
 
+  // Every geometry number below is in client/screen coordinates — what getBoundingClientRect
+  // reports and what pointer events carry. No single viewport API is trustworthy on its own:
+  // a <meta viewport> wider than the device inflates innerWidth and clientWidth, a CSS
+  // transform on <html> or an over-wide body inflates innerWidth, and pinch zoom shrinks
+  // only visualViewport. Each is either correct or too large, never too small, so the
+  // smallest of the three is right in all of them. `root` is only asked where it starts:
+  // it is position:fixed inset:0, so its corner is the origin our left/top resolve from.
   function viewportBox() {
     const viewport = window.visualViewport;
     const client = document.documentElement;
+    const frame = root.isConnected ? root.getBoundingClientRect() : null;
     return {
-      left: finite(viewport?.offsetLeft, 0),
-      top: finite(viewport?.offsetTop, 0),
+      left: finite(frame?.left, 0) + finite(viewport?.offsetLeft, 0),
+      top: finite(frame?.top, 0) + finite(viewport?.offsetTop, 0),
       width: smallestPositive([viewport?.width, client?.clientWidth, window.innerWidth], 360),
       height: smallestPositive([viewport?.height, client?.clientHeight, window.innerHeight], 640)
     };
+  }
+
+  // How many screen pixels one of the dock's own CSS pixels covers. A host page that scales
+  // <html> makes `left:348px` land 487px across the screen, so sizes and offsets have to be
+  // divided by this before they are written back as styles.
+  function dockRenderScale(measured = null) {
+    const local = dock.offsetWidth;
+    if (!(local > 0)) return 1;
+    const rendered = (measured || dock.getBoundingClientRect()).width;
+    const ratio = rendered / local;
+    return Number.isFinite(ratio) && ratio > 0.05 && ratio < 20 ? ratio : 1;
   }
 
   // The only ceiling a saved panel size has is the screen it must still fit on. Phones used
@@ -9028,9 +9056,12 @@
   // out for the phone and overflowed the panel it lived in.
   function syncDockDensity(measured = null) {
     if (dock.classList.contains('compact')) return;
+    // Density is about the room the content has to lay itself out in, which is the panel's
+    // own CSS pixels. On a host page that scales <html> those are not screen pixels, so
+    // offsetWidth is the right ruler here even though everything else works in screen space.
     const rect = measured || dock.getBoundingClientRect();
-    const width = rect.width || finite(state.dockWidth, 0) || viewportBox().width;
-    const height = rect.height || finite(state.dockHeight, 0) || viewportBox().height;
+    const width = dock.offsetWidth || rect.width || finite(state.dockWidth, 0) || viewportBox().width;
+    const height = dock.offsetHeight || rect.height || finite(state.dockHeight, 0) || viewportBox().height;
     const step = width < 300 ? 4 : width < 380 ? 3 : width < 480 ? 2 : width < 640 ? 1 : 0;
     DOCK_DENSITY_STEPS.forEach((name, index) => dock.classList.toggle(`d-${name}`, index > 0 && index <= step));
     dock.classList.toggle('h-sm', height < 430);
@@ -9081,6 +9112,42 @@
     announce(dockRestoreBox ? 'パネルを画面いっぱいに広げました' : 'パネルのサイズを戻しました');
   }
 
+  function dockMetrics() {
+    const box = viewportBox();
+    const rect = dock.getBoundingClientRect();
+    const frame = root.isConnected ? root.getBoundingClientRect() : null;
+    const viewport = window.visualViewport;
+    return {
+      usable: `${Math.round(box.width)} × ${Math.round(box.height)}`,
+      panel: `${Math.round(rect.width)} × ${Math.round(rect.height)}`,
+      density: dock.dataset.density || '—',
+      fixedFrame: frame ? `${Math.round(frame.width)} × ${Math.round(frame.height)}` : '—',
+      visual: viewport ? `${Math.round(viewport.width)} × ${Math.round(viewport.height)} (×${(viewport.scale ?? 1).toFixed(2)})` : '—',
+      layout: `${document.documentElement?.clientWidth ?? 0} × ${document.documentElement?.clientHeight ?? 0}`,
+      window: `${window.innerWidth} × ${window.innerHeight}`,
+      dpr: String(window.devicePixelRatio ?? 1)
+    };
+  }
+
+  function renderViewportReport() {
+    const list = byId('viewportReport');
+    if (!list) return;
+    const metrics = dockMetrics();
+    const rows = [
+      ['使える範囲', metrics.usable],
+      ['パネル', `${metrics.panel}（${metrics.density}）`],
+      ['固定枠', metrics.fixedFrame],
+      ['visualViewport', metrics.visual],
+      ['layout viewport', metrics.layout],
+      ['window', metrics.window],
+      ['画面倍率', metrics.dpr]
+    ];
+    list.textContent = '';
+    for (const [term, value] of rows) {
+      list.append(element('dt', { text: term }), element('dd', { text: value }));
+    }
+  }
+
   function positionDock({ keepInView = false } = {}) {
     const box = viewportBox();
     const viewportLeft = box.left;
@@ -9088,35 +9155,37 @@
     const viewportWidth = box.width;
     const viewportHeight = box.height;
     const limit = narrowDockMaxSize();
-    if (dock.classList.contains('compact')) {
+    const compact = dock.classList.contains('compact');
+    // state.dockWidth/Height and dockX/Y are screen pixels. The stylesheet's vw/dvw
+    // fallbacks are not: they measure the host page's layout viewport, which a <meta
+    // viewport> or a transform on <html> can make far wider than the phone. So the size is
+    // always written from here, converted through the host page's own scale.
+    let scale = dockRenderScale();
+    if (compact) {
       dock.style.removeProperty('--dock-width');
       dock.style.removeProperty('--dock-height');
     } else {
-      // Never let the stylesheet decide the size on its own. Its vw/dvw fallbacks measure
-      // the host page's layout viewport, which on a scaled or pinch-zoomed page is wider
-      // than the screen — that is how the panel came up larger than the phone it was on.
       const size = narrowDockDefaultSize();
       const savedWidth = Number.isFinite(state.dockWidth) ? state.dockWidth : size.width;
       const savedHeight = Number.isFinite(state.dockHeight) ? state.dockHeight : size.height;
       state.dockWidth = clamp(savedWidth, DOCK_MIN_WIDTH, limit.width);
       state.dockHeight = clamp(savedHeight, DOCK_MIN_HEIGHT, limit.height);
-      dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
-      dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
+      dock.style.setProperty('--dock-width', `${state.dockWidth / scale}px`);
+      dock.style.setProperty('--dock-height', `${state.dockHeight / scale}px`);
     }
+    // Then trust the measurement over the arithmetic: whatever the host page does to our
+    // pixels, the rendered box is what the user sees, so correct by the observed error.
     let rect = dock.getBoundingClientRect();
-    if (!dock.classList.contains('compact') && (rect.width > limit.width + 1 || rect.height > limit.height + 1)) {
-      // Belt and braces: trust the measurement over the intent. If anything in the host
-      // page still stretched the panel past the screen, pull it back to what fits.
-      state.dockWidth = Math.min(state.dockWidth, limit.width);
-      state.dockHeight = Math.min(state.dockHeight, limit.height);
-      dock.style.maxWidth = `${limit.width}px`;
-      dock.style.maxHeight = `${limit.height}px`;
-      dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
-      dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
+    for (let pass = 0; pass < 3 && !compact; pass += 1) {
+      const overflowWidth = limit.width > 0 ? rect.width / limit.width : 1;
+      const overflowHeight = limit.height > 0 ? rect.height / limit.height : 1;
+      if (overflowWidth <= 1.01 && overflowHeight <= 1.01) break;
+      scale = dockRenderScale(rect);
+      state.dockWidth = Math.max(DOCK_MIN_WIDTH, state.dockWidth / Math.max(1, overflowWidth));
+      state.dockHeight = Math.max(DOCK_MIN_HEIGHT, state.dockHeight / Math.max(1, overflowHeight));
+      dock.style.setProperty('--dock-width', `${state.dockWidth / scale}px`);
+      dock.style.setProperty('--dock-height', `${state.dockHeight / scale}px`);
       rect = dock.getBoundingClientRect();
-    } else {
-      dock.style.maxWidth = '';
-      dock.style.maxHeight = '';
     }
     const width = rect.width || 780;
     const height = rect.height || 600;
@@ -9136,11 +9205,21 @@
     if (!Number.isFinite(state.dockY)) state.dockY = Math.max(minY, viewportTop + viewportHeight - height - 6);
     state.dockX = clamp(state.dockX, minX, maxX);
     state.dockY = clamp(state.dockY, minY, maxY);
-    dock.style.left = `${state.dockX}px`;
-    dock.style.top = `${state.dockY}px`;
-    dock.style.bottom = 'auto';
+    writeDockOffset(state.dockX, state.dockY, dockRenderScale(rect));
     syncDockDensity(rect);
     syncMaximizeControl(rect);
+    if (state.page === 'settings') renderViewportReport();
+  }
+
+  // left/top are resolved against the host page's containing block, so a screen coordinate
+  // has to be pulled back through the origin and the scale before it is written.
+  function writeDockOffset(screenX, screenY, scale = dockRenderScale()) {
+    const frame = root.isConnected ? root.getBoundingClientRect() : null;
+    const originX = finite(frame?.left, 0);
+    const originY = finite(frame?.top, 0);
+    dock.style.left = `${(screenX - originX) / scale}px`;
+    dock.style.top = `${(screenY - originY) / scale}px`;
+    dock.style.bottom = 'auto';
   }
 
   function dockDragBounds({ width, height }) {
@@ -9165,12 +9244,16 @@
     const drag = {
       active: false, id: null, startX: 0, startY: 0, baseX: 0, baseY: 0,
       x: 0, y: 0, minX: 0, maxX: 0, minY: 0, maxY: 0,
-      moved: false, threshold: 3, frame: 0
+      moved: false, threshold: 3, frame: 0, scale: 1
     };
     const paint = () => {
       drag.frame = 0;
       if (!drag.active) return;
-      dock.style.transform = `translate3d(${drag.x - drag.baseX}px, ${drag.y - drag.baseY}px, 0)`;
+      // Pointer deltas are screen pixels; a transform on this element is applied in its own
+      // space first, so divide by the host page's scale or the panel outruns the finger.
+      const x = (drag.x - drag.baseX) / drag.scale;
+      const y = (drag.y - drag.baseY) / drag.scale;
+      dock.style.transform = `translate3d(${x}px, ${y}px, 0)`;
     };
     const settle = () => {
       if (drag.frame) cancelAnimationFrame(drag.frame);
@@ -9235,6 +9318,7 @@
       drag.y = rect.top;
       drag.moved = false;
       drag.threshold = pointerDragThreshold(event);
+      drag.scale = dockRenderScale(rect);
       Object.assign(drag, dockDragBounds(rect));
       acquireDragLock(event, handle, cancel);
       window.addEventListener('pointermove', move, { capture: true, passive: false });
@@ -9260,6 +9344,7 @@
       state.dockY = rect.top + delta[1];
       positionDock();
       saveLegacyState();
+      announce(`パネルを移動しました`);
     };
     if (arrowKeys) handle.addEventListener('keydown', keyMove);
     addCleanup(() => {
@@ -9516,6 +9601,17 @@
   byId('closeApp').addEventListener('click', () => { if ((state.running || state.legacyRunning) && !confirm('実行中です。停止して終了しますか？')) return; destroy(); });
   byId('toggleCompact').addEventListener('click', () => setCompact(!dock.classList.contains('compact')));
   byId('toggleMaximize').addEventListener('click', toggleDockMaximized);
+  byId('resetDockLayout').addEventListener('click', () => {
+    dockRestoreBox = null;
+    state.dockWidth = null;
+    state.dockHeight = null;
+    state.dockX = null;
+    state.dockY = null;
+    positionDock({ keepInView: true });
+    renderViewportReport();
+    saveLegacyState();
+    toast('パネルの位置とサイズを既定に戻しました');
+  });
   byId('dockHeader').addEventListener('dblclick', event => {
     if (event.target.closest?.('button,input,select,textarea,a')) return;
     toggleDockMaximized();
