@@ -114,23 +114,52 @@ test('auto attack wait resolves during continuously mutating animation', () => {
   assert.doesNotMatch(source, /stableMs: 40, description: 'フルオート攻撃開始待ち'/);
 });
 
-test('auto-attack establishes a ready baseline before watching for attack', () => {
-  assert.match(source, /description: 'フルオート攻撃受付待ち'/);
-  assert.match(source, /const attackReady = snapshot\.startVisible && !snapshot\.cancelVisible && !snapshot\.dummyVisible/);
-  assert.match(source, /if \(armed\.alreadyAttacking\) return armed/);
-  assert.match(source, /const baseline = armed\.snapshot/);
+test('the attack wait only ends on attack evidence, never on ability or board activity', () => {
+  const evidence = source.slice(
+    source.indexOf('function attackCommitEvidence'),
+    source.indexOf('function attackTransitionFromBaseline')
+  );
+  assert.match(evidence, /current\.attackRequestAt > baseline\.attackRequestAt/);
+  assert.match(evidence, /current\.attackButtonPushed && !baseline\.attackButtonPushed/);
+  assert.match(evidence, /current\.turnCount > baseline\.turnCount/);
+  // 演出・盤面の変化はアビリティでも起きるため、攻撃の根拠にしてはいけない
+  assert.doesNotMatch(evidence, /activity/);
+  assert.doesNotMatch(evidence, /dummyVisible/);
+  assert.doesNotMatch(evidence, /startVisible/);
+  assert.doesNotMatch(source, /const attackReady = snapshot\.startVisible/);
+  assert.doesNotMatch(source, /progressChanged/);
+  assert.doesNotMatch(source, /startBecameHidden/);
+
+  const press = source.slice(
+    source.indexOf('async function waitForAttackPress'),
+    source.indexOf('async function waitForAutoAttack')
+  );
+  // 基準時点で走っている攻撃は前回の攻撃なので数えない
+  assert.match(press, /let settled = !isAttackInProgress\(baseline\)/);
+  assert.match(press, /if \(isAttackInProgress\(snapshot\)\) return false;/);
+  assert.match(press, /return attackTransitionFromBaseline\(baseline, snapshot\);/);
+  // 演出が続く間はタイムアウトで打ち切らずに攻撃まで待つ
+  assert.match(press, /ATTACK_WAIT_ACTIVITY_GRACE_MS/);
+  assert.match(press, /ATTACK_WAIT_MAX_EXTENSION_MS/);
+  assert.match(press, /if \(error\?\.code !== 'TIMEOUT'\) throw error;/);
 });
 
-test('full-auto toggle waits for an observed attack transition instead of toggle time alone', () => {
+test('full-auto toggle hands its pre-press baseline to the attack wait', () => {
   const ensureStart = source.indexOf('async function ensureFullAuto');
   const ensureEnd = source.indexOf('function elementDisplayOn', ensureStart);
   const ensureBlock = source.slice(ensureStart, ensureEnd);
   assert.ok(ensureBlock.indexOf('armPendingAutoAttack') < ensureBlock.indexOf('await jqTapStrict'));
+  const armed = source.slice(
+    source.indexOf('function armPendingAutoAttack'),
+    source.indexOf('async function consumePendingAutoAttack')
+  );
+  assert.match(armed, /baseline: attackSnapshot\(\)/);
+  assert.doesNotMatch(armed, /monitorFrame/);
   const waitStart = source.indexOf('async function waitForAutoAttack');
   const waitEnd = source.indexOf('async function recoverKnownPopup', waitStart);
   const waitBlock = source.slice(waitStart, waitEnd);
-  assert.match(waitBlock, /await consumePendingAutoAttack\(timeoutMs\)/);
-  assert.match(source, /description: 'フルオート押下後の攻撃開始待ち'/);
+  assert.match(waitBlock, /\(await consumePendingAutoAttack\(timeoutMs\)\) \|\| attackSnapshot\(\)/);
+  assert.match(waitBlock, /await waitForAttackPress\(baseline, \{ signal, timeoutMs \}\)/);
   assert.doesNotMatch(source, /lastFullAutoEnabledAt/);
 });
 
@@ -147,12 +176,12 @@ test('mobile attack waiting polls runtime state without observing animation chur
   const attackEnd = source.indexOf('async function recoverKnownPopup', attackStart);
   const attack = source.slice(attackStart, attackEnd);
   assert.match(attack, /const useDomFallback = !runtime\.available/);
-  assert.match(attack, /progress: useDomFallback \? battleProgressSignature/);
-  assert.match(attack, /progressChanged/);
-  assert.match(attack, /attackTransitionFromBaseline\(initial, snapshot\)/);
-  assert.equal((attack.match(/observeOnLightweight: false/g) || []).length, 3);
-  assert.equal((attack.match(/observeCharacterData: false/g) || []).length, 3);
-  assert.equal((attack.match(/intervalMs: 160/g) || []).length, 3);
+  assert.match(attack, /activity: battleProgressSignature\(doc\)/);
+  assert.match(attack, /performance\.now\(\) - cached\.at < BATTLE_ACTIVITY_CACHE_MS/);
+  assert.equal((attack.match(/observeOnLightweight: false/g) || []).length, 1);
+  assert.equal((attack.match(/observeCharacterData: false/g) || []).length, 1);
+  assert.equal((attack.match(/intervalMs: ATTACK_WAIT_POLL_MS/g) || []).length, 1);
+  assert.match(source, /const ATTACK_WAIT_POLL_MS = 160/);
 });
 
 test('workflow-level finite and infinite loop settings are normalized, rendered and executed', () => {

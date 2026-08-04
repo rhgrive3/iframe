@@ -40,12 +40,18 @@ test('battle media hooks exist only while the active route is a battle', () => {
 
 test('mobile battle waits use runtime polling without animation observers', () => {
   const body = source.slice(source.indexOf('function armPendingAutoAttack'), source.indexOf('async function recoverKnownPopup'));
-  assert.equal((body.match(/observeOnLightweight: false/g) || []).length, 3);
-  assert.equal((body.match(/observeCharacterData: false/g) || []).length, 3);
-  assert.equal((body.match(/intervalMs: 160/g) || []).length, 3);
+  assert.equal((body.match(/observeOnLightweight: false/g) || []).length, 1);
+  assert.equal((body.match(/observeCharacterData: false/g) || []).length, 1);
+  assert.equal((body.match(/intervalMs: ATTACK_WAIT_POLL_MS/g) || []).length, 1);
   assert.doesNotMatch(body, /observeOnLightweight: true/);
   assert.doesNotMatch(body, /observeCharacterData: true/);
   const snapshot = source.slice(source.indexOf('function attackSnapshot'), source.indexOf('function isAttackInProgress'));
   assert.match(snapshot, /const useDomFallback = !runtime\.available/);
-  assert.match(snapshot, /progress: useDomFallback \? battleProgressSignature/);
+  // 盤面スキャンはキャッシュ越しの活動判定だけに使う
+  assert.match(snapshot, /activity: battleProgressSignature\(doc\)/);
+  const progress = source.slice(source.indexOf('function battleProgressSignature'), source.indexOf('function turnCountValue'));
+  assert.match(progress, /performance\.now\(\) - cached\.at < BATTLE_ACTIVITY_CACHE_MS/);
+  // 攻撃リクエストの走査は追記分だけを見る
+  const requests = source.slice(source.indexOf('function latestAttackRequestAt'), source.indexOf('function attackSnapshot'));
+  assert.match(requests, /for \(let index = scan\.scanned; index < entries\.length; index\+\+\)/);
 });
