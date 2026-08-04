@@ -275,6 +275,46 @@ test('phone panels open large and are only ever clamped by the screen itself', (
   assert.ok(maxSize.includes('box.height - DOCK_VIEWPORT_MARGIN'));
 });
 
+test('panel geometry survives a host page that redefines the pixel', () => {
+  const box = source.slice(source.indexOf('function viewportBox'), source.indexOf('function dockRenderScale'));
+  // Every viewport API is either right or too large, never too small, so take the smallest.
+  assert.ok(box.includes('smallestPositive([viewport?.width, client?.clientWidth, window.innerWidth], 360)'));
+  assert.ok(box.includes('smallestPositive([viewport?.height, client?.clientHeight, window.innerHeight], 640)'));
+  // root is position:fixed inset:0, so it supplies the origin our left/top resolve from.
+  assert.ok(box.includes("finite(frame?.left, 0) + finite(viewport?.offsetLeft, 0)"));
+
+  // A transform on <html> means one of our CSS pixels is not one screen pixel.
+  const scale = source.slice(source.indexOf('function dockRenderScale'), source.indexOf('function narrowDockMaxSize'));
+  assert.ok(scale.includes('const local = dock.offsetWidth'));
+  assert.ok(scale.includes('const ratio = rendered / local'));
+  assert.ok(scale.includes('ratio > 0.05 && ratio < 20 ? ratio : 1'));
+
+  // Sizes, offsets and the drag transform all convert through that scale.
+  const position = source.slice(source.indexOf('function positionDock'), source.indexOf('function writeDockOffset'));
+  assert.ok(position.includes('`${state.dockWidth / scale}px`'));
+  assert.ok(position.includes('`${state.dockHeight / scale}px`'));
+  assert.ok(position.includes('writeDockOffset(state.dockX, state.dockY, dockRenderScale(rect))'));
+  const write = source.slice(source.indexOf('function writeDockOffset'), source.indexOf('function dockDragBounds'));
+  assert.ok(write.includes('`${(screenX - originX) / scale}px`'));
+  assert.ok(write.includes('`${(screenY - originY) / scale}px`'));
+  assert.ok(source.includes('const x = (drag.x - drag.baseX) / drag.scale'));
+  assert.ok(source.includes('drag.scale = dockRenderScale(rect)'));
+
+  // And the rendered box is corrected against what was actually painted.
+  assert.ok(position.includes('const overflowWidth = limit.width > 0 ? rect.width / limit.width : 1'));
+  assert.ok(position.includes('state.dockWidth = Math.max(DOCK_MIN_WIDTH, state.dockWidth / Math.max(1, overflowWidth))'));
+});
+
+test('the settings page reports the measurements the layout was derived from', () => {
+  assert.ok(source.includes('id="viewportReport"'));
+  assert.ok(source.includes('id="resetDockLayout"'));
+  const metrics = source.slice(source.indexOf('function dockMetrics'), source.indexOf('function renderViewportReport'));
+  for (const key of ['usable', 'panel', 'density', 'fixedFrame', 'visual', 'layout', 'window', 'dpr']) {
+    assert.ok(metrics.includes(`${key}:`), key);
+  }
+  assert.ok(source.includes("if (state.page === 'settings') renderViewportReport();"));
+});
+
 test('panel chrome is sized from the panel, not from the phone screen', () => {
   const density = source.slice(source.indexOf('function syncDockDensity'), source.indexOf('function dockFillsViewport'));
   assert.ok(density.includes('const rect = measured || dock.getBoundingClientRect()'));
