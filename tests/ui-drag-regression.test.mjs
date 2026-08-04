@@ -53,7 +53,7 @@ test('coarse pointers do not use fragile HTML drag and drop', () => {
 
 test('compact and expanded phone UI stay movable with header controls on-screen', () => {
   assert.match(source, /grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
-  assert.match(source, /requestAnimationFrame\(positionDock\)/);
+  assert.match(source, /requestAnimationFrame\(\(\) => positionDock\(\{ keepInView: true \}\)\)/);
   assert.match(source, /max-width:calc\(100vw - 8px\);max-width:calc\(100dvw - 8px\)/);
   assert.match(source, /max-height:calc\(100vh - 8px\);max-height:calc\(100dvh - 8px\)/);
   assert.match(source, /function normalizeNarrowDockSize\(\)/);

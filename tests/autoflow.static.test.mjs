@@ -246,7 +246,7 @@ test('lightweight execution keeps only error logs and removes continuous overlay
   assert.ok(source.includes("if (!lightweightMode) {\n      renderPalette();\n      renderWorkflowEditor();\n    }"));
 });
 
-test('Android phones launch compact and stale desktop dock sizes are normalized', () => {
+test('phone panels open large and are only ever clamped by the screen itself', () => {
   assert.ok(source.includes('function isAndroidPhone()'));
   assert.ok(source.includes('navigator.userAgentData?.mobile === true'));
   assert.ok(source.includes('/\\bAndroid\\b/i.test(userAgent)'));
@@ -255,15 +255,96 @@ test('Android phones launch compact and stale desktop dock sizes are normalized'
   assert.ok(source.includes("dock.classList.toggle('narrowViewport', narrowScreen)"));
   assert.ok(source.includes('narrowScreen = isNarrowViewport()'));
   assert.ok(source.includes('if (narrowScreen && !wasNarrow) normalizeNarrowDockSize()'));
-  assert.ok(source.includes('setBrowserHidden(state.legacy.browserHidden || narrowScreen)'));
-  assert.ok(source.includes('setCompact(state.legacy.compact || narrowScreen)'));
   assert.ok(source.includes('normalizeNarrowDockSize();'));
-  assert.ok(source.includes('width:var(--dock-width,min(380px,82dvw))'));
-  assert.ok(source.includes('height:var(--dock-height,min(500px,46dvh))'));
-  assert.ok(source.includes('max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px)'));
-  assert.ok(source.includes('max-height:54vh;max-height:54dvh'));
-  assert.ok(source.includes('button{min-height:40px}'));
-  assert.ok(source.includes('.paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr))'));
+
+  // The dock fills most of a phone screen by default and may be grown to all of it.
+  assert.ok(source.includes('width:var(--dock-width,min(460px,calc(100dvw - 12px)))'));
+  assert.ok(source.includes('height:var(--dock-height,min(800px,74dvh))'));
+  assert.ok(source.includes('max-height:calc(100vh - 6px);max-height:calc(100dvh - 6px)'));
+  assert.ok(!source.includes('max-height:54vh;max-height:54dvh'));
+
+  // No Android-only shrink ray, and no screen-fraction ceiling above the saved size.
+  assert.ok(!source.includes('androidCompact'));
+  assert.ok(!/viewportWidth \* 0\.72/.test(source));
+  const normalize = source.slice(source.indexOf('function normalizeNarrowDockSize'), source.indexOf('function syncDockDensity'));
+  assert.ok(normalize.includes('const size = narrowDockMaxSize()'));
+  assert.ok(normalize.includes('state.dockWidth = size.width'));
+  assert.ok(normalize.includes('state.dockHeight = size.height'));
+  const maxSize = source.slice(source.indexOf('function narrowDockMaxSize'), source.indexOf('function narrowDockDefaultSize'));
+  assert.ok(maxSize.includes('box.width - DOCK_VIEWPORT_MARGIN'));
+  assert.ok(maxSize.includes('box.height - DOCK_VIEWPORT_MARGIN'));
+});
+
+test('panel chrome is sized from the panel, not from the phone screen', () => {
+  const density = source.slice(source.indexOf('function syncDockDensity'), source.indexOf('function dockFillsViewport'));
+  assert.ok(density.includes('const rect = dock.getBoundingClientRect()'));
+  assert.ok(density.includes("const density = width < 380 ? 'xs' : width < 480 ? 'sm' : width < 640 ? 'md' : 'lg'"));
+  assert.ok(density.includes("dock.classList.toggle('d-md', density !== 'lg')"));
+  assert.ok(density.includes("dock.classList.toggle('d-sm', density === 'sm' || density === 'xs')"));
+  assert.ok(density.includes("dock.classList.toggle('d-xs', density === 'xs')"));
+  assert.ok(density.includes("dock.classList.toggle('h-sm', height < 430)"));
+  assert.ok(source.includes('new ResizeObserver(() => syncDockDensity())'));
+  assert.ok(source.includes('#dock.d-sm .paletteItems{grid-template-columns:1fr;gap:5px}'));
+  assert.ok(source.includes('#dock.d-xs .grid2,#dock.d-xs .grid3{grid-template-columns:1fr}'));
+  // Legible type, not the 5.5px the old Android override shipped.
+  assert.ok(source.includes('#dock.d-sm{font-size:12.5px}'));
+  assert.ok(source.includes('#dock.d-xs{font-size:11.5px}'));
+  assert.ok(!source.includes('font-size:5.5px'));
+});
+
+test('the panel may hang off any edge and still be grabbed back', () => {
+  const position = source.slice(source.indexOf('function positionDock'), source.indexOf('function installDockDrag'));
+  assert.ok(position.includes('let minX = viewportLeft + keepX - width'));
+  assert.ok(position.includes('let maxX = Math.max(minX, viewportLeft + viewportWidth - keepX)'));
+  assert.ok(position.includes('let maxY = Math.max(minY, viewportTop + viewportHeight - keepY)'));
+  // Growing the panel still pulls it fully back on-screen; only a drag may park it.
+  assert.ok(position.includes('if (keepInView) {'));
+  assert.ok(source.includes('positionDock({ keepInView: true })'));
+  assert.ok(position.includes('syncDockDensity()'));
+  assert.ok(source.includes('const DOCK_KEEP_VISIBLE_X = 76'));
+  assert.ok(source.includes('const DOCK_KEEP_VISIBLE_Y = 46'));
+
+  // Resizing reaches the whole screen from wherever the panel sits.
+  const resize = source.slice(source.indexOf('const resizeTo = (desiredWidth'), source.indexOf('const move = event =>', source.indexOf('const resizeTo = (desiredWidth')));
+  assert.ok(resize.includes('Math.max(DOCK_MIN_WIDTH, box.width - DOCK_VIEWPORT_MARGIN / 2)'));
+  assert.ok(resize.includes('Math.max(DOCK_MIN_HEIGHT, box.height - DOCK_VIEWPORT_MARGIN / 2)'));
+  assert.ok(!resize.includes('Math.min(260, maxWidth)'));
+
+  // One tap fills the screen, another puts the panel back where it was.
+  assert.ok(source.includes('id="toggleMaximize"'));
+  assert.ok(source.includes("byId('toggleMaximize').addEventListener('click', toggleDockMaximized)"));
+  assert.ok(source.includes("byId('dockHeader').addEventListener('dblclick'"));
+  const maximize = source.slice(source.indexOf('function toggleDockMaximized'), source.indexOf('function positionDock'));
+  assert.ok(maximize.includes('if (dockRestoreBox) {'));
+  assert.ok(maximize.includes('state.dockWidth = Math.max(DOCK_MIN_WIDTH, box.width - DOCK_VIEWPORT_MARGIN)'));
+
+  // Panel geometry saved by the cramped phone layout is dropped once on upgrade.
+  assert.ok(source.includes('const DOCK_LAYOUT_REVISION = 2'));
+  assert.ok(source.includes('if (state.legacy.dockLayout < DOCK_LAYOUT_REVISION) {'));
+
+  // The corner grips keep their own space so they cannot swallow a tap meant for 実行.
+  assert.ok(source.includes('.resizeHandle{\n        position:absolute;z-index:20;bottom:0;width:32px'));
+  assert.ok(source.includes('margin:0 -16px;padding:12px 34px calc(12px + env(safe-area-inset-bottom))'));
+  assert.ok(source.includes('#dock.d-sm #runBar{margin:0 -10px;padding:9px 30px'));
+});
+
+test('the run bar carries only run and stop, with issues shown when they exist', () => {
+  assert.ok(!source.includes('実行前チェック'));
+  assert.ok(!source.includes('id="validationBar"'));
+  assert.ok(!source.includes("id=\"validateWorkflow\""));
+  assert.ok(source.includes('<button id="runWorkflow">▶ 実行</button>'));
+  assert.ok(source.includes('<button id="workflowIssues" class="issuePill" type="button" hidden></button>'));
+  const chip = source.slice(source.indexOf('function renderValidationChip'), source.indexOf('function scheduleValidationRefresh'));
+  assert.ok(chip.includes('if (!errors.length && !warnings.length) {'));
+  assert.ok(chip.includes('chip.hidden = true'));
+  assert.ok(chip.includes('const label = errors.length ? `⚠ ${count}件の要修正` : `⚠ ${count}件の注意`'));
+  const refresh = source.slice(source.indexOf('function scheduleValidationRefresh'), source.indexOf('function invalidateWorkflowValidation'));
+  assert.ok(refresh.includes('state.validationIssues = validateWorkflowDefinition(currentWorkflow())'));
+  assert.ok(refresh.includes('renderValidationChip()'));
+  assert.ok(source.includes('scheduleValidationRefresh();'));
+  // The chip is the only entry point left, and it still walks to the offending block.
+  assert.ok(source.includes("ui.workflowIssues.addEventListener('click', () => {"));
+  assert.ok(source.includes('focusWorkflowValidationIssue();'));
 });
 
 test('assist HP threshold blocks use inclusive above and below comparisons', () => {
@@ -365,7 +446,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 68'));
+  assert.ok(source.includes('const APP_VERSION = 69'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -658,34 +739,28 @@ test('parent-page restart handoff persists ownership and safe fallbacks', () => 
   assert.ok(handoff.includes('if (state.running) clearWorkflowHandoff(current.id)'));
 });
 
-test('iOS opens the new tab from a trusted tap instead of a blind window.open', () => {
+test('iOS and iPadOS reload the parent in place instead of opening a second tab', () => {
   const detect = source.slice(source.indexOf('function isIosLikeBrowser'), source.indexOf('function isNarrowViewport'));
   assert.ok(detect.includes('/\\b(iPhone|iPod)\\b/i.test(userAgent)'));
   assert.ok(detect.includes('/\\biPad\\b/i.test(userAgent)'));
   assert.ok(detect.includes('/\\bMacintosh\\b/i.test(userAgent) && touchPoints > 1'));
 
-  const allowed = source.slice(source.indexOf('function scriptedTabOpenAllowed'), source.indexOf('function gestureHandoffTargets'));
-  // Android and desktop keep the plain window.open path they already work with.
-  assert.ok(allowed.includes('if (!isIosLikeBrowser()) return true'));
-  assert.ok(allowed.includes("typeof activation?.isActive === 'boolean' ? activation.isActive : false"));
-
   const restart = source.slice(source.indexOf('async function beginWorkflowParentRestart'), source.indexOf('async function resumeClaimedWorkflowHandoff'));
-  assert.ok(restart.includes('let opened = scriptedTabOpenAllowed() ? openWorkflowHandoffTab(handoff) : null'));
-  assert.ok(restart.includes('if (!opened && isIosLikeBrowser()) {'));
-  assert.ok(restart.includes('opened = await awaitGestureHandoffTab(handoff, context.signal)'));
-  // The same-tab restart stays the last resort, never the iOS default.
-  assert.ok(restart.indexOf('awaitGestureHandoffTab') < restart.indexOf('continueWorkflowInCurrentTab'));
-});
+  // WebKit never reaches window.open: the same tab reloads and resumes the saved run.
+  assert.ok(restart.includes('if (isIosLikeBrowser()) {'));
+  assert.ok(restart.indexOf('continueWorkflowInCurrentTab') < restart.indexOf('openWorkflowHandoffTab'));
+  assert.ok(restart.includes('const opened = openWorkflowHandoffTab(handoff)'));
 
-test('the gesture wait opens the tab synchronously and always releases the run', () => {
-  const wait = source.slice(source.indexOf('function awaitGestureHandoffTab'), source.indexOf('async function beginWorkflowParentRestart'));
-  assert.ok(wait.includes('if (!event?.isTrusted) return'));
-  assert.ok(wait.includes('const opened = openWorkflowHandoffTab(handoff)'));
-  assert.ok(wait.includes('if (opened) settle(opened)'));
-  assert.ok(wait.includes("signal?.addEventListener('abort', onAbort, { once: true })"));
-  assert.ok(wait.includes('timer = setTimeout(() => settle(null), WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS)'));
-  assert.ok(source.includes('const WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS = 30_000'));
-  assert.ok(source.includes("const GESTURE_HANDOFF_EVENTS = Object.freeze(['pointerup', 'touchend', 'click'])"));
+  // The pop-up gesture dance it replaces is gone for good.
+  assert.ok(!source.includes('awaitGestureHandoffTab'));
+  assert.ok(!source.includes('scriptedTabOpenAllowed'));
+  assert.ok(!source.includes('GESTURE_HANDOFF_EVENTS'));
+
+  // Same blocks, same runtime cursor — only the tab strategy changed.
+  const fallback = source.slice(source.indexOf('async function continueWorkflowInCurrentTab'), source.indexOf('function openWorkflowHandoffTab'));
+  assert.ok(fallback.includes("phase: 'committed',\n      mode: 'same-tab'"));
+  assert.ok(fallback.includes('window.name = fallback.targetName'));
+  assert.ok(fallback.includes('replaceParentLocation(fallback.parentUrl)'));
 });
 
 test('same-tab parent restart forces a reload when only the fragment changes', () => {
