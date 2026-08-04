@@ -277,30 +277,40 @@ test('phone panels open large and are only ever clamped by the screen itself', (
 
 test('panel chrome is sized from the panel, not from the phone screen', () => {
   const density = source.slice(source.indexOf('function syncDockDensity'), source.indexOf('function dockFillsViewport'));
-  assert.ok(density.includes('const rect = dock.getBoundingClientRect()'));
-  assert.ok(density.includes("const density = width < 380 ? 'xs' : width < 480 ? 'sm' : width < 640 ? 'md' : 'lg'"));
-  assert.ok(density.includes("dock.classList.toggle('d-md', density !== 'lg')"));
-  assert.ok(density.includes("dock.classList.toggle('d-sm', density === 'sm' || density === 'xs')"));
-  assert.ok(density.includes("dock.classList.toggle('d-xs', density === 'xs')"));
+  assert.ok(density.includes('const rect = measured || dock.getBoundingClientRect()'));
+  assert.ok(density.includes("const step = width < 300 ? 4 : width < 380 ? 3 : width < 480 ? 2 : width < 640 ? 1 : 0"));
+  assert.ok(density.includes('DOCK_DENSITY_STEPS.forEach((name, index) => dock.classList.toggle(`d-${name}`, index > 0 && index <= step))'));
+  assert.ok(source.includes("const DOCK_DENSITY_STEPS = Object.freeze(['lg', 'md', 'sm', 'xs', 'xxs'])"));
   assert.ok(density.includes("dock.classList.toggle('h-sm', height < 430)"));
-  assert.ok(source.includes('new ResizeObserver(() => syncDockDensity())'));
+  // Density resyncs are coalesced to one measurement per frame.
+  assert.ok(source.includes('const densityObserver = new ResizeObserver(() => {'));
+  assert.ok(source.includes('densityFrame = requestAnimationFrame(() => {'));
   assert.ok(source.includes('#dock.d-sm .paletteItems{grid-template-columns:1fr;gap:5px}'));
-  assert.ok(source.includes('#dock.d-xs .grid2,#dock.d-xs .grid3{grid-template-columns:1fr}'));
+  assert.ok(source.includes('#dock.d-xxs .grid2,#dock.d-xxs .grid3{grid-template-columns:1fr}'));
   // Legible type, not the 5.5px the old Android override shipped.
-  assert.ok(source.includes('#dock.d-sm{font-size:12.5px}'));
-  assert.ok(source.includes('#dock.d-xs{font-size:11.5px}'));
+  assert.ok(source.includes('#dock.d-sm{font-size:12.5px;--field-height:34px;--field-font:13px'));
+  assert.ok(source.includes('#dock.d-xs{font-size:11.5px;--field-height:32px;--field-font:12.5px'));
   assert.ok(!source.includes('font-size:5.5px'));
+  // Inputs shrink with the panel, and only WebKit pays the 16px anti-zoom tax.
+  assert.ok(source.includes('min-height:var(--field-height)'));
+  assert.ok(source.includes('font-size:var(--field-font)'));
+  assert.ok(source.includes('#dock.ios{--field-font:16px}'));
+  assert.ok(source.includes("dock.classList.toggle('ios', isIosLikeBrowser())"));
+  // A checkbox sits beside its label instead of under it.
+  assert.ok(source.includes('.field:has(input[type=checkbox]){flex-direction:row-reverse'));
 });
 
 test('the panel may hang off any edge and still be grabbed back', () => {
   const position = source.slice(source.indexOf('function positionDock'), source.indexOf('function installDockDrag'));
-  assert.ok(position.includes('let minX = viewportLeft + keepX - width'));
-  assert.ok(position.includes('let maxX = Math.max(minX, viewportLeft + viewportWidth - keepX)'));
-  assert.ok(position.includes('let maxY = Math.max(minY, viewportTop + viewportHeight - keepY)'));
+  assert.ok(position.includes('let { minX, maxX, minY, maxY } = dockDragBounds({ width, height })'));
+  const bounds = source.slice(source.indexOf('function dockDragBounds'), source.indexOf('function installDockDrag'));
+  assert.ok(bounds.includes('const minX = box.left + keepX - width'));
+  assert.ok(bounds.includes('maxX: Math.max(minX, box.left + box.width - keepX)'));
+  assert.ok(bounds.includes('maxY: Math.max(minY, box.top + box.height - keepY)'));
   // Growing the panel still pulls it fully back on-screen; only a drag may park it.
   assert.ok(position.includes('if (keepInView) {'));
   assert.ok(source.includes('positionDock({ keepInView: true })'));
-  assert.ok(position.includes('syncDockDensity()'));
+  assert.ok(position.includes('syncDockDensity(rect)'));
   assert.ok(source.includes('const DOCK_KEEP_VISIBLE_X = 76'));
   assert.ok(source.includes('const DOCK_KEEP_VISIBLE_Y = 46'));
 
