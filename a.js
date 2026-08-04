@@ -465,7 +465,7 @@
     return;
   }
 
-  const APP_VERSION = 68;
+  const APP_VERSION = 69;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -485,9 +485,6 @@
   const WORKFLOW_HANDOFF_TTL_MS = 5 * 60_000;
   const WORKFLOW_HANDOFF_READY_TIMEOUT_MS = 45_000;
   const WORKFLOW_HANDOFF_POLL_MS = 100;
-  const WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS = 30_000;
-  const GESTURE_HANDOFF_REMINDER_MS = 2400;
-  const GESTURE_HANDOFF_EVENTS = Object.freeze(['pointerup', 'touchend', 'click']);
   const MAX_REPEAT_COUNT = 10_000;
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
@@ -496,6 +493,13 @@
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
   const DEFAULT_STABLE_MS = 140;
+  const VALIDATION_REFRESH_MS = 320;
+  const DOCK_LAYOUT_REVISION = 2;
+  const DOCK_MIN_WIDTH = 208;
+  const DOCK_MIN_HEIGHT = 168;
+  const DOCK_VIEWPORT_MARGIN = 8;
+  const DOCK_KEEP_VISIBLE_X = 76;
+  const DOCK_KEEP_VISIBLE_Y = 46;
   const MAX_LOGS = 20;
   const MAX_WORKFLOW_HISTORY = 40;
   const MAX_WORKFLOW_HISTORY_BYTES = 12_000_000;
@@ -662,10 +666,10 @@
         background:var(--panel);box-shadow:var(--shadow-lg);overflow:hidden;isolation:isolate
       }
       #dock.narrowViewport{
-        width:var(--dock-width,min(380px,82vw));width:var(--dock-width,min(380px,82dvw));
-        height:var(--dock-height,min(500px,46vh));height:var(--dock-height,min(500px,46dvh));
-        max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px);
-        max-height:54vh;max-height:54dvh;border-radius:14px
+        width:var(--dock-width,min(460px,calc(100vw - 12px)));width:var(--dock-width,min(460px,calc(100dvw - 12px)));
+        height:var(--dock-height,min(800px,74vh));height:var(--dock-height,min(800px,74dvh));
+        max-width:calc(100vw - 6px);max-width:calc(100dvw - 6px);
+        max-height:calc(100vh - 6px);max-height:calc(100dvh - 6px);border-radius:16px
       }
       #dock::before{
         content:'';position:absolute;z-index:-1;inset:0 0 auto;height:150px;pointer-events:none;
@@ -681,8 +685,8 @@
       .compactOnly #compactRun.is-stop{background:var(--red-soft);color:#ffc0c6}
 
       #dockHeader{
-        flex:0 0 auto;display:grid;grid-template-columns:44px minmax(0,1fr) 40px 40px;align-items:center;
-        gap:6px;min-height:64px;padding:8px 10px;border-bottom:1px solid var(--line);background:rgba(10,12,18,.28)
+        flex:0 0 auto;display:grid;grid-template-columns:44px minmax(0,1fr) 40px 40px 40px;align-items:center;
+        gap:6px;min-height:60px;padding:7px 9px;border-bottom:1px solid var(--line);background:rgba(10,12,18,.28)
       }
       #dockGrip,#compactGrip{
         position:relative;padding:0;border-color:transparent;background:transparent;touch-action:none;cursor:grab;
@@ -702,19 +706,20 @@
       #dockHeader.is-dragging{cursor:grabbing}
       #dockHeader button{cursor:pointer}
       .resizeHandle{
-        position:absolute;z-index:20;bottom:0;width:34px;min-height:34px;height:34px;padding:0;border:0;background:transparent;
-        touch-action:none;opacity:.55
+        position:absolute;z-index:20;bottom:0;width:32px;min-height:32px;height:32px;padding:0;border:0;background:transparent;
+        touch-action:none;opacity:.6
       }
       .resizeHandle:hover,.resizeHandle:focus-visible{background:rgba(124,140,255,.08);opacity:1}
       .resizeHandle::before{
-        content:'';position:absolute;right:7px;bottom:7px;width:12px;height:12px;
+        content:'';position:absolute;right:8px;bottom:8px;width:13px;height:13px;
         border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);border-radius:0 0 2px
       }
       #resizeDockLeft{left:0;cursor:nesw-resize;transform:scaleX(-1)}
       #resizeDockRight{right:0;cursor:nwse-resize}
       .resizeHandle.is-dragging{opacity:1}
-      #toggleCompact,#closeApp{width:40px;height:40px;min-height:40px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:17px}
-      #toggleCompact:hover:not(:disabled){color:var(--text);background:var(--surface)}
+      #toggleCompact,#toggleMaximize,#closeApp{width:40px;height:40px;min-height:40px;padding:0;border-color:transparent;background:transparent;color:var(--muted);font-size:17px}
+      #toggleMaximize{font-size:14px}
+      #toggleCompact:hover:not(:disabled),#toggleMaximize:hover:not(:disabled){color:var(--text);background:var(--surface)}
       #closeApp:hover:not(:disabled){color:#ffc0c6;background:var(--red-soft)}
       .title{min-width:0}
       .title strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:760;letter-spacing:.01em}
@@ -730,9 +735,11 @@
         border-bottom:1px solid var(--line);background:rgba(9,11,16,.34)
       }
       .mainTab{
-        position:relative;display:flex;align-items:center;justify-content:center;gap:7px;min-height:40px;height:40px;
-        border-color:transparent;border-radius:10px;background:transparent;color:var(--muted);font-size:11.5px
+        position:relative;display:flex;align-items:center;justify-content:center;gap:7px;min-width:0;min-height:40px;height:40px;
+        border-color:transparent;border-radius:10px;background:transparent;color:var(--muted);font-size:11.5px;
+        padding:0 6px;white-space:nowrap
       }
+      .mainTab>span:not(.tabIcon){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .mainTab:hover:not(:disabled){background:var(--surface);color:var(--text-soft)}
       .mainTab[aria-selected=true]{border-color:rgba(124,140,255,.2);background:var(--accent-soft);color:#dfe3ff}
       .mainTab[aria-selected=true]::after{content:'';position:absolute;right:18%;bottom:-8px;left:18%;height:2px;border-radius:2px;background:var(--accent)}
@@ -809,6 +816,7 @@
       .historyActions{align-items:center}
       .historyActions::after{content:'';width:1px;height:24px;margin:0 3px;background:var(--line)}
       .historyActions button{min-width:92px}
+      .btnLabel{margin-left:6px}
       .toolbar button{min-height:40px;padding:0 12px;font-size:10.5px}
       .workflowActions{padding-top:1px}
       .workflowActions button{flex-basis:94px}
@@ -833,8 +841,8 @@
       .paletteContent{padding:13px 15px 15px}
       .paletteControls{display:grid;grid-template-columns:minmax(160px,1fr) auto;gap:8px;margin-bottom:10px}
       .paletteSearchWrap{position:relative}
-      .paletteSearchWrap::before{content:'⌕';position:absolute;z-index:1;top:50%;left:12px;transform:translateY(-52%);color:var(--muted);font-size:16px;pointer-events:none}
-      #paletteSearch{padding-left:34px}
+      .paletteSearchWrap::before{content:'⌕';position:absolute;z-index:1;top:50%;left:13px;transform:translateY(-52%);color:var(--muted);font-size:15px;pointer-events:none}
+      #paletteSearch{padding-left:38px}
       .paletteFilters{display:flex;gap:4px}
       .paletteFilter{min-height:40px;height:40px;padding:0 10px;border-color:transparent;background:transparent;color:var(--muted);font-size:9.5px}
       .paletteFilter[aria-pressed=true]{border-color:rgba(124,140,255,.23);background:var(--accent-soft);color:#dfe3ff}
@@ -922,28 +930,21 @@
       .validationBadge.error{border-color:rgba(255,107,120,.24);background:var(--red-soft);color:#ffc0c6}
 
       #runBar{
-        position:sticky;z-index:6;bottom:0;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px;
-        margin:0 -16px;padding:16px 16px calc(14px + env(safe-area-inset-bottom));
-        border-top:1px solid rgba(255,255,255,.08);background:rgba(14,16,22,.98)
+        position:sticky;z-index:6;bottom:0;display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:8px;
+        margin:0 -16px;padding:12px 34px calc(12px + env(safe-area-inset-bottom));
+        border-top:1px solid rgba(255,255,255,.08);background:#0e1016
       }
-      #runBar button{min-height:48px;font-size:12px}
+      #runBar button{min-height:46px;font-size:12px}
       #runWorkflow{border-color:rgba(70,212,149,.34);background:linear-gradient(180deg,#54dda1 0%,#35bf82 100%);color:#071d13}
       #runWorkflow:hover:not(:disabled){background:linear-gradient(180deg,#62e4aa 0%,#3dc98a 100%)}
       #stopWorkflow{border-color:rgba(255,107,120,.2);background:var(--red-soft);color:#ffc0c6}
-      #validationBar{
-        grid-column:1/-1;display:grid;grid-template-columns:9px minmax(0,1fr) auto auto;align-items:center;gap:9px;
-        min-height:44px;padding:7px 8px;border:1px solid var(--line);border-radius:11px;background:rgba(0,0,0,.14)
+      .cardHeaderAside{display:flex;flex:0 0 auto;align-items:center;gap:6px;min-width:0}
+      .issuePill{
+        min-height:26px;height:26px;padding:0 10px;border-color:rgba(255,107,120,.32);border-radius:999px;
+        background:var(--red-soft);color:#ffc0c6;font-size:9.5px;white-space:nowrap
       }
-      #validationBar::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--muted)}
-      #validationBar[data-tone=success]::before{background:var(--green)}
-      #validationBar[data-tone=warning]::before{background:var(--amber)}
-      #validationBar[data-tone=error]::before{background:var(--red)}
-      .validationText{min-width:0}
-      .validationText strong,.validationText small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-      .validationText strong{color:var(--text-soft);font-size:10px}
-      .validationText small{margin-top:2px;color:var(--muted);font-size:9px}
-      #validationBar button{min-height:34px;height:34px;padding:0 10px;font-size:9.5px}
-      #validationFocus[hidden]{display:none}
+      .issuePill[data-tone=warning]{border-color:rgba(240,182,92,.32);background:var(--amber-soft);color:#f2d29d}
+      .issuePill[hidden]{display:none}
 
       #legacyActionList{display:grid;gap:9px;padding-bottom:16px}
       .legacyRow{padding:12px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.025)}
@@ -1017,119 +1018,122 @@
         *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
         button:not(#dockGrip):not(#compactGrip):active{transform:none}
       }
-      @media(max-width:760px){
-        .paletteControls{grid-template-columns:1fr}
-        .paletteFilters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
-        .paletteFilter{padding:0 5px}
-        .blockHead{grid-template-columns:38px minmax(0,1fr)}
-        .blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:46px}
-      }
+      /* Viewport-anchored chrome. The URL bar, the recorder and the element picker are
+         glued to the screen, so they are the only pieces a viewport media query may size.
+         Everything inside the dock is sized from the dock instead — see the density rules
+         below — because a media query cannot tell that a 300px panel is sitting on a
+         400px phone, which is exactly how the controls used to end up bigger than the
+         surface holding them. */
       @media(max-width:620px){
-        #browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:44px 44px 44px minmax(70px,1fr) 56px 44px;gap:3px;padding:3px;border-radius:10px}
-        #browserBar button,#browserBar input{height:44px;min-height:44px}
+        #browserBar{top:max(3px,env(safe-area-inset-top));width:calc(100dvw - 8px);grid-template-columns:40px 40px 40px minmax(70px,1fr) 54px 40px;gap:3px;padding:3px;border-radius:12px}
+        #browserBar button,#browserBar input{height:40px;min-height:40px}
         #browserBar input{padding:4px 8px;font-size:16px}
         #loadUrl{font-size:10px}
-        #dock{left:6px;width:var(--dock-width,min(380px,82vw));width:var(--dock-width,min(380px,82dvw));height:var(--dock-height,min(500px,46vh));height:var(--dock-height,min(500px,46dvh));max-width:calc(100vw - 24px);max-width:calc(100dvw - 24px);max-height:54vh;max-height:54dvh;border-radius:14px}
-        #dock.compact{width:104px;height:48px;border-radius:24px}
-        #dockHeader{grid-template-columns:40px minmax(0,1fr) 40px 40px;gap:3px;min-height:56px;padding:5px 7px}
-        #dockGrip,#toggleCompact,#closeApp{width:40px;height:40px;min-height:40px}
-        #dockGrip::before{inset:12px}
-        .title strong{font-size:11.5px}.title small{font-size:9px}
-        #mainTabs{gap:3px;padding:4px 6px}
-        .mainTab{height:44px;min-height:44px;font-size:10px}
-        .mainTab[aria-selected=true]::after{bottom:-5px}
-        .tabIcon{font-size:12px}
-        .page{padding:10px 9px 0}
-        .pageIntro{margin:0 1px 10px}
-        .pageIntro h2{font-size:15px}.pageIntro p{display:none}.eyebrow{font-size:8px}.shortcutHint{display:none}
-        .card{margin-bottom:8px;padding:10px;border-radius:11px}
-        .cardHeader,.cardTitle{margin-bottom:9px}
-        .sectionIcon{width:26px;height:26px}
-        .cardHeading strong{font-size:11px}.cardHeading small{font-size:8.5px}
-        .grid2,.grid3{gap:7px}
-        .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
-        .toolbar{gap:5px;margin-top:8px}.toolbar>*{flex-basis:78px}
-        .toolbar button{min-height:38px;padding:0 8px;font-size:9.5px}
-        .paletteCard{padding:0}
-        .paletteCard>summary{padding:11px}
-        .paletteContent{padding:10px}
-        .paletteGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
-        .paletteItems{grid-template-columns:1fr;gap:5px}
-        .paletteFilters{overflow:auto;grid-template-columns:repeat(5,minmax(60px,1fr))}
-        .paletteButton{min-height:54px;padding:8px 9px 8px 12px}
-        .paletteButton strong{font-size:9.5px}.paletteButton small{font-size:8.5px}
-        .editorCard{padding-bottom:1px}
-        #workflowEditor{padding-bottom:82px}
-        .empty{min-height:96px}
-        .blockCard{margin:3px 0;border-radius:10px}
-        .blockHead{grid-template-columns:32px minmax(0,1fr);gap:4px;min-height:50px;padding:6px 6px 6px 8px}
-        .blockHead button,.legacyTools button{min-height:40px;height:40px}
-        .collapseToggle{width:30px}
-        .blockName{gap:5px}
-        .blockTypeBadge{padding:0 5px;font-size:7.5px}
-        .blockName strong{font-size:10px}.blockName small{font-size:8px}
-        .blockBody{padding:9px}
-        .blockTools{grid-column:1/-1;flex-wrap:wrap;justify-content:flex-start;padding-left:35px;gap:2px}
-        .blockTools button{min-width:40px;width:40px}
-        .childArea{margin:0 6px 7px 15px;padding:5px}
-        #runBar{margin:0 -9px;padding:10px 9px calc(9px + env(safe-area-inset-bottom))}
-        #runBar button{min-height:43px}
-        #validationBar{grid-template-columns:8px minmax(0,1fr) auto;padding:7px}
-        #validationFocus{display:none!important}
-        #validateWorkflow{min-width:78px}
-        .historyActions button{min-width:0;flex:1}
-        .logEntry{grid-template-columns:50px 68px minmax(0,1fr);gap:5px;padding:7px 4px;font-size:9px}
       }
       @media(max-width:430px){
-        #browserBar{grid-template-columns:44px 44px minmax(66px,1fr) 52px 44px}
+        #browserBar{grid-template-columns:40px 40px minmax(66px,1fr) 52px 40px}
         #forwardFrame{display:none}
-        .toolbar>*{flex-basis:72px}
-        .paletteFilter{font-size:8.5px}
-        .errorActions{grid-template-columns:1fr}
-        .grid2,.grid3{grid-template-columns:1fr}
-        .span2{grid-column:auto}
         #recordToolbar{grid-template-columns:1fr 1fr}
         .recordStatus{grid-column:1/-1;justify-content:center}
       }
       @media(hover:none) and (pointer:coarse){
         #browserBar,#dock,.blockCard{backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}
-        button{min-height:40px}
-        input,select,textarea{min-height:40px}
-        .blockHead button,.legacyTools button{min-height:40px;height:40px}
         #recordToolbar button{min-height:44px;height:44px}
         .paletteButton:hover:not(:disabled){transform:none}
       }
-      @media(max-width:620px){
-        #browserBar button,#browserBar input{height:38px;min-height:38px}
-        #dockHeader{grid-template-columns:34px minmax(0,1fr) 34px 34px;min-height:48px;padding:4px 6px}
-        #dockGrip,#toggleCompact,#closeApp{width:34px;height:34px;min-height:34px}
-        #dockGrip::before{inset:10px}
-        .mainTab{height:36px;min-height:36px}
-        input,select,textarea{min-height:36px;padding:6px 8px;font-size:16px}
-        .grid2,.grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
-        .span2{grid-column:1/-1}
-        .field{gap:4px}
-        .toolbar button{min-height:34px;height:34px;padding:0 7px}
-        .blockHead button,.legacyTools button{min-height:32px;height:32px}
-        .blockTools button{min-width:32px;width:32px}
-        .paletteFilter{min-height:34px;height:34px}
-        .paletteButton{min-height:46px}
-        #runBar button{min-height:40px;height:40px}
-        #validationBar button{min-height:32px;height:32px}
-      }
-      #dock.narrowViewport.androidCompact{
-        width:var(--dock-width,72vw);width:var(--dock-width,72dvw);
-        height:var(--dock-height,38vh);height:var(--dock-height,38dvh);
-        max-width:82vw;max-width:82dvw;max-height:48vh;max-height:48dvh;border-radius:14px
-      }
-      #dock.compact.androidCompact{width:124px;height:58px;border-radius:29px}
-      #dock.androidCompact{font-size:7.4px}
-      #dock.androidCompact #dockHeader{gap:5px;min-height:41px;padding:6px 8px}
-      #dock.androidCompact .title strong{font-size:7px}
-      #dock.androidCompact .title small{font-size:5.5px}
-      #dock.androidCompact #toggleCompact,#dock.androidCompact #closeApp{width:17px;height:17px;min-height:17px;font-size:8.7px}
-      #dock.androidCompact #mainTabs{gap:3px;padding:6px 8px}
-      #dock.androidCompact .tabIcon{width:9px;height:9px;font-size:7.2px}
+
+      /* Panel density. syncDockDensity() measures the dock itself and adds d-md / d-sm /
+         d-xs cumulatively, so a narrower panel keeps every rule of the wider steps and
+         only tightens further. Nothing here looks at the screen. */
+      #dock.d-md .shortcutHint{display:none}
+      #dock.d-md .page{padding:14px 13px 0}
+      #dock.d-md .grid3{grid-template-columns:repeat(2,minmax(0,1fr))}
+      #dock.d-md .paletteControls{grid-template-columns:1fr}
+      #dock.d-md .paletteFilters{display:grid;grid-template-columns:repeat(5,minmax(0,1fr))}
+      #dock.d-md .paletteFilter{padding:0 5px}
+      #dock.d-md .blockHead{grid-template-columns:38px minmax(0,1fr)}
+      #dock.d-md .blockTools{grid-column:1/-1;justify-content:flex-start;padding-left:46px}
+      #dock.d-md #runBar{margin:0 -13px;padding:12px 32px calc(11px + env(safe-area-inset-bottom))}
+
+      #dock.d-sm{font-size:12.5px}
+      #dock.d-sm #dockHeader{grid-template-columns:36px minmax(0,1fr) 36px 36px 36px;gap:4px;min-height:52px;padding:5px 7px}
+      #dock.d-sm #dockGrip,#dock.d-sm #toggleCompact,#dock.d-sm #toggleMaximize,#dock.d-sm #closeApp{width:36px;height:36px;min-height:36px}
+      #dock.d-sm #dockGrip::before{inset:11px}
+      #dock.d-sm #toggleCompact,#dock.d-sm #closeApp{font-size:15px}
+      #dock.d-sm #toggleMaximize{font-size:13px}
+      #dock.d-sm .title strong{font-size:12px}
+      #dock.d-sm .title small{font-size:9.5px}
+      #dock.d-sm #mainTabs{gap:3px;padding:5px 7px}
+      #dock.d-sm .mainTab{height:38px;min-height:38px;font-size:10.5px;gap:5px}
+      #dock.d-sm .mainTab[aria-selected=true]::after{bottom:-5px}
+      #dock.d-sm .tabIcon{width:15px;height:15px;font-size:12px}
+      #dock.d-sm .page{padding:11px 10px 0}
+      /* The tab strip already names the page, so the banner is pure overhead here. */
+      #dock.d-sm .pageIntro{display:none}
+      #dock.d-sm .card{margin-bottom:9px;padding:11px;border-radius:12px}
+      #dock.d-sm .cardHeader,#dock.d-sm .cardTitle{margin-bottom:9px;font-size:11.5px}
+      #dock.d-sm .sectionIcon{width:25px;height:25px;font-size:12px}
+      #dock.d-sm .cardHeading strong{font-size:11.5px}
+      #dock.d-sm .cardHeading small{font-size:9px}
+      #dock.d-sm .grid2,#dock.d-sm .grid3{gap:7px}
+      #dock.d-sm input,#dock.d-sm select,#dock.d-sm textarea{min-height:38px;padding:7px 9px;font-size:16px}
+      #dock.d-sm .toolbar{gap:5px;margin-top:8px}
+      #dock.d-sm .toolbar>*{flex-basis:88px}
+      #dock.d-sm .toolbar button{min-height:36px;height:36px;padding:0 9px;font-size:10px}
+      #dock.d-sm .paletteCard>summary{padding:11px}
+      #dock.d-sm .paletteContent{padding:10px}
+      #dock.d-sm .paletteItems{grid-template-columns:1fr;gap:5px}
+      #dock.d-sm .paletteButton{min-height:52px;padding:8px 10px 8px 12px}
+      #dock.d-sm .paletteButton strong{font-size:10px}
+      #dock.d-sm .paletteButton small{font-size:8.5px}
+      #dock.d-sm .paletteFilter{min-height:34px;height:34px;padding:0 4px;font-size:9px}
+      #dock.d-sm .blockCard{border-radius:11px}
+      #dock.d-sm .blockHead{grid-template-columns:30px minmax(0,1fr);gap:5px;min-height:46px;padding:6px 7px}
+      #dock.d-sm .collapseToggle{width:30px;min-height:34px;height:34px}
+      #dock.d-sm .blockTypeBadge{padding:0 5px;font-size:7.5px}
+      #dock.d-sm .blockName strong{font-size:10.5px}
+      #dock.d-sm .blockName small{font-size:8.5px}
+      #dock.d-sm .blockBody{padding:9px}
+      #dock.d-sm .blockTools{padding-left:35px;gap:2px}
+      #dock.d-sm .blockTools button,#dock.d-sm .legacyTools button{min-width:34px;width:34px;min-height:34px;height:34px}
+      #dock.d-sm .childArea{margin:0 6px 7px 14px;padding:6px}
+      #dock.d-sm #workflowEditor{padding-bottom:78px}
+      #dock.d-sm .empty{min-height:92px;padding:20px 12px}
+      #dock.d-sm #runBar{margin:0 -10px;padding:9px 30px calc(9px + env(safe-area-inset-bottom))}
+      #dock.d-sm #runBar button{min-height:42px;font-size:11px}
+      #dock.d-sm .historyActions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+      #dock.d-sm .historyActions::after{display:none}
+      #dock.d-sm .historyActions button{min-width:0;font-size:14px}
+      #dock.d-sm .historyActions .btnLabel{display:none}
+      #dock.d-sm .logEntry{grid-template-columns:52px 70px minmax(0,1fr);gap:6px;padding:7px 4px;font-size:9.5px}
+
+      #dock.d-xs{font-size:11.5px}
+      #dock.d-xs #dockHeader{grid-template-columns:32px minmax(0,1fr) 32px 32px 32px;gap:3px;min-height:46px;padding:4px 6px}
+      #dock.d-xs #dockGrip,#dock.d-xs #toggleCompact,#dock.d-xs #toggleMaximize,#dock.d-xs #closeApp{width:32px;height:32px;min-height:32px}
+      #dock.d-xs #dockGrip::before{inset:10px}
+      #dock.d-xs .title strong{font-size:11px}
+      #dock.d-xs .title small{font-size:9px;gap:5px}
+      #dock.d-xs #mainTabs{gap:2px;padding:4px 5px}
+      #dock.d-xs .mainTab{height:34px;min-height:34px;gap:4px;font-size:9.5px}
+      #dock.d-xs .tabIcon{width:13px;height:13px;font-size:11px}
+      #dock.d-xs .page{padding:9px 8px 0}
+      #dock.d-xs .card{padding:9px}
+      #dock.d-xs .grid2,#dock.d-xs .grid3{grid-template-columns:1fr}
+      #dock.d-xs .span2{grid-column:auto}
+      #dock.d-xs .toolbar>*{flex-basis:70px}
+      #dock.d-xs .toolbar button{min-height:34px;height:34px;padding:0 7px;font-size:9.5px}
+      #dock.d-xs .paletteFilters{grid-template-columns:repeat(5,minmax(0,1fr));gap:2px}
+      #dock.d-xs .paletteFilter{padding:0 2px;font-size:8.5px}
+      #dock.d-xs .blockTools button,#dock.d-xs .legacyTools button{min-width:32px;width:32px;min-height:32px;height:32px}
+      #dock.d-xs .blockTools{padding-left:0;justify-content:space-between}
+      #dock.d-xs .errorActions{grid-template-columns:1fr}
+      #dock.d-xs #runBar button{min-height:40px}
+      #dock.d-xs .logEntry{grid-template-columns:46px 62px minmax(0,1fr);gap:4px;padding:6px 3px;font-size:9px}
+
+      /* Short panels give the vertical budget back to the flow itself. */
+      #dock.h-sm .pageIntro{display:none}
+      #dock.h-sm .workflowSettings,#dock.h-sm .templateCard{margin-bottom:7px}
+      #dock.h-sm #runBar{padding-top:8px;padding-bottom:calc(8px + env(safe-area-inset-bottom))}
       @media(forced-colors:active){
         #dock,#browserBar,.card,.blockCard,input,select,textarea,button{border:1px solid CanvasText}
         .blockCard::before,.paletteButton::after{width:5px}
@@ -1168,6 +1172,7 @@
           <strong>AutoFlow Studio</strong>
           <small id="statusText" data-tone="success">準備完了</small>
         </div>
+        <button id="toggleMaximize" aria-label="パネルを画面いっぱいに広げる" aria-pressed="false" title="全画面表示・元のサイズに戻す">⛶</button>
         <button id="toggleCompact" aria-label="パネルを最小化" title="最小化">—</button>
         <button id="closeApp" aria-label="AutoFlowを終了" title="終了">×</button>
       </div>
@@ -1275,23 +1280,21 @@
                 <span class="sectionIcon" aria-hidden="true">⌁</span>
                 <div class="cardHeading" role="heading" aria-level="3"><strong>フローステップ</strong><small>上から順に実行</small></div>
               </div>
-              <span id="workflowStats" class="hint statsPill"></span>
+              <div class="cardHeaderAside">
+                <button id="workflowIssues" class="issuePill" type="button" hidden></button>
+                <span id="workflowStats" class="hint statsPill"></span>
+              </div>
             </div>
             <div class="toolbar compactActions historyActions" role="group" aria-label="編集履歴とブロック表示操作">
-              <button id="undoWorkflow" class="ghost" title="元に戻す（Ctrl/⌘ + Z）" disabled>↶ 元に戻す</button>
-              <button id="redoWorkflow" class="ghost" title="やり直す（Ctrl/⌘ + Shift + Z）" disabled>↷ やり直す</button>
-              <button id="expandAllBlocks" class="ghost">すべて展開</button>
-              <button id="collapseAllBlocks" class="ghost">すべて折りたたむ</button>
+              <button id="undoWorkflow" class="ghost" title="元に戻す（Ctrl/⌘ + Z）" aria-label="元に戻す" disabled>↶<span class="btnLabel">元に戻す</span></button>
+              <button id="redoWorkflow" class="ghost" title="やり直す（Ctrl/⌘ + Shift + Z）" aria-label="やり直す" disabled>↷<span class="btnLabel">やり直す</span></button>
+              <button id="expandAllBlocks" class="ghost" title="すべて展開" aria-label="すべて展開">⊞<span class="btnLabel">すべて展開</span></button>
+              <button id="collapseAllBlocks" class="ghost" title="すべて折りたたむ" aria-label="すべて折りたたむ">⊟<span class="btnLabel">すべて折りたたむ</span></button>
             </div>
             <div id="workflowEditor"></div>
           </article>
           <div id="runBar" role="group" aria-label="ワークフロー実行操作">
-            <div id="validationBar" data-tone="idle">
-              <div class="validationText"><strong id="validationTitle">実行前チェック</strong><small id="validationMessage">変更内容は実行時に自動確認されます</small></div>
-              <button id="validationFocus" class="ghost" hidden>問題を確認</button>
-              <button id="validateWorkflow" class="ghost">チェック</button>
-            </div>
-            <button id="runWorkflow">▶ フローを実行</button>
+            <button id="runWorkflow">▶ 実行</button>
             <button id="stopWorkflow" disabled>■ 停止</button>
           </div>
         </section>
@@ -1387,9 +1390,8 @@
     legacyPresetSlot: byId('legacyPresetSlot'), legacyPresetName: byId('legacyPresetName'), logList: byId('logList'),
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
     elementPickerToolbar: byId('elementPickerToolbar'), elementPickerHint: byId('elementPickerHint'), elementPickerCancel: byId('elementPickerCancel'),
-    undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), validationBar: byId('validationBar'),
-    validationTitle: byId('validationTitle'), validationMessage: byId('validationMessage'), validationFocus: byId('validationFocus'),
-    validateWorkflow: byId('validateWorkflow'), battlePerformanceToggle: byId('battlePerformanceToggle')
+    undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), workflowIssues: byId('workflowIssues'),
+    battlePerformanceToggle: byId('battlePerformanceToggle')
   };
 
   const state = {
@@ -1489,7 +1491,6 @@
   }
   let narrowScreen = isNarrowViewport();
   dock.classList.toggle('narrowViewport', narrowScreen);
-  dock.classList.toggle('androidCompact', isAndroidPhone());
   const dragLock = { active: false, pointerId: null, owner: null, restore: null, cancel: null };
 
 
@@ -1735,6 +1736,8 @@
   }
 
   let logScrollFrame = 0;
+  let validationRefreshTimer = 0;
+  let dockRestoreBox = null;
 
   function scheduleLogScroll() {
     if (logScrollFrame || state.destroyed || state.page !== 'logs') return;
@@ -3187,6 +3190,7 @@
       for (const [type, definition] of matches) {
         const button = element('button', {
           className: `paletteButton ${definition.category}`,
+          dataset: { type },
           attrs: { 'aria-label': `${definition.label}を追加` }
         }, [
           element('strong', { text: definition.label }),
@@ -3315,17 +3319,53 @@
     return issues;
   }
 
+  // The old design parked a permanent pre-run check bar above the run buttons. It cost a
+  // whole row of an already short panel to say nothing at all most of the time, so the
+  // status now lives in a chip that only exists while there is something to report.
+  function renderValidationChip(issues = state.validationIssues) {
+    const chip = ui.workflowIssues;
+    if (!chip) return;
+    const errors = issues.filter(issue => issue.severity === 'error');
+    const warnings = issues.filter(issue => issue.severity === 'warning');
+    if (!errors.length && !warnings.length) {
+      chip.hidden = true;
+      chip.textContent = '';
+      chip.removeAttribute('title');
+      return;
+    }
+    const tone = errors.length ? 'error' : 'warning';
+    const count = errors.length || warnings.length;
+    const label = errors.length ? `⚠ ${count}件の要修正` : `⚠ ${count}件の注意`;
+    chip.hidden = false;
+    chip.dataset.tone = tone;
+    chip.textContent = label;
+    const first = (errors[0] || warnings[0]).message;
+    chip.title = first;
+    chip.setAttribute('aria-label', `${label}。${first}。押すと該当ブロックへ移動します`);
+  }
+
+  function scheduleValidationRefresh() {
+    clearTimeout(validationRefreshTimer);
+    validationRefreshTimer = setTimeout(() => {
+      if (state.destroyed || state.running || state.legacyRunning) return;
+      state.validationIssues = validateWorkflowDefinition(currentWorkflow());
+      renderValidationChip();
+      // Repaint the per-block badges too, but never while a field is being typed into —
+      // a re-render there would take the caret away mid-word.
+      const typing = shadow.activeElement?.matches?.('#workflowEditor input,#workflowEditor select,#workflowEditor textarea');
+      if (!typing) renderWorkflowEditor();
+    }, VALIDATION_REFRESH_MS);
+  }
+
   function invalidateWorkflowValidation() {
     state.validationIssues = [];
-    ui.validationBar.dataset.tone = 'idle';
-    ui.validationTitle.textContent = '実行前チェック';
-    ui.validationMessage.textContent = '変更内容は実行時に自動確認されます';
-    ui.validationFocus.hidden = true;
+    renderValidationChip([]);
     shadow.querySelectorAll('.blockCard.validation-error,.blockCard.validation-warning').forEach(card => {
       card.classList.remove('validation-error', 'validation-warning');
       card.removeAttribute('aria-description');
     });
     shadow.querySelectorAll('.validationBadge').forEach(badge => badge.remove());
+    scheduleValidationRefresh();
   }
 
   function firstActionableValidationIssue() {
@@ -3338,7 +3378,7 @@
   function focusWorkflowValidationIssue(issue = firstActionableValidationIssue()) {
     if (!issue) return;
     if (!issue.blockId) {
-      ui.validateWorkflow?.focus?.({ preventScroll: true });
+      ui.workflowIssues?.focus?.({ preventScroll: true });
       return announce(issue.message);
     }
     let location = findBlockLocation(issue.blockId);
@@ -3359,31 +3399,19 @@
   }
 
   function runWorkflowValidation({ announceResult = true, focusFirstError = false } = {}) {
+    clearTimeout(validationRefreshTimer);
     const workflow = currentWorkflow();
     const issues = validateWorkflowDefinition(workflow);
     state.validationIssues = issues;
     const errors = issues.filter(issue => issue.severity === 'error');
     const warnings = issues.filter(issue => issue.severity === 'warning');
-    ui.validationFocus.hidden = !issues.length;
-    if (errors.length) {
-      ui.validationBar.dataset.tone = 'error';
-      ui.validationTitle.textContent = `${errors.length}件のエラー`;
-      ui.validationMessage.textContent = errors[0].message;
-    } else if (warnings.length) {
-      ui.validationBar.dataset.tone = 'warning';
-      ui.validationTitle.textContent = `${warnings.length}件の注意`;
-      ui.validationMessage.textContent = warnings[0].message;
-    } else {
-      ui.validationBar.dataset.tone = 'success';
-      ui.validationTitle.textContent = '実行準備OK';
-      ui.validationMessage.textContent = `${countBlocks(workflow.blocks)}ブロックを確認しました`;
-    }
+    renderValidationChip(issues);
     renderWorkflowEditor();
     const summary = errors.length
       ? `${errors.length}件のエラーがあります`
       : warnings.length
         ? `${warnings.length}件の注意があります。実行は可能です`
-        : '実行前チェックに問題はありません';
+        : '問題はありません';
     if (announceResult) toast(summary);
     if (focusFirstError && errors.length) focusWorkflowValidationIssue(errors[0]);
     return { issues, errors, warnings, valid: !errors.length };
@@ -7056,7 +7084,7 @@
     if (fragmentOnly) setTimeout(() => { try { location.reload(); } catch {} }, 0);
   }
 
-  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null) {
+  async function continueWorkflowInCurrentTab(handoff, reason, sourceError = null, level = 'warn') {
     const fallback = {
       ...handoff,
       targetName: `${handoff.targetName}-same-${nowId('tab')}`,
@@ -7070,8 +7098,8 @@
       throw new FlowError(`同一タブ用の進行内容を保存できませんでした${detail}`, 'HANDOFF_FALLBACK_SAVE_FAILED');
     }
     window.name = fallback.targetName;
-    appendLog(reason, 'warn', '親ページ再起動');
-    setStatus('進行を保存して親ページを再起動');
+    appendLog(reason, level, '親ページ再起動');
+    setStatus('進行を保存して親ページを再読み込み');
     try { replaceParentLocation(fallback.parentUrl); }
     catch (error) {
       clearWorkflowHandoff(handoff.id);
@@ -7086,64 +7114,6 @@
     catch { return null; }
   }
 
-  function scriptedTabOpenAllowed() {
-    // Only WebKit puts a confirmation sheet in front of a scripted pop-up. Android and
-    // desktop open it silently, so never gate the direct call there.
-    if (!isIosLikeBrowser()) return true;
-    const activation = navigator.userActivation;
-    return typeof activation?.isActive === 'boolean' ? activation.isActive : false;
-  }
-
-  function gestureHandoffTargets() {
-    const targets = [window];
-    try {
-      const frameWindow = iframe.contentWindow;
-      if (frameWindow && frameWindow !== window && new URL(frameWindow.location.href).origin === location.origin) {
-        targets.push(frameWindow);
-      }
-    } catch {}
-    return targets;
-  }
-
-  function awaitGestureHandoffTab(handoff, signal) {
-    return new Promise(resolve => {
-      const targets = gestureHandoffTargets();
-      let settled = false;
-      let timer = null;
-      let reminder = null;
-      const settle = value => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        clearInterval(reminder);
-        signal?.removeEventListener('abort', onAbort);
-        for (const target of targets) {
-          for (const type of GESTURE_HANDOFF_EVENTS) {
-            try { target.removeEventListener(type, onGesture, true); } catch {}
-          }
-        }
-        resolve(value);
-      };
-      const onGesture = event => {
-        if (!event?.isTrusted) return;
-        const opened = openWorkflowHandoffTab(handoff);
-        if (opened) settle(opened);
-      };
-      const onAbort = () => settle(null);
-      const remind = () => toast('新しいタブへ移ります。コントローラーを1回タップしてください');
-      for (const target of targets) {
-        for (const type of GESTURE_HANDOFF_EVENTS) {
-          try { target.addEventListener(type, onGesture, true); } catch {}
-        }
-      }
-      signal?.addEventListener('abort', onAbort, { once: true });
-      setStatus('タップ待ち（新しいタブを開きます）');
-      remind();
-      reminder = setInterval(remind, GESTURE_HANDOFF_REMINDER_MS);
-      timer = setTimeout(() => settle(null), WORKFLOW_HANDOFF_GESTURE_TIMEOUT_MS);
-    });
-  }
-
   async function beginWorkflowParentRestart(context) {
     throwIfAborted(context.signal);
     commitActiveEditorInput();
@@ -7155,14 +7125,20 @@
       throw new FlowError('進行内容を保存できないため、親ページを再起動しませんでした', 'HANDOFF_SAVE_FAILED');
     }
 
-    let opened = scriptedTabOpenAllowed() ? openWorkflowHandoffTab(handoff) : null;
-    if (!opened && isIosLikeBrowser()) {
-      // iOS/iPadOS confirm every pop-up a script opens without user activation, and the
-      // run sits behind that sheet until somebody taps it. Never make that call blind:
-      // window.open from inside a trusted tap opens the tab with no confirmation at all.
-      opened = await awaitGestureHandoffTab(handoff, context.signal);
-      throwIfAborted(context.signal);
+    if (isIosLikeBrowser()) {
+      // iPhone/iPad reload the parent in place instead of hopping to a second tab. A new
+      // tab there needs a pop-up confirmation, buries the window the user was watching and
+      // leaves the old tab behind; reloading this one keeps a single window and the same
+      // blocks, and the handoff record makes the run pick up exactly where it stopped.
+      return continueWorkflowInCurrentTab(
+        handoff,
+        '親ページを再読み込みして同じタブで進行を再開します',
+        null,
+        ''
+      );
     }
+
+    const opened = openWorkflowHandoffTab(handoff);
     if (!opened) {
       return continueWorkflowInCurrentTab(
         handoff,
@@ -7664,6 +7640,7 @@
       settingsOpen: true,
       browserHidden: false,
       compact: false,
+      dockLayout: DOCK_LAYOUT_REVISION,
       dockX: null,
       dockY: null,
       dockWidth: null,
@@ -7755,6 +7732,7 @@
       settingsOpen: source.settingsOpen !== false,
       browserHidden: Boolean(source.browserHidden),
       compact: Boolean(source.compact),
+      dockLayout: int(source.dockLayout, 0),
       dockX: source.dockX != null && Number.isFinite(Number(source.dockX)) ? Number(source.dockX) : null,
       dockY: source.dockY != null && Number.isFinite(Number(source.dockY)) ? Number(source.dockY) : null,
       dockWidth: source.dockWidth != null && Number.isFinite(Number(source.dockWidth)) ? Number(source.dockWidth) : null,
@@ -7780,6 +7758,16 @@
     ui.legacyCount.value = state.legacy.count;
     ui.legacyJitter.value = state.legacy.timeJitterMs;
     ui.legacyPositionJitter.value = state.legacy.positionJitterPx;
+    if (state.legacy.dockLayout < DOCK_LAYOUT_REVISION) {
+      // Sizes saved by the old phone layout were a fraction of the screen on purpose.
+      // Keeping them would reproduce the cramped panel this revision exists to replace,
+      // so drop the stored geometry once and let the new defaults apply.
+      state.legacy.dockLayout = DOCK_LAYOUT_REVISION;
+      state.legacy.dockX = null;
+      state.legacy.dockY = null;
+      state.legacy.dockWidth = null;
+      state.legacy.dockHeight = null;
+    }
     if (Number.isFinite(state.legacy.dockX)) state.dockX = state.legacy.dockX;
     if (Number.isFinite(state.legacy.dockY)) state.dockY = state.legacy.dockY;
     if (Number.isFinite(state.legacy.dockWidth)) state.dockWidth = state.legacy.dockWidth;
@@ -7805,6 +7793,7 @@
       settingsOpen: true,
       browserHidden: ui.browserBar.classList.contains('hidden'),
       compact: dock.classList.contains('compact'),
+      dockLayout: DOCK_LAYOUT_REVISION,
       dockX: state.dockX,
       dockY: state.dockY,
       dockWidth: state.dockWidth,
@@ -8860,7 +8849,7 @@
     'legacyAddWait', 'legacyRecord', 'legacyCount', 'legacyJitter', 'legacyPositionJitter', 'legacyPresetSlot',
     'legacyPresetName', 'legacySavePreset', 'legacyLoadPreset', 'legacyDeletePreset', 'paletteSearch',
     'clearInsertion', 'expandAllBlocks', 'collapseAllBlocks', 'undoWorkflow', 'redoWorkflow',
-    'restoreCheckpoint', 'validateWorkflow', 'validationFocus', 'loadExternalWorkflows', 'keepLocalWorkflows'
+    'restoreCheckpoint', 'workflowIssues', 'loadExternalWorkflows', 'keepLocalWorkflows'
   ]);
 
   function syncRunControls() {
@@ -8915,7 +8904,7 @@
     byId('toggleCompact').setAttribute('aria-expanded', 'false');
     byId('compactGrip').setAttribute('aria-expanded', 'false');
     requestAnimationFrame(() => {
-      positionDock();
+      positionDock({ keepInView: true });
       byId('compactRun').focus({ preventScroll: true });
     });
     return true;
@@ -8927,7 +8916,7 @@
     byId('toggleCompact').textContent = '—';
     byId('toggleCompact').setAttribute('aria-expanded', 'true');
     byId('compactGrip').setAttribute('aria-expanded', 'true');
-    requestAnimationFrame(positionDock);
+    requestAnimationFrame(() => positionDock({ keepInView: true }));
   }
 
   function setCompact(compact) {
@@ -8937,28 +8926,44 @@
     byId('toggleCompact').setAttribute('aria-expanded', String(!compact));
     byId('compactGrip').setAttribute('aria-expanded', String(!compact));
     requestAnimationFrame(() => {
-      positionDock();
+      positionDock({ keepInView: true });
       if (focusMoves) (compact ? byId('compactGrip') : byId(`tab-${state.page}`)).focus({ preventScroll: true });
     });
     saveLegacyState();
   }
 
-  function narrowDockDefaultSize() {
+  function viewportBox() {
     const viewport = window.visualViewport;
-    const viewportWidth = finite(viewport?.width, window.innerWidth);
-    const viewportHeight = finite(viewport?.height, window.innerHeight);
-    if (isAndroidPhone()) {
-      return { width: viewportWidth * 0.72, height: viewportHeight * 0.38 };
-    }
     return {
-      width: Math.max(260, Math.min(380, viewportWidth * 0.82)),
-      height: Math.max(260, Math.min(500, viewportHeight * 0.46))
+      left: finite(viewport?.offsetLeft, 0),
+      top: finite(viewport?.offsetTop, 0),
+      width: finite(viewport?.width, window.innerWidth),
+      height: finite(viewport?.height, window.innerHeight)
+    };
+  }
+
+  // The only ceiling a saved panel size has is the screen it must still fit on. Phones used
+  // to be pinned to a fraction of the viewport, which is what made the panel too small to
+  // read while its own controls stayed phone-sized.
+  function narrowDockMaxSize() {
+    const box = viewportBox();
+    return {
+      width: Math.max(DOCK_MIN_WIDTH, box.width - DOCK_VIEWPORT_MARGIN),
+      height: Math.max(DOCK_MIN_HEIGHT, box.height - DOCK_VIEWPORT_MARGIN)
+    };
+  }
+
+  function narrowDockDefaultSize() {
+    const box = viewportBox();
+    return {
+      width: Math.max(DOCK_MIN_WIDTH, Math.min(460, box.width - 12)),
+      height: Math.max(DOCK_MIN_HEIGHT, Math.min(800, box.height * 0.74))
     };
   }
 
   function normalizeNarrowDockSize() {
     if (!dock.classList.contains('narrowViewport')) return false;
-    const size = narrowDockDefaultSize();
+    const size = narrowDockMaxSize();
     let changed = false;
     if (Number.isFinite(state.dockWidth) && state.dockWidth > size.width) {
       state.dockWidth = size.width;
@@ -8971,12 +8976,72 @@
     return changed;
   }
 
-  function positionDock() {
-    const viewport = window.visualViewport;
-    const viewportLeft = finite(viewport?.offsetLeft, 0);
-    const viewportTop = finite(viewport?.offsetTop, 0);
-    const viewportWidth = finite(viewport?.width, window.innerWidth);
-    const viewportHeight = finite(viewport?.height, window.innerHeight);
+  // Density is measured from the dock, never from the screen. A viewport media query cannot
+  // see that a 280px panel is floating on a 412px phone, so every control kept being laid
+  // out for the phone and overflowed the panel it lived in.
+  function syncDockDensity() {
+    if (dock.classList.contains('compact')) return;
+    const rect = dock.getBoundingClientRect();
+    const width = rect.width || finite(state.dockWidth, 0) || viewportBox().width;
+    const height = rect.height || finite(state.dockHeight, 0) || viewportBox().height;
+    const density = width < 380 ? 'xs' : width < 480 ? 'sm' : width < 640 ? 'md' : 'lg';
+    dock.classList.toggle('d-md', density !== 'lg');
+    dock.classList.toggle('d-sm', density === 'sm' || density === 'xs');
+    dock.classList.toggle('d-xs', density === 'xs');
+    dock.classList.toggle('h-sm', height < 430);
+    dock.dataset.density = density;
+  }
+
+  function dockFillsViewport() {
+    const box = viewportBox();
+    const rect = dock.getBoundingClientRect();
+    return rect.width >= box.width - DOCK_VIEWPORT_MARGIN - 2 && rect.height >= box.height - DOCK_VIEWPORT_MARGIN - 2;
+  }
+
+  function syncMaximizeControl() {
+    const button = byId('toggleMaximize');
+    if (!button) return;
+    const maximized = Boolean(dockRestoreBox) || dockFillsViewport();
+    button.setAttribute('aria-pressed', String(maximized));
+    button.textContent = maximized ? '⤡' : '⛶';
+    button.title = maximized ? '元のサイズに戻す' : '画面いっぱいに広げる';
+    button.setAttribute('aria-label', maximized ? 'パネルを元のサイズに戻す' : 'パネルを画面いっぱいに広げる');
+  }
+
+  function toggleDockMaximized() {
+    if (dock.classList.contains('compact')) setCompact(false);
+    if (dockRestoreBox) {
+      const restore = dockRestoreBox;
+      dockRestoreBox = null;
+      state.dockWidth = restore.width;
+      state.dockHeight = restore.height;
+      state.dockX = restore.x;
+      state.dockY = restore.y;
+    } else {
+      const rect = dock.getBoundingClientRect();
+      const box = viewportBox();
+      dockRestoreBox = {
+        width: Number.isFinite(state.dockWidth) ? state.dockWidth : rect.width,
+        height: Number.isFinite(state.dockHeight) ? state.dockHeight : rect.height,
+        x: rect.left,
+        y: rect.top
+      };
+      state.dockWidth = Math.max(DOCK_MIN_WIDTH, box.width - DOCK_VIEWPORT_MARGIN);
+      state.dockHeight = Math.max(DOCK_MIN_HEIGHT, box.height - DOCK_VIEWPORT_MARGIN);
+      state.dockX = box.left + DOCK_VIEWPORT_MARGIN / 2;
+      state.dockY = box.top + DOCK_VIEWPORT_MARGIN / 2;
+    }
+    positionDock({ keepInView: true });
+    saveLegacyState();
+    announce(dockRestoreBox ? 'パネルを画面いっぱいに広げました' : 'パネルのサイズを戻しました');
+  }
+
+  function positionDock({ keepInView = false } = {}) {
+    const box = viewportBox();
+    const viewportLeft = box.left;
+    const viewportTop = box.top;
+    const viewportWidth = box.width;
+    const viewportHeight = box.height;
     if (Number.isFinite(state.dockWidth)) dock.style.setProperty('--dock-width', `${state.dockWidth}px`);
     else dock.style.removeProperty('--dock-width');
     if (Number.isFinite(state.dockHeight)) dock.style.setProperty('--dock-height', `${state.dockHeight}px`);
@@ -8984,17 +9049,32 @@
     const rect = dock.getBoundingClientRect();
     const width = rect.width || 780;
     const height = rect.height || 600;
-    const minX = viewportLeft + 4;
-    const minY = viewportTop + 4;
-    const maxX = Math.max(minX, viewportLeft + viewportWidth - width - 4);
-    const maxY = Math.max(minY, viewportTop + viewportHeight - height - 4);
-    if (!Number.isFinite(state.dockX)) state.dockX = viewportLeft + 8;
-    if (!Number.isFinite(state.dockY)) state.dockY = Math.max(minY, viewportTop + viewportHeight - height - 8);
+    // The panel may hang off any edge. All that is guaranteed is a strip of the header
+    // wide enough to grab, so a panel pushed aside can always be pulled back.
+    const keepX = Math.min(DOCK_KEEP_VISIBLE_X, width);
+    const keepY = Math.min(DOCK_KEEP_VISIBLE_Y, height);
+    let minX = viewportLeft + keepX - width;
+    let maxX = Math.max(minX, viewportLeft + viewportWidth - keepX);
+    let minY = viewportTop;
+    let maxY = Math.max(minY, viewportTop + viewportHeight - keepY);
+    if (keepInView) {
+      // Growing the panel — leaving compact, maximising, a rotation — must not strand it
+      // half off the screen. Only a deliberate drag may park it on an edge.
+      const inset = DOCK_VIEWPORT_MARGIN / 2;
+      minX = viewportLeft + inset;
+      maxX = Math.max(minX, viewportLeft + viewportWidth - width - inset);
+      minY = viewportTop + inset;
+      maxY = Math.max(minY, viewportTop + viewportHeight - height - inset);
+    }
+    if (!Number.isFinite(state.dockX)) state.dockX = viewportLeft + 6;
+    if (!Number.isFinite(state.dockY)) state.dockY = Math.max(minY, viewportTop + viewportHeight - height - 6);
     state.dockX = clamp(state.dockX, minX, maxX);
     state.dockY = clamp(state.dockY, minY, maxY);
     dock.style.left = `${state.dockX}px`;
     dock.style.top = `${state.dockY}px`;
     dock.style.bottom = 'auto';
+    syncDockDensity();
+    syncMaximizeControl();
   }
 
   function installDockDrag(handle) {
@@ -9160,19 +9240,13 @@
       window.removeEventListener('pointercancel', finish, true);
     };
     const resizeTo = (desiredWidth, desiredHeight) => {
-      const viewport = window.visualViewport;
-      const viewportLeft = finite(viewport?.offsetLeft, 0);
-      const viewportTop = finite(viewport?.offsetTop, 0);
-      const viewportWidth = finite(viewport?.width, window.innerWidth);
-      const viewportHeight = finite(viewport?.height, window.innerHeight);
-      const viewportRight = viewportLeft + viewportWidth;
-      const viewportBottom = viewportTop + viewportHeight;
-      const maxWidth = Math.max(160, side === 'left'
-        ? drag.baseRight - viewportLeft - 4
-        : viewportRight - drag.baseLeft - 4);
-      const maxHeight = Math.max(180, viewportBottom - drag.baseTop - 4);
-      const minWidth = Math.min(260, maxWidth);
-      const minHeight = Math.min(260, maxHeight);
+      const box = viewportBox();
+      // Growing is capped by the screen, not by where the panel happens to sit. Dragging a
+      // corner therefore always reaches full size, even from a panel parked in a corner.
+      const maxWidth = Math.max(DOCK_MIN_WIDTH, box.width - DOCK_VIEWPORT_MARGIN / 2);
+      const maxHeight = Math.max(DOCK_MIN_HEIGHT, box.height - DOCK_VIEWPORT_MARGIN / 2);
+      const minWidth = Math.min(DOCK_MIN_WIDTH, maxWidth);
+      const minHeight = Math.min(DOCK_MIN_HEIGHT, maxHeight);
       state.dockWidth = clamp(desiredWidth, minWidth, maxWidth);
       state.dockHeight = clamp(desiredHeight, minHeight, maxHeight);
       state.dockX = side === 'left' ? drag.baseRight - state.dockWidth : drag.baseLeft;
@@ -9213,6 +9287,7 @@
     const start = event => {
       if (event.button !== 0 || dock.classList.contains('compact')) return;
       cancelActiveDrag('replaced');
+      dockRestoreBox = null;
       const rect = dock.getBoundingClientRect();
       Object.assign(drag, {
         active: true,
@@ -9260,9 +9335,10 @@
     };
     const reset = event => {
       event.preventDefault();
+      dockRestoreBox = null;
       state.dockWidth = null;
       state.dockHeight = null;
-      positionDock();
+      positionDock({ keepInView: true });
       saveLegacyState();
       toast('パネルサイズを初期値に戻しました');
     };
@@ -9339,6 +9415,7 @@
     stopElementPicker({ restoreFocus: false });
     clearTimeout(state.toastTimer);
     clearTimeout(state.autosaveTimer);
+    clearTimeout(validationRefreshTimer);
     for (const timer of state.telemetryTimers) clearTimeout(timer);
     state.telemetryTimers.clear();
     if (state.announceFrame) cancelAnimationFrame(state.announceFrame);
@@ -9383,6 +9460,11 @@
   ui.browserHandle.addEventListener('click', () => setBrowserHidden(false));
   byId('closeApp').addEventListener('click', () => { if ((state.running || state.legacyRunning) && !confirm('実行中です。停止して終了しますか？')) return; destroy(); });
   byId('toggleCompact').addEventListener('click', () => setCompact(!dock.classList.contains('compact')));
+  byId('toggleMaximize').addEventListener('click', toggleDockMaximized);
+  byId('dockHeader').addEventListener('dblclick', event => {
+    if (event.target.closest?.('button,input,select,textarea,a')) return;
+    toggleDockMaximized();
+  });
   byId('compactRun').addEventListener('click', () => state.page === 'legacy' ? (state.legacyRunning ? stopLegacy() : startLegacy()) : (state.running ? stopWorkflow() : startWorkflow()));
   const mainTabs = Array.from(shadow.querySelectorAll('.mainTab'));
   mainTabs.forEach((button, index) => {
@@ -9473,8 +9555,10 @@
   byId('backupConflictWorkflows').addEventListener('click', exportAllWorkflows);
   ui.undoWorkflow.addEventListener('click', undoWorkflowChange);
   ui.redoWorkflow.addEventListener('click', redoWorkflowChange);
-  ui.validateWorkflow.addEventListener('click', () => runWorkflowValidation());
-  ui.validationFocus.addEventListener('click', () => focusWorkflowValidationIssue());
+  ui.workflowIssues.addEventListener('click', () => {
+    runWorkflowValidation({ announceResult: false });
+    focusWorkflowValidationIssue();
+  });
   ui.runWorkflow.addEventListener('click', startWorkflow);
   ui.stopWorkflow.addEventListener('click', () => stopWorkflow());
 
@@ -9532,7 +9616,7 @@
     narrowScreen = isNarrowViewport();
     dock.classList.toggle('narrowViewport', narrowScreen);
     if (narrowScreen && !wasNarrow) normalizeNarrowDockSize();
-    positionDock();
+    positionDock({ keepInView: true });
     for (const action of state.legacy?.actions || []) {
       if (action.type === 'click') {
         action.cx = clamp(action.cx, 0, window.innerWidth);
@@ -9557,6 +9641,11 @@
     window.removeEventListener('storage', handleExternalWorkflowUpdate);
     window.removeEventListener('pagehide', pageHideHandler);
   });
+  if (typeof ResizeObserver === 'function') {
+    const densityObserver = new ResizeObserver(() => syncDockDensity());
+    densityObserver.observe(dock);
+    addCleanup(() => densityObserver.disconnect());
+  }
   installDockDrag(byId('dockGrip'));
   installDockDrag(byId('compactGrip'));
   installDockHeaderDrag(byId('dockHeader'));
@@ -9625,11 +9714,14 @@
     toast('保存データが読めなかったため、直前の復旧ポイントを読み込みました');
   }
   byId('workflowSettingsPanel').open = !narrowScreen;
+  // An empty flow has nothing to look at, so lead with the library rather than making the
+  // first block a scavenger hunt behind a collapsed section.
+  if (!currentWorkflow()?.blocks?.length) ui.palette.closest('details').open = true;
   setPage('workflow');
   setBrowserHidden(state.legacy.browserHidden || narrowScreen);
   setCompact(state.legacy.compact || narrowScreen);
   requestAnimationFrame(() => {
-    positionDock();
+    positionDock({ keepInView: true });
     (dock.classList.contains('compact') ? byId('compactGrip') : byId('tab-workflow')).focus({ preventScroll: true });
   });
   const pendingWorkflowHandoff = claimPendingWorkflowHandoff();
