@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { createFunctionExtractor } from './source-extract.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/granblue-captured-scenarios.json', import.meta.url), 'utf8'));
@@ -26,104 +27,13 @@ const SELECTORS = Object.freeze({
   attackCancel: '.btn-attack-cancel',
   attackActor: '.prt-command .btn-command-character.attack',
   turn: '#js-turn-num-count',
-  myPageScreen: '.cnt-mypage'
+  myPageScreen: '.cnt-mypage',
+  authCaptcha: '#pop-c-a-i',
+  authCaptchaPanel: '.pop-usual',
+  authCaptchaContent: '#c-a-i-frm-group, .txt-c-a-i-message'
 });
 
-function extractFunction(name) {
-  const starts = [`async function ${name}(`, `function ${name}(`];
-  const start = starts.map(token => source.indexOf(token)).find(index => index >= 0);
-  assert.notEqual(start, undefined, `missing production function: ${name}`);
-  const paramsOpen = source.indexOf('(', start);
-  assert.ok(paramsOpen >= 0, `missing function parameters: ${name}`);
-  let paramsDepth = 0;
-  let paramsClose = -1;
-  let paramsMode = 'code';
-  for (let index = paramsOpen; index < source.length; index++) {
-    const char = source[index];
-    const next = source[index + 1];
-    if (paramsMode === 'line-comment') {
-      if (char === '\n') paramsMode = 'code';
-      continue;
-    }
-    if (paramsMode === 'block-comment') {
-      if (char === '*' && next === '/') { paramsMode = 'code'; index += 1; }
-      continue;
-    }
-    if (paramsMode === 'single' || paramsMode === 'double' || paramsMode === 'template') {
-      const delimiter = paramsMode === 'single' ? "'" : paramsMode === 'double' ? '"' : '`';
-      if (char === '\\') { index += 1; continue; }
-      if (char === delimiter) paramsMode = 'code';
-      continue;
-    }
-    if (char === '/' && next === '/') { paramsMode = 'line-comment'; index += 1; continue; }
-    if (char === '/' && next === '*') { paramsMode = 'block-comment'; index += 1; continue; }
-    if (char === "'") { paramsMode = 'single'; continue; }
-    if (char === '"') { paramsMode = 'double'; continue; }
-    if (char === '`') { paramsMode = 'template'; continue; }
-    if (char === '(') paramsDepth += 1;
-    if (char === ')') {
-      paramsDepth -= 1;
-      if (paramsDepth === 0) { paramsClose = index; break; }
-    }
-  }
-  assert.ok(paramsClose >= 0, `unterminated function parameters: ${name}`);
-  const open = source.indexOf('{', paramsClose + 1);
-  assert.ok(open >= 0, `missing function body: ${name}`);
-  let depth = 0;
-  let mode = 'code';
-  for (let index = open; index < source.length; index++) {
-    const char = source[index];
-    const next = source[index + 1];
-    if (mode === 'line-comment') {
-      if (char === '\n') mode = 'code';
-      continue;
-    }
-    if (mode === 'block-comment') {
-      if (char === '*' && next === '/') {
-        mode = 'code';
-        index += 1;
-      }
-      continue;
-    }
-    if (mode === 'single' || mode === 'double' || mode === 'template') {
-      const delimiter = mode === 'single' ? "'" : mode === 'double' ? '"' : '`';
-      if (char === '\\') {
-        index += 1;
-        continue;
-      }
-      if (char === delimiter) mode = 'code';
-      continue;
-    }
-    if (char === '/' && next === '/') {
-      mode = 'line-comment';
-      index += 1;
-      continue;
-    }
-    if (char === '/' && next === '*') {
-      mode = 'block-comment';
-      index += 1;
-      continue;
-    }
-    if (char === "'") {
-      mode = 'single';
-      continue;
-    }
-    if (char === '"') {
-      mode = 'double';
-      continue;
-    }
-    if (char === '`') {
-      mode = 'template';
-      continue;
-    }
-    if (char === '{') depth += 1;
-    if (char === '}') {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, index + 1);
-    }
-  }
-  assert.fail(`unterminated production function: ${name}`);
-}
+const extractFunction = createFunctionExtractor(source);
 
 class FakeElement {
   constructor({ textContent = '', dataset = {}, classes = [], style = {}, visible = true, tagName = 'DIV' } = {}) {
@@ -322,6 +232,8 @@ for (const name of [
   'computedVisible',
   'hiddenOrAbsent',
   'popupInfo',
+  'authCaptchaInfo',
+  'authCaptchaPresence',
   'isBattleResultUrl',
   'detectScreenState',
   'safeDetectScreenState',
@@ -409,6 +321,58 @@ test('captured Granblue screens classify with production priority and popup norm
   setFrame(result, fixture.urls.result);
   assert.equal(sandbox.detectScreenState(result).type, 'RESULT');
   assert.equal(sandbox.expectedScreenMatches('result', result), true);
+});
+
+function authCaptchaDocument({ panelClasses = ['pop-usual', 'pop-show'], emptied = false, panelVisible = true } = {}) {
+  const doc = new FakeDocument();
+  const root = doc.attach(SELECTORS.authCaptcha, new FakeElement({ visible: !emptied }));
+  if (emptied) return doc;
+  const panel = new FakeElement({ classes: panelClasses, visible: panelVisible });
+  const content = new FakeElement();
+  panel.ownerDocument = doc;
+  content.ownerDocument = doc;
+  root.add(SELECTORS.authCaptchaPanel, panel);
+  root.add(SELECTORS.authCaptchaContent, content);
+  return doc;
+}
+
+test('the server authentication captcha outranks every other screen classification', () => {
+  const captcha = authCaptchaDocument();
+  setFrame(captcha, fixture.urls.assist);
+  assert.equal(sandbox.detectScreenState(captcha).type, 'AUTH_CAPTCHA');
+
+  // 通常のエラーポップアップと同時に出ても認証が優先される
+  const withPopup = authCaptchaDocument();
+  const popup = new FakeElement();
+  const body = new FakeElement({ textContent: fixture.messages.maxAssist });
+  popup.ownerDocument = withPopup;
+  body.ownerDocument = withPopup;
+  popup.add(SELECTORS.popupBody, body);
+  withPopup.attach(SELECTORS.popup, popup);
+  setFrame(withPopup, fixture.urls.assist);
+  assert.equal(sandbox.detectScreenState(withPopup).type, 'AUTH_CAPTCHA');
+
+  // 認証を通すと view が $el.empty() するだけで #pop-c-a-i は残る
+  const solved = authCaptchaDocument({ emptied: true });
+  setFrame(solved, fixture.urls.assist);
+  assert.equal(sandbox.detectScreenState(solved).type, 'UNKNOWN');
+  assert.equal(sandbox.authCaptchaInfo(solved), null);
+
+  // 閉じるアニメーション中（pop-hide）は検出しない
+  const closing = authCaptchaDocument({ panelClasses: ['pop-usual', 'pop-hide'] });
+  assert.equal(sandbox.authCaptchaInfo(closing), null);
+
+  // 非表示のポップアップだけが残っている場合も検出しない
+  const hidden = authCaptchaDocument({ panelVisible: false });
+  hidden.querySelector(SELECTORS.authCaptcha)._visible = false;
+  hidden.querySelector(SELECTORS.authCaptcha).querySelector(SELECTORS.authCaptchaContent)._visible = false;
+  assert.equal(sandbox.authCaptchaInfo(hidden), null);
+
+  const assist = new FakeDocument();
+  assist.attach(SELECTORS.assistScreen, new FakeElement());
+  setFrame(assist, fixture.urls.assist);
+  assert.equal(sandbox.authCaptchaInfo(assist), null);
+  assert.equal(sandbox.detectScreenState(assist).type, 'ASSIST_LIST');
 });
 
 test('captured assist HP and participant counts rank correctly and recent raid IDs are excluded', () => {

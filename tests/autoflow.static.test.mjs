@@ -4,6 +4,7 @@ import test from 'node:test';
 import './safari-performance-regression.test.mjs';
 import './ui-drag-regression.test.mjs';
 import './granblue-captured-simulation.test.mjs';
+import './auth-captcha-guard.test.mjs';
 import './battle-performance-loader.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
@@ -520,7 +521,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 70'));
+  assert.ok(source.includes('const APP_VERSION = 71'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));
@@ -1124,4 +1125,57 @@ test('internal aborts are reported instead of masquerading as a user stop', () =
   assert.ok(start.includes("if (error?.name === 'AbortError' && (controller.signal.aborted || state.destroyed))"));
   const show = source.slice(source.indexOf('function showWorkflowError'), source.indexOf('function clearWorkflowError'));
   assert.ok(show.includes("typeof error?.code === 'string' && error.code"));
+});
+
+test('the server authentication captcha stops the run immediately and escapes after 30 idle seconds', () => {
+  assert.ok(source.includes("authCaptcha: '#pop-c-a-i'"));
+  assert.ok(source.includes("authCaptchaContent: '#c-a-i-frm-group, .txt-c-a-i-message'"));
+  assert.ok(source.includes('const AUTH_CAPTCHA_IDLE_ESCAPE_MS = 30_000'));
+  assert.ok(source.includes("const AUTH_CAPTCHA_ESCAPE_URL = 'https://www.google.com/'"));
+  assert.ok(source.includes('const AUTH_CAPTCHA_POLL_MS = 250'));
+
+  const detect = source.slice(source.indexOf('function authCaptchaInfo'), source.indexOf('function authCaptchaPresence'));
+  // 認証成功後に残る空の #pop-c-a-i を認証中と誤認しない
+  assert.ok(detect.includes('if (!content) return null;'));
+  assert.ok(detect.includes("classList?.contains('pop-hide')"));
+
+  const screen = source.slice(source.indexOf('function detectScreenState'), source.indexOf('function safeDetectScreenState'));
+  assert.ok(screen.includes('const captcha = authCaptchaInfo(doc);\n    if (captcha) return captcha;'));
+
+  const guard = source.slice(source.indexOf('const authCaptchaGuard = {'), source.indexOf('function workflowErrorSignature'));
+  assert.ok(guard.includes('setInterval(pollAuthCaptcha, AUTH_CAPTCHA_POLL_MS)'));
+  assert.ok(guard.includes('stopEverything(AUTH_CAPTCHA_STOP_REASON);'));
+  assert.ok(guard.includes('}, AUTH_CAPTCHA_IDLE_ESCAPE_MS);'));
+  // 30秒の間に認証が片付いたら離脱しない
+  assert.ok(guard.includes("if (authCaptchaPresence() === 'absent') {"));
+  assert.ok(guard.includes('navigateHostAway(AUTH_CAPTCHA_ESCAPE_URL)'));
+  assert.ok(guard.includes('for (const candidate of [window.top, window.parent, window])'));
+
+  const start = source.slice(source.indexOf('async function startWorkflow'), source.indexOf('function stopWorkflow'));
+  assert.ok(start.includes('releaseAuthCaptchaHold();\n    startAuthCaptchaWatch();'));
+  // 認証待ちで止まっている間は監視を続けたいので、実行終了だけでは切らない
+  assert.ok(start.includes('stopAuthCaptchaWatch();'));
+  assert.ok(source.includes('function authCaptchaWatchNeeded() {\n    return Boolean(state.running || state.legacyRunning || authCaptchaGuard.held);'));
+});
+
+test('workflow errors restart from the top unless the same failure repeats', () => {
+  assert.ok(source.includes('const MAX_WORKFLOW_ERROR_RESTARTS = 100'));
+  const signature = source.slice(source.indexOf('function workflowErrorSignature'), source.indexOf('function retryableWorkflowError'));
+  assert.ok(signature.includes('const blockId = error?.block?.id'));
+  const retryable = source.slice(source.indexOf('function retryableWorkflowError'), source.indexOf('const LEGACY_CONDITION_TYPES'));
+  assert.ok(retryable.includes('if (error instanceof FlowStop || error instanceof FlowRestart) return false;'));
+  assert.ok(retryable.includes("if (error.name === 'AbortError') return false;"));
+  assert.ok(retryable.includes('if (state.destroyed || controller?.signal?.aborted) return false;'));
+
+  const start = source.slice(source.indexOf('async function startWorkflow'), source.indexOf('function stopWorkflow'));
+  assert.ok(start.includes('if (!retryableWorkflowError(error, controller)) throw error;'));
+  assert.ok(start.includes('const signature = workflowErrorSignature(error);'));
+  assert.ok(start.includes('if (signature === context.lastErrorSignature) {'));
+  assert.ok(start.includes('error.repeatedFailure = true;'));
+  assert.ok(start.includes('if (context.errorRestartCount > MAX_WORKFLOW_ERROR_RESTARTS) throw error;'));
+  // 一周通せたら「連続した同じ失敗」ではなくなる
+  assert.ok(start.includes("context.lastErrorSignature = '';\n            break;"));
+  assert.ok(start.includes("setStatus(`${workflow.name} · エラーのため先頭から再開`)"));
+  // 敵撃破後の再開は従来どおり別カウント
+  assert.ok(start.includes('if (context.restartCount > MAX_WORKFLOW_RESTARTS) {'));
 });
