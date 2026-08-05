@@ -495,7 +495,7 @@
     return;
   }
 
-  const APP_VERSION = 70;
+  const APP_VERSION = 71;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -519,6 +519,11 @@
   const MAX_WORKFLOW_LOOP_COUNT = 999_999;
   const MAX_CONDITION_ITERATIONS = 10_000;
   const MAX_WORKFLOW_RESTARTS = 10_000;
+  const MAX_WORKFLOW_ERROR_RESTARTS = 100;
+  const AUTH_CAPTCHA_POLL_MS = 250;
+  const AUTH_CAPTCHA_IDLE_ESCAPE_MS = 30_000;
+  const AUTH_CAPTCHA_ESCAPE_URL = 'https://www.google.com/';
+  const AUTH_CAPTCHA_STOP_REASON = '認証画面を検出したため停止';
   const WORKFLOW_YIELD_INTERVAL = 64;
   const DEFAULT_TIMEOUT_MS = 15_000;
   const DEFAULT_FLOW_TIMEOUT_MS = 120_000;
@@ -580,7 +585,13 @@
     attackCancel: '.btn-attack-cancel',
     attackActor: '.prt-command .btn-command-character.attack',
     turn: '#js-turn-num-count',
-    myPageScreen: '.cnt-mypage'
+    myPageScreen: '.cnt-mypage',
+    // サーバー要求で割り込む画像認証ポップアップ。view/captcha が #pop-c-a-i を el にして
+    // #c-a-i-frm-group と .txt-c-a-i-message を差し込む。認証を通すと view が $el.empty() で
+    // 中身だけ捨てて空の #pop-c-a-i を残すため、中身の有無まで見ないと解決済みを誤検出する。
+    authCaptcha: '#pop-c-a-i',
+    authCaptchaPanel: '.pop-usual',
+    authCaptchaContent: '#c-a-i-frm-group, .txt-c-a-i-message'
   });
   const MY_PAGE_BUTTON_SELECTORS = Object.freeze([
     '.btn-footer-mypage[data-href="mypage"]',
@@ -1885,7 +1896,8 @@
     const code = typeof error?.code === 'string' && error.code
       ? error.code
       : (error?.name && error.name !== 'Error' ? error.name : 'UNEXPECTED_ERROR');
-    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / コード: ${code} / 理由: ${message}`;
+    const retryNote = error?.repeatedFailure ? ' / 同じ失敗が連続したため先頭からのやり直しを打ち切りました' : '';
+    ui.errorMessage.textContent = `ワークフロー: ${workflow?.name || '不明'} / ブロック: ${block ? blockLabel(block.type) : '不明'} / 画面: ${screen.type} / コード: ${code} / 理由: ${message}${retryNote}`;
     ui.error.classList.add('show');
     appendLog(`[${code}] ${workflow?.name || '不明'} / ${screen.type}: ${message}`, 'error', block ? blockLabel(block.type) : '実行');
     setPage('workflow');
@@ -4324,6 +4336,27 @@
     return { type, text, rawText: String(body?.textContent || '').trim(), popup, ok: popup.querySelector(SELECTORS.popupOk) };
   }
 
+  function authCaptchaInfo(doc = frameDocument()) {
+    const root = doc.querySelector(SELECTORS.authCaptcha);
+    if (!root) return null;
+    const content = root.querySelector(SELECTORS.authCaptchaContent);
+    if (!content) return null;
+    const panel = root.querySelector(SELECTORS.authCaptchaPanel);
+    if (panel?.classList?.contains('pop-hide')) return null;
+    const target = [panel, root, content].find(element => element && computedVisible(element));
+    if (!target) return null;
+    return { type: 'AUTH_CAPTCHA', root, panel, content, element: target, document: doc };
+  }
+
+  // iframeを読めない瞬間（遷移中など）に「認証は消えた」と決めつけないための3値判定。
+  function authCaptchaPresence(doc = null) {
+    try {
+      return (doc ? authCaptchaInfo(doc) : authCaptchaInfo()) ? 'present' : 'absent';
+    } catch {
+      return 'unknown';
+    }
+  }
+
   // 戦闘結果は #result/<raid_id>（シングル）と #result_multi/<raid_id>（マルチ）の2種類。
   // result/scene・result/quest・result/detail などraid_idを取らないルートは対象外。
   const BATTLE_RESULT_URL_PATTERN = /(?:#|\/)result(?:_multi)?\/\d+/i;
@@ -4333,6 +4366,8 @@
   }
 
   function detectScreenState(doc = frameDocument()) {
+    const captcha = authCaptchaInfo(doc);
+    if (captcha) return captcha;
     const popup = popupInfo(doc);
     if (popup) return { ...popup, document: doc };
     const deckOk = doc.querySelector(SELECTORS.deckOk);
@@ -7225,6 +7260,7 @@
         cycle: context.cycle,
         totalCycles: context.totalCycles,
         restartCount: context.restartCount,
+        errorRestartCount: context.errorRestartCount,
         completedBattles: context.completedBattles,
         recentRaidIds: Array.from(context.recentRaidIds || []),
         battleRecoveryConfig: context.battleRecoveryConfig ? deepClone(context.battleRecoveryConfig) : null,
@@ -7655,6 +7691,8 @@
       cycle: resumeRuntime ? Math.max(1, int(resumeRuntime.cycle, 1)) : 0,
       totalCycles: resumeRuntime?.totalCycles ?? null,
       restartCount: Math.max(0, int(resumeRuntime?.restartCount, 0)),
+      errorRestartCount: Math.max(0, int(resumeRuntime?.errorRestartCount, 0)),
+      lastErrorSignature: '',
       completedBattles: Math.max(0, int(resumeRuntime?.completedBattles, 0)),
       recentRaidIds: new Set(),
       battleRecoveryConfig: resumeRuntime?.battleRecoveryConfig && typeof resumeRuntime.battleRecoveryConfig === 'object'
@@ -7667,6 +7705,9 @@
     }
     state.running = context;
     resetBattleEndDetection();
+    // 実行を始め直した時点で「放置」ではなくなるので、離脱タイマーは畳んでから監視し直す。
+    releaseAuthCaptchaHold();
+    startAuthCaptchaWatch();
     const restoreExpandedDock = enterRuntimeCompactMode();
     syncRunControls();
     if (!lightweightMode) {
@@ -7706,18 +7747,42 @@
         while (!controller.signal.aborted) {
           try {
             await runBlockList(workflow.blocks, context);
+            // 最後まで通ったので、次の失敗は「連続した同じ失敗」ではない。
+            context.lastErrorSignature = '';
             break;
           } catch (error) {
-            if (!(error instanceof FlowRestart)) throw error;
-            context.restartCount += 1;
-            if (context.restartCount > MAX_WORKFLOW_RESTARTS) {
-              throw new FlowError('敵撃破後の自動再開回数が安全上限に達しました', 'WORKFLOW_RESTART_LIMIT');
+            if (error instanceof FlowRestart) {
+              context.restartCount += 1;
+              if (context.restartCount > MAX_WORKFLOW_RESTARTS) {
+                throw new FlowError('敵撃破後の自動再開回数が安全上限に達しました', 'WORKFLOW_RESTART_LIMIT');
+              }
+              context.executionState = createWorkflowExecutionState();
+              clearPendingAutoAttack('ワークフロー先頭から再開します');
+              setRunningBlock(context, null);
+              appendLog(error.message, 'warn', '自動復帰');
+              setStatus(`${workflow.name} · 先頭から再開`);
+              continue;
             }
+            if (!retryableWorkflowError(error, controller)) throw error;
+            const signature = workflowErrorSignature(error);
+            // 直前と同じ失敗を繰り返したら、やり直しても抜けられないので従来どおり止める。
+            if (signature === context.lastErrorSignature) {
+              error.repeatedFailure = true;
+              throw error;
+            }
+            context.lastErrorSignature = signature;
+            context.errorRestartCount += 1;
+            if (context.errorRestartCount > MAX_WORKFLOW_ERROR_RESTARTS) throw error;
             context.executionState = createWorkflowExecutionState();
-            clearPendingAutoAttack('ワークフロー先頭から再開します');
+            clearPendingAutoAttack('エラーのためワークフロー先頭から再開します');
             setRunningBlock(context, null);
-            appendLog(error.message, 'warn', '自動復帰');
-            setStatus(`${workflow.name} · 先頭から再開`);
+            resetBattleEndDetection();
+            appendLog(
+              `${error.message} / 先頭からやり直します（${context.errorRestartCount}回目）`,
+              'error',
+              error.block ? blockLabel(error.block.type) : 'エラー再試行'
+            );
+            setStatus(`${workflow.name} · エラーのため先頭から再開`);
           }
         }
         context.executionState = createWorkflowExecutionState();
@@ -7726,8 +7791,9 @@
       setStatus('ワークフロー完了');
     } catch (error) {
       if (error?.name === 'AbortError' && (controller.signal.aborted || state.destroyed)) {
-        appendLog('ユーザー操作で停止', 'warn');
-        setStatus('停止しました');
+        const byAuthCaptcha = authCaptchaStopReason(error, controller);
+        appendLog(byAuthCaptcha ? AUTH_CAPTCHA_STOP_REASON : 'ユーザー操作で停止', 'warn');
+        setStatus(byAuthCaptcha ? AUTH_CAPTCHA_STOP_REASON : '停止しました');
       } else if (error instanceof FlowStop) {
         appendLog(error.message, 'warn', '停止');
         setStatus(error.message);
@@ -7739,6 +7805,8 @@
       clearPendingAutoAttack('ワークフローを終了しました');
       resetBattleEndDetection();
       if (state.running === context) state.running = null;
+      // 認証待ちで止まっている間は、解消されたか30秒経ったかを見るため監視を続ける。
+      stopAuthCaptchaWatch();
       leaveRuntimeCompactMode(restoreExpandedDock);
       state.blockProgress.clear();
       syncRunControls();
@@ -7752,6 +7820,147 @@
     abandonWorkflowHandoffResume('手動停止のため保存済み進行の自動復元を取りやめました');
     if (!state.running) return;
     state.running.controller.abort(new DOMException(reason, 'AbortError'));
+  }
+
+  const authCaptchaGuard = {
+    pollTimer: null,
+    escapeTimer: null,
+    detectedAt: 0,
+    held: false,
+    escaping: false
+  };
+
+  function authCaptchaStopReason(error, controller = null) {
+    const reason = controller?.signal?.reason;
+    const message = String(reason?.message || error?.message || '');
+    return message === AUTH_CAPTCHA_STOP_REASON;
+  }
+
+  function authCaptchaWatchNeeded() {
+    return Boolean(state.running || state.legacyRunning || authCaptchaGuard.held);
+  }
+
+  function startAuthCaptchaWatch() {
+    if (state.destroyed || authCaptchaGuard.escaping || authCaptchaGuard.pollTimer) return;
+    // タイマーを先に立ててから初回判定する。判定が停止処理まで進んでも再入しない。
+    authCaptchaGuard.pollTimer = setInterval(pollAuthCaptcha, AUTH_CAPTCHA_POLL_MS);
+    pollAuthCaptcha();
+  }
+
+  function stopAuthCaptchaWatch({ force = false } = {}) {
+    if (!force && authCaptchaWatchNeeded()) return;
+    clearInterval(authCaptchaGuard.pollTimer);
+    authCaptchaGuard.pollTimer = null;
+  }
+
+  function pollAuthCaptcha() {
+    if (state.destroyed || authCaptchaGuard.escaping) return;
+    const presence = authCaptchaPresence();
+    if (presence === 'present') {
+      haltForAuthCaptcha();
+      return;
+    }
+    // 'unknown' は判断保留。保持中なら次のポーリングまで離脱タイマーを維持する。
+    if (presence !== 'absent') return;
+    releaseAuthCaptchaHold('認証画面が閉じられました');
+    stopAuthCaptchaWatch();
+  }
+
+  function haltForAuthCaptcha() {
+    if (!authCaptchaGuard.held) {
+      authCaptchaGuard.held = true;
+      authCaptchaGuard.detectedAt = performance.now();
+      appendLog('サーバーの認証画面を検出したため、実行中のワークフローを即時停止しました', 'error', '認証');
+      toast(`認証画面を検出しました。${Math.round(AUTH_CAPTCHA_IDLE_ESCAPE_MS / 1000)}秒以内に対応してください`);
+      setStatus(AUTH_CAPTCHA_STOP_REASON);
+    }
+    // 判定は250ms毎に走るので、実際に止めるものがある時だけ手を出す。
+    if (state.running || state.legacyRunning) {
+      stopEverything(AUTH_CAPTCHA_STOP_REASON);
+      setStatus(AUTH_CAPTCHA_STOP_REASON);
+    }
+    scheduleAuthCaptchaEscape();
+  }
+
+  function scheduleAuthCaptchaEscape() {
+    if (state.destroyed || authCaptchaGuard.escaping || authCaptchaGuard.escapeTimer) return;
+    authCaptchaGuard.escapeTimer = setTimeout(() => {
+      authCaptchaGuard.escapeTimer = null;
+      escapeFromAuthCaptcha();
+    }, AUTH_CAPTCHA_IDLE_ESCAPE_MS);
+  }
+
+  function clearAuthCaptchaEscape() {
+    clearTimeout(authCaptchaGuard.escapeTimer);
+    authCaptchaGuard.escapeTimer = null;
+  }
+
+  function releaseAuthCaptchaHold(notice = '') {
+    if (!authCaptchaGuard.held && !authCaptchaGuard.escapeTimer) return;
+    authCaptchaGuard.held = false;
+    authCaptchaGuard.detectedAt = 0;
+    clearAuthCaptchaEscape();
+    if (notice && !state.running && !state.legacyRunning) setStatus(notice);
+  }
+
+  function escapeFromAuthCaptcha() {
+    if (state.destroyed || authCaptchaGuard.escaping) return;
+    // 30秒の間に認証が片付いていたら離脱しない。読めない場合は放置とみなして離脱する。
+    if (authCaptchaPresence() === 'absent') {
+      releaseAuthCaptchaHold('認証画面が閉じられました');
+      stopAuthCaptchaWatch();
+      return;
+    }
+    authCaptchaGuard.escaping = true;
+    stopAuthCaptchaWatch({ force: true });
+    stopEverything(AUTH_CAPTCHA_STOP_REASON);
+    const idleSec = Math.round(Math.max(0, performance.now() - authCaptchaGuard.detectedAt) / 1000);
+    appendLog(
+      `認証画面が${idleSec || Math.round(AUTH_CAPTCHA_IDLE_ESCAPE_MS / 1000)}秒放置されたため、親ページを${AUTH_CAPTCHA_ESCAPE_URL}へ移動します`,
+      'error',
+      '認証'
+    );
+    setStatus('認証画面の放置により離脱します');
+    try { flushWorkflowStore(); saveLegacyState(); } catch {}
+    if (!navigateHostAway(AUTH_CAPTCHA_ESCAPE_URL)) {
+      authCaptchaGuard.escaping = false;
+      appendLog('親ページを移動できませんでした', 'error', '認証');
+      startAuthCaptchaWatch();
+      scheduleAuthCaptchaEscape();
+    }
+  }
+
+  function navigateHostAway(url) {
+    const targets = [];
+    for (const candidate of [window.top, window.parent, window]) {
+      try {
+        if (candidate && !targets.includes(candidate)) targets.push(candidate);
+      } catch {}
+    }
+    for (const target of targets) {
+      try {
+        if (typeof target.location?.replace === 'function') target.location.replace(url);
+        else target.location.href = url;
+        return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  function workflowErrorSignature(error) {
+    const code = typeof error?.code === 'string' && error.code
+      ? error.code
+      : (error?.name && error.name !== 'Error' ? error.name : 'UNEXPECTED_ERROR');
+    const blockId = error?.block?.id || '';
+    return `${code}|${blockId}|${normalizePopupText(error?.message || '')}`;
+  }
+
+  function retryableWorkflowError(error, controller = null) {
+    if (!error) return false;
+    if (error instanceof FlowStop || error instanceof FlowRestart) return false;
+    if (error.name === 'AbortError') return false;
+    if (state.destroyed || controller?.signal?.aborted) return false;
+    return true;
   }
 
   const LEGACY_CONDITION_TYPES = new Set([
@@ -8529,6 +8738,8 @@
     const controller = new AbortController();
     const token = { controller, signal: controller.signal, runState };
     state.legacyRunning = token;
+    releaseAuthCaptchaHold();
+    startAuthCaptchaWatch();
     const restoreExpandedDock = enterRuntimeCompactMode();
     syncRunControls();
     if (!lightweightMode) renderLegacy();
@@ -8551,14 +8762,16 @@
       setStatus('旧マクロ完了');
     } catch (error) {
       if (error?.name === 'AbortError') {
-        appendLog('旧マクロを停止', 'warn');
-        setStatus('旧マクロ停止');
+        const byAuthCaptcha = authCaptchaStopReason(error, controller);
+        appendLog(byAuthCaptcha ? `旧マクロを${AUTH_CAPTCHA_STOP_REASON}` : '旧マクロを停止', 'warn');
+        setStatus(byAuthCaptcha ? AUTH_CAPTCHA_STOP_REASON : '旧マクロ停止');
       } else {
         appendLog(`旧マクロエラー: ${error.message}`, 'error');
         setStatus(`旧マクロ停止: ${error.message}`);
       }
     } finally {
       if (state.legacyRunning === token) state.legacyRunning = null;
+      stopAuthCaptchaWatch();
       leaveRuntimeCompactMode(restoreExpandedDock);
       syncRunControls();
       renderLegacy();
@@ -9674,6 +9887,8 @@
     state.destroyed = true;
     state.frameNavigationId += 1;
     stopEverything('終了');
+    clearAuthCaptchaEscape();
+    stopAuthCaptchaWatch({ force: true });
     if (state.recording) finishLegacyRecording({ apply: false });
     stopElementPicker({ restoreFocus: false });
     clearTimeout(state.toastTimer);
@@ -10049,6 +10264,9 @@
     chooseSupporter,
     parseSupporterRow,
     detectScreenState,
+    authCaptchaInfo,
+    workflowErrorSignature,
+    retryableWorkflowError,
     evaluateWorkflowCondition,
     validateWorkflowDefinition,
     inspectWorkflowImport,
