@@ -4,6 +4,7 @@ import test from 'node:test';
 import './safari-performance-regression.test.mjs';
 import './ui-drag-regression.test.mjs';
 import './granblue-captured-simulation.test.mjs';
+import './battle-performance-loader.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
@@ -180,6 +181,29 @@ test('tap-backed state waits share immediate cancellation cleanup', () => {
   const unclaimed = source.slice(source.indexOf('async function confirmAllUnclaimed'), source.indexOf('function fullAutoState'));
   assert.ok(unclaimed.includes('const topRow = doc.querySelector(SELECTORS.unclaimedRows)'));
   assert.ok(!unclaimed.includes('querySelectorAll(SELECTORS.unclaimedRows)'));
+});
+
+test('the unclaimed confirmation round trip reacts on a short poll instead of the default wait', () => {
+  assert.ok(source.includes('const UNCLAIMED_POLL_MS = 60'));
+  assert.ok(source.includes('const UNCLAIMED_STABLE_MS = 60'));
+  assert.ok(source.includes('async function waitForFrameReady({ signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = \'auto\', before = null, requireChange = false, stableMs = DEFAULT_STABLE_MS, intervalMs = null }'));
+  assert.ok(source.includes('}, { signal, timeoutMs, stableMs, intervalMs, description: \'ページ読込完了待ち\' });'));
+
+  const unclaimed = source.slice(source.indexOf('async function confirmAllUnclaimed'), source.indexOf('function fullAutoState'));
+  // 画面遷移待ち・タップ・一覧への復帰の3か所すべてを詰めないと1件あたりの待ちは縮まない。
+  assert.equal((unclaimed.match(/intervalMs: UNCLAIMED_POLL_MS/g) || []).length, 3);
+  assert.equal((unclaimed.match(/stableMs: UNCLAIMED_STABLE_MS/g) || []).length, 3);
+  assert.ok(!unclaimed.includes('stableMs: DEFAULT_STABLE_MS'));
+  assert.ok(unclaimed.includes('label: `未確認バトル ${href}`, fast: true'));
+
+  const returnToAssist = source.slice(source.indexOf('async function returnToAssistFromUnclaimed'), source.indexOf('async function confirmAllUnclaimed'));
+  assert.ok(returnToAssist.includes('intervalMs: UNCLAIMED_POLL_MS'));
+  assert.ok(returnToAssist.includes("label: '救援一覧へ戻る', fast: true"));
+
+  const recovery = source.slice(source.indexOf('async function recoverKnownPopup'), source.indexOf('async function pressDeckConfirm'));
+  assert.ok(recovery.includes("expected: ['UNCLAIMED_LIST'],\n        intervalMs: UNCLAIMED_POLL_MS,\n        fast: true"));
+  // 監視は増やさない。軽量モードでの重い全体監視を持ち込まないための歯止め。
+  assert.ok(!unclaimed.includes('observeOnLightweight'));
 });
 
 test('game-route navigation drops the old document before reusing the iframe shell', () => {
@@ -496,7 +520,7 @@ test('assist selection excludes raid IDs already entered in the current workflow
 });
 
 test('professional UX exposes truthful runtime and accessible recovery state', () => {
-  assert.ok(source.includes('const APP_VERSION = 69'));
+  assert.ok(source.includes('const APP_VERSION = 70'));
   assert.ok(source.includes('function syncRunControls()'));
   assert.ok(source.includes("compactRun.textContent = isRunning ? '■' : '▶'"));
   assert.ok(source.includes("compactRun.classList.toggle('is-stop', isRunning)"));

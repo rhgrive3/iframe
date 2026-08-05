@@ -38,6 +38,9 @@
     const soundRestorers = [];
     const patchedSoundObjects = new WeakSet();
     const patchedStages = new Map();
+    const transparentAssets = new Map();
+    let transparentAssetSerial = 0;
+    const TRANSPARENT_ASSET_LIMIT = 4096;
     const LOAD_QUEUE_MARKER = '__autoFlowBattlePerformanceLoadQueue__';
     const STAGE_RENDER_MARKER = '__autoFlowBattlePerformanceStageRender__';
     const runtimeToken = {};
@@ -56,7 +59,20 @@
         || /\/sp\/raid\/bg\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url)
         || /\/sp\/assets\/enemy\/[^?#]+\.(?:png|jpe?g|webp)(?:[?#]|$)/i.test(url);
     };
-    const rewriteAsset = value => shouldReplaceAsset(value) ? BATTLE_PERFORMANCE_TRANSPARENT_IMAGE : value;
+    // 透明画像は素材ごとに別URLで配る。全素材を同じdata URLへ寄せるとCreateJSの画像キャッシュが
+    // 1枚に潰れ、2件目以降が「読み込み済み」として同期完了するため、キュー消化が素材数ぶんの再帰に
+    // なる。素材が最多になる戦闘直リロードではその再帰でスタックを使い切り、completeが飛ばずに
+    // 読み込みが終わらなくなる。URLを分ければ未パッチ時と同じく1素材=1画像で非同期に完了する。
+    const transparentAssetFor = value => {
+      const key = String(value ?? '');
+      const known = transparentAssets.get(key);
+      if (known) return known;
+      if (transparentAssets.size >= TRANSPARENT_ASSET_LIMIT) transparentAssets.clear();
+      const unique = `${BATTLE_PERFORMANCE_TRANSPARENT_IMAGE}#af${(++transparentAssetSerial).toString(36)}`;
+      transparentAssets.set(key, unique);
+      return unique;
+    };
+    const rewriteAsset = value => shouldReplaceAsset(value) ? transparentAssetFor(value) : value;
 
     function ensureStyle() {
       if (!style || !style.isConnected) {
@@ -98,7 +114,7 @@
     function rewriteManifestItem(item) {
       if (typeof item === 'string') return rewriteAsset(item);
       if (!item || typeof item !== 'object' || !shouldReplaceAsset(item.src)) return item;
-      return { ...item, src: BATTLE_PERFORMANCE_TRANSPARENT_IMAGE };
+      return { ...item, src: transparentAssetFor(item.src) };
     }
 
     function rewriteManifest(manifest) {
@@ -307,6 +323,15 @@
       setAttributeRestore = null;
     }
 
+    // CreateJSはCDN画像を読む前提でcrossOrigin="anonymous"を付けてからsrcを差す。差し替え後の
+    // data URLをCORSモードで取りにいくとブラウザによっては失敗し、画像が欠けたまま先へ進めなくなる。
+    // data URLはcanvasを汚さないので、差し替えるときだけCORS指定を外す。
+    function dropCorsForTransparentAsset(element) {
+      try {
+        if (element?.crossOrigin != null) element.removeAttribute('crossorigin');
+      } catch {}
+    }
+
     function patchImageSources() {
       if (!imageSrcRestore) {
         try {
@@ -314,7 +339,9 @@
           const descriptor = Object.getOwnPropertyDescriptor(prototype || {}, 'src');
           if (prototype && descriptor?.get && descriptor?.set && descriptor.configurable) {
             const wrappedSet = function (value) {
-              return descriptor.set.call(this, rewriteAsset(value));
+              const next = rewriteAsset(value);
+              if (next !== value) dropCorsForTransparentAsset(this);
+              return descriptor.set.call(this, next);
             };
             Object.defineProperty(prototype, 'src', { ...descriptor, set: wrappedSet });
             imageSrcRestore = () => {
@@ -331,7 +358,10 @@
           if (prototype && typeof originalSetAttribute === 'function') {
             const wrappedSetAttribute = function (name, value) {
               const isImageSource = this instanceof window.HTMLImageElement && String(name).toLowerCase() === 'src';
-              return originalSetAttribute.call(this, name, isImageSource ? rewriteAsset(value) : value);
+              if (!isImageSource) return originalSetAttribute.call(this, name, value);
+              const next = rewriteAsset(value);
+              if (next !== value) dropCorsForTransparentAsset(this);
+              return originalSetAttribute.call(this, name, next);
             };
             prototype.setAttribute = wrappedSetAttribute;
             setAttributeRestore = () => {
@@ -465,7 +495,7 @@
     return;
   }
 
-  const APP_VERSION = 69;
+  const APP_VERSION = 70;
   const ROOT_ID = '__fullscreen_iframe_autoclicker__';
   const GLOBAL_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER__';
   const HOST_RUNTIME_RELEASED_KEY = '__FULLSCREEN_IFRAME_AUTOCLICKER_HOST_RELEASED__';
@@ -4553,7 +4583,7 @@
     });
   }
 
-  async function waitForFrameReady({ signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', before = null, requireChange = false, stableMs = DEFAULT_STABLE_MS } = {}) {
+  async function waitForFrameReady({ signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', before = null, requireChange = false, stableMs = DEFAULT_STABLE_MS, intervalMs = null } = {}) {
     const baseline = requireChange ? (before || captureFrameState()) : null;
     return monitorFrame(() => {
       const doc = frameDocument();
@@ -4569,13 +4599,13 @@
         if (!changed) return false;
       }
       return { document: doc, state: stateInfo.type, url: currentFrameUrl() };
-    }, { signal, timeoutMs, stableMs, description: 'ページ読込完了待ち' });
+    }, { signal, timeoutMs, stableMs, intervalMs, description: 'ページ読込完了待ち' });
   }
 
-  async function performFrameOperation(operation, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', requireChange = true } = {}) {
+  async function performFrameOperation(operation, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expectedScreen = 'auto', requireChange = true, stableMs = DEFAULT_STABLE_MS, intervalMs = null } = {}) {
     const before = captureFrameState({ includeDocument: true });
     return runObservedAction(
-      waitSignal => waitForFrameReady({ signal: waitSignal, timeoutMs, expectedScreen, before, requireChange }),
+      waitSignal => waitForFrameReady({ signal: waitSignal, timeoutMs, expectedScreen, before, requireChange, stableMs, intervalMs }),
       () => {
         try {
           operation();
@@ -5460,16 +5490,17 @@
     return popup;
   }
 
-  async function tapPopupOk(popup, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expected = null } = {}) {
+  async function tapPopupOk(popup, { signal, timeoutMs = DEFAULT_TIMEOUT_MS, expected = null, intervalMs = null, fast = false } = {}) {
     if (!popup?.ok) throw new FlowError('表示中エラーポップアップのOKが見つかりません', 'POPUP_OK_MISSING');
     if (expected) {
       return runObservedAction(
         waitSignal => waitForGbfState(expected, {
           signal: waitSignal,
           timeoutMs,
-          description: 'エラー後画面待ち'
+          description: 'エラー後画面待ち',
+          intervalMs
         }),
-        () => jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK' }),
+        () => jqTapStrict(popup.ok, { signal, label: 'エラーポップアップOK', fast }),
         { signal, cancelMessage: 'エラー後画面監視を解除しました' }
       );
     }
@@ -5524,6 +5555,9 @@
   const ATTACK_WAIT_ACTIVITY_GRACE_MS = 4_000;
   const ATTACK_WAIT_MAX_EXTENSION_MS = 60_000;
   const ASSIST_HANDOFF_POLL_MS = 50;
+  // 未確認バトルは静止画面の往復なので、監視を増やさずポーリング間隔と安定待ちだけ詰める。
+  const UNCLAIMED_POLL_MS = 60;
+  const UNCLAIMED_STABLE_MS = 60;
   const ASSIST_SLOT_SETTLE_MS = 700;
   const ASSIST_RETRY_ROUTE = '#quest/assist/multi/0';
   const MAX_ASSIST_RECOVERY_RELOADS = 10;
@@ -5873,20 +5907,35 @@
           timeoutMs: config.timeoutSec * 1000,
           expectedScreen: 'assist',
           before,
-          requireChange: true
+          requireChange: true,
+          stableMs: UNCLAIMED_STABLE_MS,
+          intervalMs: UNCLAIMED_POLL_MS
         }),
-        () => jqTapStrict(returnButton, { signal, label: '救援一覧へ戻る' }),
+        () => jqTapStrict(returnButton, { signal, label: '救援一覧へ戻る', fast: true }),
         { signal, cancelMessage: '救援一覧復帰監視を解除しました' }
       );
     }
     return performFrameOperation(() => {
       frameWindow().location.href = gameRouteUrl('#quest/assist/multi/0');
-    }, { signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'assist', requireChange: true });
+    }, {
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      expectedScreen: 'assist',
+      requireChange: true,
+      stableMs: UNCLAIMED_STABLE_MS,
+      intervalMs: UNCLAIMED_POLL_MS
+    });
   }
 
   async function confirmAllUnclaimed(config, context) {
     const { signal } = context;
-    await waitForFrameReady({ signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'unclaimed' });
+    await waitForFrameReady({
+      signal,
+      timeoutMs: config.timeoutSec * 1000,
+      expectedScreen: 'unclaimed',
+      stableMs: UNCLAIMED_STABLE_MS,
+      intervalMs: UNCLAIMED_POLL_MS
+    });
     let processed = 0;
     while (true) {
       throwIfAborted(signal);
@@ -5907,17 +5956,25 @@
         }, {
           signal: waitSignal,
           timeoutMs: config.timeoutSec * 1000,
-          stableMs: DEFAULT_STABLE_MS,
+          stableMs: UNCLAIMED_STABLE_MS,
           description: '未確認結果画面待ち',
-          observeRoots: gbfStateObservationRoots
+          observeRoots: gbfStateObservationRoots,
+          intervalMs: UNCLAIMED_POLL_MS
         }),
-        () => jqTapStrict(topRow, { signal, label: `未確認バトル ${href}` }),
+        () => jqTapStrict(topRow, { signal, label: `未確認バトル ${href}`, fast: true }),
         { signal, cancelMessage: '未確認結果画面監視を解除しました' }
       );
       processed += 1;
       await performFrameOperation(() => {
         frameWindow().location.href = gameRouteUrl('#quest/assist/unclaimed/0/0');
-      }, { signal, timeoutMs: config.timeoutSec * 1000, expectedScreen: 'unclaimed', requireChange: true });
+      }, {
+        signal,
+        timeoutMs: config.timeoutSec * 1000,
+        expectedScreen: 'unclaimed',
+        requireChange: true,
+        stableMs: UNCLAIMED_STABLE_MS,
+        intervalMs: UNCLAIMED_POLL_MS
+      });
     }
     await returnToAssistFromUnclaimed(config, context);
     return { processed };
@@ -6655,7 +6712,13 @@
       throw new FlowError(`処理できない画面状態です: ${stateInfo.type}`, 'UNEXPECTED_STATE');
     }
     if (stateInfo.type === 'UNCLAIMED_ERROR') {
-      await tapPopupOk(stateInfo, { signal: context.signal, timeoutMs: refreshConfig.timeoutSec * 1000, expected: ['UNCLAIMED_LIST'] });
+      await tapPopupOk(stateInfo, {
+        signal: context.signal,
+        timeoutMs: refreshConfig.timeoutSec * 1000,
+        expected: ['UNCLAIMED_LIST'],
+        intervalMs: UNCLAIMED_POLL_MS,
+        fast: true
+      });
       await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
       return { retry: true, reason: '未確認バトルを処理しました' };
     }
@@ -6670,7 +6733,9 @@
           signal: context.signal,
           timeoutMs: refreshConfig.timeoutSec * 1000,
           expectedScreen: 'unclaimed',
-          requireChange: true
+          requireChange: true,
+          stableMs: UNCLAIMED_STABLE_MS,
+          intervalMs: UNCLAIMED_POLL_MS
         });
         const result = await confirmAllUnclaimed({ timeoutSec: refreshConfig.timeoutSec, maxItems: 10000 }, context);
         return { retry: true, reason: `最大3件エラー後に未確認バトルを${result.processed}件処理しました` };
