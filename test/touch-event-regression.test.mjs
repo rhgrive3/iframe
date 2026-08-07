@@ -8,28 +8,60 @@ const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 
 test('script parses', () => assert.doesNotThrow(() => new vm.Script(source)));
 
-test('all internally sampled interaction delays use rejection-sampled truncated normals', () => {
+test('all internally sampled interaction delays use rejection-sampled ex-Gaussians', () => {
   assert.match(source, /function sampleTruncatedNormal\(/);
+  assert.match(source, /function sampleExGaussian\(\{ mean, stdDev, tau, min, max \}/);
   assert.match(source, /TRUNCATED_NORMAL_MAX_ATTEMPTS = 10_000/);
   assert.match(source, /if \(sample >= minValue && sample <= maxValue\) return sample/);
-  assert.match(source, /const visibleLatency = handoff/);
+  assert.match(source, /const visibleLatency = shiftLatencyMean\(/);
   assert.match(source, /TOUCH_HANDOFF_VISIBLE_LATENCY_MS/);
-  assert.match(source, /sampleTruncatedNormalMs\(visibleLatency\)/);
-  assert.match(source, /const holdLatency = handoff/);
+  assert.match(source, /sampleExGaussianMs\(visibleLatency\)/);
+  assert.match(source, /const holdLatency = scaleLatencyConfig\(/);
   assert.match(source, /TOUCH_HANDOFF_HOLD_LATENCY_MS/);
-  assert.match(source, /sampleTruncatedNormalMs\(holdLatency\)/);
-  assert.match(source, /sampleTruncatedNormalMs\(TOUCH_SCROLL_SETTLE_LATENCY_MS\)/);
+  assert.match(source, /sampleExGaussianMs\(holdLatency\)/);
+  assert.match(source, /sampleExGaussianMs\(TOUCH_SCROLL_SETTLE_LATENCY_MS\)/);
   assert.doesNotMatch(source, /sampleClampedNormalMs/);
+  // 潜時パラメータは必ず tau を持ち、max は裾を切らない安全弁として十分大きく取る。
+  for (const name of [
+    'TOUCH_VISIBLE_LATENCY_MS',
+    'TOUCH_FAST_VISIBLE_LATENCY_MS',
+    'TOUCH_HANDOFF_VISIBLE_LATENCY_MS',
+    'TOUCH_HOLD_LATENCY_MS',
+    'TOUCH_FAST_HOLD_LATENCY_MS',
+    'TOUCH_HANDOFF_HOLD_LATENCY_MS',
+    'TOUCH_SCROLL_SETTLE_LATENCY_MS',
+    'TOUCH_SCROLL_INERTIA_LATENCY_MS'
+  ]) {
+    const match = source.match(new RegExp(`const ${name} = Object\\.freeze\\((\\{[^}]+\\})\\)`));
+    assert.ok(match, `missing ex-Gaussian latency config: ${name}`);
+    const config = vm.runInNewContext(`(${match[1]})`);
+    assert.ok(config.tau > 0, `${name} needs an exponential component`);
+    assert.ok(config.max >= (config.mean + config.tau) * 4, `${name} truncates its right tail`);
+  }
 });
 
-test('tap start is a session-consistent offset 2D truncated normal without edge clamping', () => {
-  assert.match(source, /const TOUCH_SESSION = Object\.freeze/);
+test('tap start is a session-consistent offset 2D truncated normal that drifts over the session', () => {
+  assert.doesNotMatch(source, /const TOUCH_SESSION = Object\.freeze/);
+  assert.match(source, /const touchSessionDrift = \{/);
   assert.match(source, /rightOffsetX: sampleTruncatedNormal\(TOUCH_SESSION_OFFSET_X_RATIO\)/);
   assert.match(source, /verticalOffsetY: sampleTruncatedNormal\(TOUCH_SESSION_OFFSET_Y_RATIO\)/);
-  assert.match(source, /mean: 0\.5 \+ TOUCH_SESSION\.rightOffsetX/);
-  assert.match(source, /mean: 0\.5 \+ TOUCH_SESSION\.verticalOffsetY/);
+  assert.match(source, /function currentTouchSession\(now = Date\.now\(\), random = Math\.random\)/);
+  assert.match(source, /advanceOrnsteinUhlenbeck\(\s*touchSessionDrift\.rightOffsetX, TOUCH_SESSION_OFFSET_X_RATIO/);
+  assert.match(source, /mean: 0\.5 \+ session\.rightOffsetX/);
+  assert.match(source, /mean: 0\.5 \+ session\.verticalOffsetY/);
   assert.doesNotMatch(source, /x: clamp\(0\.5/);
   assert.doesNotMatch(source, /y: clamp\(0\.5/);
+  // 参照元はタップ座標とスクロール開始点の両方。
+  const fractions = source.slice(
+    source.indexOf('function sampleTouchStartFractions'),
+    source.indexOf('function sampleTouchEndPoint')
+  );
+  assert.match(fractions, /const session = currentTouchSession\(\)/);
+  const scroll = source.slice(
+    source.indexOf('function sampleScrollGesturePoints'),
+    source.indexOf('function highResolutionNow')
+  );
+  assert.match(scroll, /const session = currentTouchSession\(\)/);
 });
 
 test('occluded tap coordinates are resampled before the gesture fails', () => {

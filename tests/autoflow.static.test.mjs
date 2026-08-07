@@ -6,6 +6,7 @@ import './ui-drag-regression.test.mjs';
 import './granblue-captured-simulation.test.mjs';
 import './auth-captcha-guard.test.mjs';
 import './battle-performance-loader.test.mjs';
+import './human-input-distributions.test.mjs';
 
 const source = readFileSync(new URL('../a.js', import.meta.url), 'utf8');
 

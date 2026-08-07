@@ -1427,6 +1427,15 @@
           </article>
           <article class="card">
             <div class="cardHeader">
+              <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">⏱</span><div class="cardHeading" role="heading" aria-level="3"><strong>人間らしい間</strong><small>繰り返しの区切りに置く休憩</small></div></div>
+            </div>
+            <div class="grid3">
+              <label class="field"><span>人間らしい間</span><select id="humanPacingLevel"><option value="off">なし</option><option value="weak">弱</option><option value="medium">中</option></select></label>
+            </div>
+            <div class="settingNote">「繰り返す」「条件まで繰り返す」ブロックの反復と反復のあいだにだけ、まれに短い休憩（弱: 3%で0.8〜2.5秒）とごくまれに長い休憩（弱: 0.3%で15〜60秒）を入れます。あわせて実行開始からの経過時間に応じて休憩がわずかに伸びます（弱: 60分で+8%）。ブロックの実行中には一切割り込みません。既定は「弱」で、1反復あたりの平均増加は約0.16秒です。</div>
+          </article>
+          <article class="card">
+            <div class="cardHeader">
               <div class="cardTitleGroup"><span class="sectionIcon" aria-hidden="true">▦</span><div class="cardHeading" role="heading" aria-level="3"><strong>表示領域</strong><small>パネルの大きさの決まり方</small></div></div>
               <button id="resetDockLayout" class="ghost">既定サイズに戻す</button>
             </div>
@@ -1464,7 +1473,8 @@
     recordToolbar: byId('recordToolbar'), recordCount: byId('recordCount'), announcer: byId('announcer'),
     elementPickerToolbar: byId('elementPickerToolbar'), elementPickerHint: byId('elementPickerHint'), elementPickerCancel: byId('elementPickerCancel'),
     undoWorkflow: byId('undoWorkflow'), redoWorkflow: byId('redoWorkflow'), workflowIssues: byId('workflowIssues'),
-    battlePerformanceToggle: byId('battlePerformanceToggle')
+    battlePerformanceToggle: byId('battlePerformanceToggle'),
+    humanPacingLevel: byId('humanPacingLevel')
   };
 
   const state = {
@@ -1982,15 +1992,15 @@
   function defaultBlockConfig(type) {
     switch (type) {
       case 'gbfAssistSelect':
-        return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
+        return { minimumHp: 50, baseDelaySec: 0.6, jitterSec: 0.18, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
       case 'gbfAssistSelectBelow':
-        return { maximumHp: 10, baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
+        return { maximumHp: 10, baseDelaySec: 0.6, jitterSec: 0.18, timeoutSec: 15, maxAttempts: 10000, assistSlots: [1], supporterCandidates: defaultSupporterCandidates() };
       case 'gbfSupporterAuto':
         return { timeoutSec: 15 };
       case 'gbfSupporterConditional':
         return { timeoutSec: 15, supporterCandidates: defaultSupporterCandidates() };
       case 'gbfDeckConfirm':
-        return { timeoutSec: 30, refreshBaseDelaySec: 0.6, refreshJitterSec: 0 };
+        return { timeoutSec: 30, refreshBaseDelaySec: 0.6, refreshJitterSec: 0.18 };
       case 'gbfUnclaimedAll':
         return { timeoutSec: 30, maxItems: 10000 };
       case 'gbfEnsureFullAuto':
@@ -2003,7 +2013,7 @@
           memoryReliefSettleSec: 1.5
         };
       case 'gbfRefreshAssist':
-        return { baseDelaySec: 0.6, jitterSec: 0, timeoutSec: 15 };
+        return { baseDelaySec: 0.6, jitterSec: 0.18, timeoutSec: 15 };
       case 'gbfMyPage':
         return { timeoutSec: 45, settleSec: 1.5 };
       case 'gbfReleaseResources':
@@ -2252,25 +2262,40 @@
     return workflows;
   }
 
+  // E: 保存形式は既存のまま。未知のキーを1つ足すだけなので、旧データは既定値へ落ちる。
+  function normalizeHumanPacing(value) {
+    const level = String(value || '').trim();
+    return HUMAN_PACING_LEVELS.includes(level) ? level : DEFAULT_HUMAN_PACING;
+  }
+
+  function currentHumanPacingLevel() {
+    return normalizeHumanPacing(state.workflows?.humanPacing);
+  }
+
   function migrateWorkflowStore(raw) {
     if (!raw) {
       const workflow = defaultWorkflow();
-      return { version: 1, currentId: workflow.id, workflows: [workflow] };
+      return { version: 1, currentId: workflow.id, workflows: [workflow], humanPacing: DEFAULT_HUMAN_PACING };
     }
     if (Array.isArray(raw)) {
       const workflows = repairWorkflowStoreIds(raw.map(normalizeWorkflow));
       const fallback = workflows[0] || defaultWorkflow();
-      return { version: 1, currentId: fallback.id, workflows: workflows.length ? workflows : [fallback] };
+      return {
+        version: 1,
+        currentId: fallback.id,
+        workflows: workflows.length ? workflows : [fallback],
+        humanPacing: DEFAULT_HUMAN_PACING
+      };
     }
     if (Array.isArray(raw.blocks)) {
       const workflow = normalizeWorkflow(raw);
       repairWorkflowStoreIds([workflow]);
-      return { version: 1, currentId: workflow.id, workflows: [workflow] };
+      return { version: 1, currentId: workflow.id, workflows: [workflow], humanPacing: DEFAULT_HUMAN_PACING };
     }
     const workflows = repairWorkflowStoreIds((Array.isArray(raw.workflows) ? raw.workflows : []).map(normalizeWorkflow));
     if (!workflows.length) workflows.push(defaultWorkflow());
     const currentId = workflows.some(workflow => workflow.id === raw.currentId) ? raw.currentId : workflows[0].id;
-    return { version: 1, currentId, workflows };
+    return { version: 1, currentId, workflows, humanPacing: normalizeHumanPacing(raw.humanPacing) };
   }
 
   function readJson(key) {
@@ -2301,6 +2326,7 @@
       version: 1,
       currentId: state.selectedWorkflowId,
       workflows: state.workflows.workflows.map(workflow => normalizeWorkflow(workflow)),
+      humanPacing: currentHumanPacingLevel(),
       updatedAt: Date.now(),
       writerId: instanceId
     };
@@ -2310,7 +2336,8 @@
     return deepClone({
       version: 1,
       currentId: state.selectedWorkflowId,
-      workflows: state.workflows.workflows
+      workflows: state.workflows.workflows,
+      humanPacing: currentHumanPacingLevel()
     });
   }
 
@@ -3246,6 +3273,7 @@
       ui.workflowSelect.append(element('option', { value: workflow.id, text: workflow.name }));
     }
     ui.workflowSelect.value = state.selectedWorkflowId;
+    if (ui.humanPacingLevel) ui.humanPacingLevel.value = currentHumanPacingLevel();
     renderWorkflowEditor();
   }
 
@@ -4675,14 +4703,17 @@
     return next;
   }
 
-  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 130, stdDev: 20, min: 80, max: 250 });
-  const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 24, stdDev: 6, min: 12, max: 42 });
-  const TOUCH_HANDOFF_VISIBLE_LATENCY_MS = Object.freeze({ mean: 8, stdDev: 3, min: 2, max: 16 });
-  const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 95, stdDev: 15, min: 50, max: 180 });
-  const TOUCH_FAST_HOLD_LATENCY_MS = Object.freeze({ mean: 55, stdDev: 9, min: 32, max: 85 });
-  const TOUCH_HANDOFF_HOLD_LATENCY_MS = Object.freeze({ mean: 42, stdDev: 7, min: 28, max: 65 });
-  const TOUCH_SCROLL_SETTLE_LATENCY_MS = Object.freeze({ mean: 72, stdDev: 16, min: 36, max: 130 });
-  const TOUCH_SCROLL_INERTIA_LATENCY_MS = Object.freeze({ mean: 180, stdDev: 34, min: 110, max: 290 });
+  // 潜時は ex-Gaussian（正規 + 指数）。mean は正規成分の中心で、分布全体の期待値は
+  // 切断の効果込みで従来の切断正規と一致するよう数値的に較正してある（tests/human-input-distributions）。
+  // max は暴走防止の安全弁であり、裾は切らない。
+  const TOUCH_VISIBLE_LATENCY_MS = Object.freeze({ mean: 94.5, stdDev: 15, tau: 35, min: 70, max: 900 });
+  const TOUCH_FAST_VISIBLE_LATENCY_MS = Object.freeze({ mean: 16.8, stdDev: 4.2, tau: 7, min: 10, max: 220 });
+  const TOUCH_HANDOFF_VISIBLE_LATENCY_MS = Object.freeze({ mean: 5.6, stdDev: 2, tau: 2.4, min: 1, max: 90 });
+  const TOUCH_HOLD_LATENCY_MS = Object.freeze({ mean: 69.9, stdDev: 11, tau: 25, min: 45, max: 620 });
+  const TOUCH_FAST_HOLD_LATENCY_MS = Object.freeze({ mean: 40.9, stdDev: 6.5, tau: 14, min: 28, max: 380 });
+  const TOUCH_HANDOFF_HOLD_LATENCY_MS = Object.freeze({ mean: 30.7, stdDev: 5, tau: 11, min: 24, max: 300 });
+  const TOUCH_SCROLL_SETTLE_LATENCY_MS = Object.freeze({ mean: 51.5, stdDev: 12, tau: 20, min: 32, max: 520 });
+  const TOUCH_SCROLL_INERTIA_LATENCY_MS = Object.freeze({ mean: 129.9, stdDev: 25, tau: 48, min: 100, max: 900 });
   const TOUCH_START_STDDEV_RATIO = Object.freeze({ mean: 0.135, stdDev: 0.008, min: 0.12, max: 0.15 });
   const TOUCH_SESSION_OFFSET_X_RATIO = Object.freeze({ mean: 0.03, stdDev: 0.006, min: 0.015, max: 0.045 });
   const TOUCH_SESSION_OFFSET_Y_RATIO = Object.freeze({ mean: 0.02, stdDev: 0.006, min: 0.005, max: 0.035 });
@@ -4695,6 +4726,79 @@
   const SCROLL_SPEED_MAX_PX_PER_SEC = 1800;
   const SCROLL_INERTIA_MIN_DISTANCE_PX = 80;
   const TRUNCATED_NORMAL_MAX_ATTEMPTS = 10_000;
+
+  // 中央寄り＋右裾の標準形。[0,1] 上で期待値がちょうど 0.5 になるよう中心を数値較正してある。
+  const CENTERED_UNIT_STDDEV = 0.13;
+  const CENTERED_UNIT_TAU = 0.13;
+  const CENTERED_UNIT_CENTER = 0.3786;
+
+  // B: テンポの自己相関（対数テンポの AR(1)）。乗数の期待値は 1 に正規化する。
+  const TEMPO_AR_PHI = 0.55;
+  const TEMPO_AR_STATIONARY_STDDEV = 0.18;
+
+  // C: セッションバイアスのドリフト（Ornstein-Uhlenbeck、時定数5分）。
+  const TOUCH_SESSION_DRIFT_TIME_CONSTANT_MS = 5 * 60 * 1000;
+
+  // D: Fitts の法則。直前タップ位置との距離 D と標的短辺 W から潜時を伸ばす。
+  const TOUCH_FITTS_SLOPE_MS = 55;
+  const TOUCH_FITTS_MAX_ADD_MS = 250;
+  const TOUCH_FITTS_REPEAT_DISTANCE_PX = 8;
+  const TOUCH_FITTS_REPEAT_MEAN_SCALE = 0.75;
+  const TOUCH_FITTS_BASELINE_SMOOTHING = 0.06;
+  const TOUCH_FITTS_CENTERED_LIMIT_MS = 60;
+
+  // H: rAF の位相ロック解消。位相は 0〜16ms から抽選し、期待値分は差し引いて総時間を変えない。
+  const GESTURE_PHASE_OFFSET_SPAN_MS = 16;
+  const GESTURE_FRAME_GUARD_MIN_MS = 5;
+  const GESTURE_FRAME_GUARD_MAX_MS = 9;
+  const DISPLAY_REFRESH_INTERVAL_60HZ_MS = 16.7;
+  const DISPLAY_REFRESH_INTERVAL_120HZ_MS = 8.3;
+
+  // I: post-error slowing。STALE_TARGET リトライ直後だけ潜時を伸ばし、成功3回で 1.0 へ戻す。
+  const POST_ERROR_SLOWING_FACTOR = 1.3;
+  const POST_ERROR_SLOWING_DECAY = 1 / 3;
+
+  // J: 標的短辺と hold の相関。小さい標的ほど長く押さえる（±15%）。
+  const TOUCH_HOLD_REFERENCE_SHORT_SIDE_PX = 44;
+  const TOUCH_HOLD_SIZE_SCALE_RANGE = 0.15;
+
+  // G: jitterSec が 0 のままの保存データに、実行時だけ与える最小ゆらぎ比率。
+  const MINIMUM_RUNTIME_JITTER_RATIO = 0.2;
+
+  // E: マクロ構造（反復境界だけに入る「間」）。ここだけが設定で制御できる。
+  const HUMAN_PACING_LEVELS = Object.freeze(['off', 'weak', 'medium']);
+  const DEFAULT_HUMAN_PACING = 'weak';
+  const HUMAN_PACING_LABELS = Object.freeze({ off: 'なし', weak: '弱', medium: '中' });
+  const HUMAN_PACING_PROFILES = Object.freeze({
+    off: Object.freeze({
+      shortPauseChance: 0,
+      shortPauseMinMs: 0,
+      shortPauseMaxMs: 0,
+      longPauseChance: 0,
+      longPauseMinMs: 0,
+      longPauseMaxMs: 0,
+      fatiguePerHour: 0
+    }),
+    weak: Object.freeze({
+      shortPauseChance: 0.03,
+      shortPauseMinMs: 800,
+      shortPauseMaxMs: 2500,
+      longPauseChance: 0.003,
+      longPauseMinMs: 15_000,
+      longPauseMaxMs: 60_000,
+      fatiguePerHour: 0.08
+    }),
+    medium: Object.freeze({
+      shortPauseChance: 0.06,
+      shortPauseMinMs: 900,
+      shortPauseMaxMs: 3200,
+      longPauseChance: 0.006,
+      longPauseMinMs: 15_000,
+      longPauseMaxMs: 75_000,
+      fatiguePerHour: 0.14
+    })
+  });
+  const HUMAN_PACING_FATIGUE_MAX = 0.25;
 
   function sampleStandardNormal(random = Math.random) {
     const u1 = Math.max(Number.MIN_VALUE, 1 - random());
@@ -4735,11 +4839,287 @@
     throw new FlowError('切断正規分布の時間再抽選上限に達しました', 'TRUNCATED_NORMAL_MS_EXHAUSTED');
   }
 
-  const TOUCH_SESSION = Object.freeze({
+  function sampleStandardExponential(random = Math.random) {
+    return -Math.log(Math.max(Number.MIN_VALUE, 1 - random()));
+  }
+
+  // A: ex-Gaussian（正規 + 指数）。人間の反応時間の定番モデルで、右に長い裾を持つ。
+  function sampleExGaussian({ mean, stdDev, tau, min, max }, random = Math.random) {
+    const meanValue = Number(mean);
+    const stdDevValue = Number(stdDev);
+    const tauValue = Number(tau);
+    const minValue = Number(min);
+    const maxValue = Number(max);
+    if (![meanValue, stdDevValue, tauValue, minValue, maxValue].every(Number.isFinite)
+      || stdDevValue < 0
+      || tauValue < 0
+      || maxValue < minValue) {
+      throw new FlowError('ex-Gauss分布のパラメータが不正です', 'INVALID_EX_GAUSSIAN');
+    }
+    if (stdDevValue === 0 && tauValue === 0) {
+      if (meanValue < minValue || meanValue > maxValue) {
+        throw new FlowError('分散0のex-Gauss平均値が切断範囲外です', 'INVALID_EX_GAUSSIAN');
+      }
+      return meanValue;
+    }
+    for (let attempt = 0; attempt < TRUNCATED_NORMAL_MAX_ATTEMPTS; attempt++) {
+      const sample = meanValue
+        + (sampleStandardNormal(random) * stdDevValue)
+        + (tauValue > 0 ? sampleStandardExponential(random) * tauValue : 0);
+      if (sample >= minValue && sample <= maxValue) return sample;
+    }
+    throw new FlowError('ex-Gauss分布の再抽選上限に達しました', 'EX_GAUSSIAN_EXHAUSTED');
+  }
+
+  function sampleExGaussianMs(config, random = Math.random) {
+    const minValue = Number(config?.min);
+    const maxValue = Number(config?.max);
+    for (let attempt = 0; attempt < TRUNCATED_NORMAL_MAX_ATTEMPTS; attempt++) {
+      const rounded = Math.round(sampleExGaussian(config, random));
+      if (rounded >= minValue && rounded <= maxValue) return rounded;
+    }
+    throw new FlowError('ex-Gauss分布の時間再抽選上限に達しました', 'EX_GAUSSIAN_MS_EXHAUSTED');
+  }
+
+  // 乗数は分布全体（切断境界も含む）を相似に伸縮させる。こうすると切断で歪まないので、
+  // 期待値1の乗数を掛けても期待値がそのまま保たれる。
+  function scaleLatencyConfig(config, factor) {
+    const scale = Math.max(0, finite(factor, 1));
+    if (scale === 1) return config;
+    return {
+      mean: finite(config.mean, 0) * scale,
+      stdDev: finite(config.stdDev, 0) * scale,
+      tau: finite(config.tau, 0) * scale,
+      min: finite(config.min, 0) * scale,
+      max: finite(config.max, 0) * scale
+    };
+  }
+
+  // 加算は分布を丸ごと平行移動する。min だけ据え置くと下向きの加算が切り落とされて
+  // 平均が上振れするので、切断境界も一緒に動かす（負側は 0 で止める）。
+  function shiftLatencyMean(config, deltaMs) {
+    const delta = finite(deltaMs, 0);
+    if (delta === 0) return config;
+    return {
+      ...config,
+      mean: Math.max(0, finite(config.mean, 0) + delta),
+      min: Math.max(0, finite(config.min, 0) + delta),
+      max: finite(config.max, 0) + Math.max(0, delta)
+    };
+  }
+
+  // F: 一様分布の置換に使う標準形。[0,1] 上で中央寄り＋右裾、期待値はちょうど 0.5。
+  function sampleCenteredUnitInterval(random = Math.random) {
+    for (let attempt = 0; attempt < TRUNCATED_NORMAL_MAX_ATTEMPTS; attempt++) {
+      const sample = CENTERED_UNIT_CENTER
+        + (sampleStandardNormal(random) * CENTERED_UNIT_STDDEV)
+        + (sampleStandardExponential(random) * CENTERED_UNIT_TAU);
+      if (sample >= 0 && sample <= 1) return sample;
+    }
+    throw new FlowError('中央寄り分布の再抽選上限に達しました', 'CENTERED_UNIT_EXHAUSTED');
+  }
+
+  // min/max の意味（到達しうる下限・上限）を保ったまま一様分布を置き換える。期待値は中点のまま。
+  function sampleCenteredRange(min, max, random = Math.random) {
+    const a = finite(min, 0);
+    const b = finite(max, 0);
+    if (b < a) throw new FlowError('中央寄り分布の最大値が最小値未満です', 'INVALID_RANGE');
+    if (b === a) return a;
+    return a + (sampleCenteredUnitInterval(random) * (b - a));
+  }
+
+  // ±magnitude の対称ゆらぎ。期待値 0、中央寄り。
+  function sampleSymmetricJitter(magnitude, random = Math.random) {
+    const span = Math.abs(finite(magnitude, 0));
+    if (span === 0) return 0;
+    return ((sampleCenteredUnitInterval(random) * 2) - 1) * span;
+  }
+
+  // B: 対数テンポの AR(1)。φ で自己相関、定常SDは TEMPO_AR_STATIONARY_STDDEV。
+  function advanceLogTempoState(previous, phi, stationaryStdDev, random = Math.random) {
+    const phiValue = clamp(finite(phi, 0), -0.999, 0.999);
+    const stationary = Math.max(0, finite(stationaryStdDev, 0));
+    const innovationStdDev = stationary * Math.sqrt(1 - (phiValue * phiValue));
+    return (phiValue * finite(previous, 0)) + (sampleStandardNormal(random) * innovationStdDev);
+  }
+
+  // exp(X), X~N(0,σ²) の期待値は exp(σ²/2) なので、その分を引いて期待値1に正規化する。
+  function logTempoMultiplier(stateValue, stationaryStdDev) {
+    const stationary = Math.max(0, finite(stationaryStdDev, 0));
+    return Math.exp(finite(stateValue, 0) - ((stationary * stationary) / 2));
+  }
+
+  let logTempoState = 0;
+
+  function nextTempoMultiplier(random = Math.random) {
+    logTempoState = advanceLogTempoState(logTempoState, TEMPO_AR_PHI, TEMPO_AR_STATIONARY_STDDEV, random);
+    return logTempoMultiplier(logTempoState, TEMPO_AR_STATIONARY_STDDEV);
+  }
+
+  // C: Ornstein-Uhlenbeck。定常分散は切断正規の stdDev をそのまま使い、range で切り詰める。
+  function advanceOrnsteinUhlenbeck(previous, { mean, stdDev, min, max }, elapsedMs, timeConstantMs, random = Math.random) {
+    const meanValue = finite(mean, 0);
+    const stationary = Math.max(0, finite(stdDev, 0));
+    const minValue = finite(min, meanValue);
+    const maxValue = finite(max, meanValue);
+    const tau = Math.max(1, finite(timeConstantMs, 1));
+    const elapsed = Math.max(0, finite(elapsedMs, 0));
+    if (elapsed === 0 || stationary === 0) return clamp(finite(previous, meanValue), minValue, maxValue);
+    const decay = Math.exp(-elapsed / tau);
+    const innovationStdDev = stationary * Math.sqrt(Math.max(0, 1 - (decay * decay)));
+    const next = meanValue
+      + ((finite(previous, meanValue) - meanValue) * decay)
+      + (sampleStandardNormal(random) * innovationStdDev);
+    return clamp(next, minValue, maxValue);
+  }
+
+  const touchSessionDrift = {
+    at: Date.now(),
     rightOffsetX: sampleTruncatedNormal(TOUCH_SESSION_OFFSET_X_RATIO),
     verticalOffsetY: sampleTruncatedNormal(TOUCH_SESSION_OFFSET_Y_RATIO),
     startStdDevRatio: sampleTruncatedNormal(TOUCH_START_STDDEV_RATIO)
-  });
+  };
+
+  function currentTouchSession(now = Date.now(), random = Math.random) {
+    const elapsed = Math.max(0, finite(now, touchSessionDrift.at) - touchSessionDrift.at);
+    if (elapsed <= 0) return touchSessionDrift;
+    const tau = TOUCH_SESSION_DRIFT_TIME_CONSTANT_MS;
+    touchSessionDrift.rightOffsetX = advanceOrnsteinUhlenbeck(
+      touchSessionDrift.rightOffsetX, TOUCH_SESSION_OFFSET_X_RATIO, elapsed, tau, random
+    );
+    touchSessionDrift.verticalOffsetY = advanceOrnsteinUhlenbeck(
+      touchSessionDrift.verticalOffsetY, TOUCH_SESSION_OFFSET_Y_RATIO, elapsed, tau, random
+    );
+    touchSessionDrift.startStdDevRatio = advanceOrnsteinUhlenbeck(
+      touchSessionDrift.startStdDevRatio, TOUCH_START_STDDEV_RATIO, elapsed, tau, random
+    );
+    touchSessionDrift.at = finite(now, touchSessionDrift.at);
+    return touchSessionDrift;
+  }
+
+  // D: 直前タップとの距離 D・標的短辺 W から Fitts の索引で潜時を決める。
+  // 連打（D が極小）は準備動作が要らないので逆に短くなる。
+  //
+  // 生の加算量 55*log2(2D/W+1) は本アプリの画面寸法だと 60〜250ms になり、そのまま足すと
+  // 平均処理速度を落としてしまう（絶対条件に反する）。そこで直近の加算量の指数移動平均を
+  // 基準に引き、「難しい標的ほど遅く、易しい標的ほど速い」という Fitts の相関構造だけを残して
+  // 全体平均は据え置く。baselineMs に 0 を渡せば素の Fitts になる。
+  function fittsLatencyProfile(previousPoint, point, shortSidePx, baselineMs = 0) {
+    const width = Math.max(1, finite(shortSidePx, 1));
+    if (!previousPoint || !Number.isFinite(previousPoint.x) || !Number.isFinite(previousPoint.y)) {
+      return { addMs: 0, rawAddMs: null, meanScale: 1, distancePx: null };
+    }
+    const distance = Math.hypot(finite(point?.x, 0) - previousPoint.x, finite(point?.y, 0) - previousPoint.y);
+    if (distance < TOUCH_FITTS_REPEAT_DISTANCE_PX) {
+      return { addMs: 0, rawAddMs: null, meanScale: TOUCH_FITTS_REPEAT_MEAN_SCALE, distancePx: distance };
+    }
+    const index = Math.log2(((2 * distance) / width) + 1);
+    const rawAddMs = Math.min(TOUCH_FITTS_MAX_ADD_MS, TOUCH_FITTS_SLOPE_MS * index);
+    return {
+      // 上下対称に頭打ちさせる。片側だけ切ると平均が動いてしまう。
+      addMs: clamp(rawAddMs - finite(baselineMs, 0), -TOUCH_FITTS_CENTERED_LIMIT_MS, TOUCH_FITTS_CENTERED_LIMIT_MS),
+      rawAddMs,
+      meanScale: 1,
+      distancePx: distance
+    };
+  }
+
+  // 実際に適用した加算量そのものを使って基準線を動かす確率近似。頭打ちで分布が歪んでも、
+  // 「適用した加算量の平均が 0 になる基準線」へ収束するので、平均潜時が動かない。
+  function nextFittsBaseline(previous, profile, smoothing = TOUCH_FITTS_BASELINE_SMOOTHING) {
+    const base = finite(previous, 0);
+    if (!profile || !Number.isFinite(profile.rawAddMs)) return base;
+    const rate = clamp(finite(smoothing, 0), 0, 1);
+    return clamp(base + (finite(profile.addMs, 0) * rate), 0, TOUCH_FITTS_MAX_ADD_MS);
+  }
+
+  // 起動直後から偏らないよう、典型的な索引（≒2.8bit）の加算量を初期値に置く。
+  let fittsBaselineMs = TOUCH_FITTS_SLOPE_MS * 2.8;
+
+  // J: 小さい標的ほど長く押さえる。標準サイズで 1.0、対数サイズに比例して ±15%。
+  function holdDurationSizeScale(shortSidePx) {
+    const shortSide = Math.max(1, finite(shortSidePx, TOUCH_HOLD_REFERENCE_SHORT_SIDE_PX));
+    const ratio = clamp(shortSide / TOUCH_HOLD_REFERENCE_SHORT_SIDE_PX, 0.25, 4);
+    return clamp(
+      1 - ((TOUCH_HOLD_SIZE_SCALE_RANGE * Math.log2(ratio)) / 2),
+      1 - TOUCH_HOLD_SIZE_SCALE_RANGE,
+      1 + TOUCH_HOLD_SIZE_SCALE_RANGE
+    );
+  }
+
+  // H: rAF の 16.7ms グリッドに張り付かないよう、ジェスチャごとに位相をずらす。
+  // 0〜16ms から引いた上で期待値（半幅）を差し引くので、ジェスチャ全体の所要時間は変わらない。
+  function sampleGesturePhaseOffsetMs(random = Math.random) {
+    return (random() * GESTURE_PHASE_OFFSET_SPAN_MS) - (GESTURE_PHASE_OFFSET_SPAN_MS / 2);
+  }
+
+  function sampleGestureFrameGuardMs(random = Math.random) {
+    return GESTURE_FRAME_GUARD_MIN_MS
+      + (random() * (GESTURE_FRAME_GUARD_MAX_MS - GESTURE_FRAME_GUARD_MIN_MS));
+  }
+
+  // H: 端末ごとのリフレッシュレートをセッション開始時に一度だけ決め、以後固定する。
+  const SESSION_FRAME_INTERVAL_MS = isAndroidPhone()
+    ? DISPLAY_REFRESH_INTERVAL_60HZ_MS
+    : isIosLikeBrowser()
+      ? DISPLAY_REFRESH_INTERVAL_120HZ_MS
+      : DISPLAY_REFRESH_INTERVAL_60HZ_MS;
+
+  // I: STALE_TARGET リトライ直後だけ効く減速係数。
+  let postErrorSlowingFactor = 1;
+
+  function markPostErrorSlowing() {
+    postErrorSlowingFactor = POST_ERROR_SLOWING_FACTOR;
+  }
+
+  function relaxPostErrorSlowing() {
+    if (postErrorSlowingFactor <= 1) return;
+    const next = 1 + ((postErrorSlowingFactor - 1) * POST_ERROR_SLOWING_DECAY);
+    postErrorSlowingFactor = next < 1.005 ? 1 : next;
+  }
+
+  // D: 直前タップの位置と時刻。間が空きすぎたタップは手を置き直すので、相関を切る。
+  const TOUCH_FITTS_MEMORY_MS = 4000;
+  let lastTouchPoint = null;
+  let lastTouchAt = 0;
+
+  function recentTouchPoint(now = Date.now()) {
+    if (!lastTouchPoint) return null;
+    return (finite(now, 0) - lastTouchAt) <= TOUCH_FITTS_MEMORY_MS ? lastTouchPoint : null;
+  }
+
+  function humanPacingProfile(level) {
+    return HUMAN_PACING_PROFILES[level] || HUMAN_PACING_PROFILES[DEFAULT_HUMAN_PACING];
+  }
+
+  // E: 反復境界だけに置く「間」。短い息継ぎと、まれな長い離席、そして経過時間による緩い減速。
+  // ブロック実行中には絶対に呼ばない。
+  function sampleMacroBoundaryPauseMs(profile, elapsedMs, random = Math.random) {
+    const settings = profile || HUMAN_PACING_PROFILES.off;
+    const fatigue = 1 + Math.min(
+      HUMAN_PACING_FATIGUE_MAX,
+      Math.max(0, finite(elapsedMs, 0) / 3_600_000) * Math.max(0, finite(settings.fatiguePerHour, 0))
+    );
+    const draw = random();
+    const longChance = Math.max(0, finite(settings.longPauseChance, 0));
+    const shortChance = Math.max(0, finite(settings.shortPauseChance, 0));
+    if (draw < longChance) {
+      return sampleCenteredRange(settings.longPauseMinMs, settings.longPauseMaxMs, random) * fatigue;
+    }
+    if (draw < longChance + shortChance) {
+      return sampleCenteredRange(settings.shortPauseMinMs, settings.shortPauseMaxMs, random) * fatigue;
+    }
+    return 0;
+  }
+
+  async function pauseAtIterationBoundary(context) {
+    const profile = humanPacingProfile(currentHumanPacingLevel());
+    if (profile === HUMAN_PACING_PROFILES.off) return;
+    const elapsed = Math.max(0, performance.now() - finite(context?.startedAt, performance.now()));
+    const pauseMs = sampleMacroBoundaryPauseMs(profile, elapsed);
+    if (pauseMs <= 0) return;
+    await abortableDelay(pauseMs, context.signal);
+  }
 
   function createSyntheticTouch(win, target, identifier, point) {
     if (typeof win.Touch !== 'function') {
@@ -4982,6 +5362,7 @@
   const SCROLL_VELOCITY_AREA = integrateScrollVelocity(1);
 
   function sampleScrollGesturePoints(viewport, delta, random = Math.random) {
+    const session = currentTouchSession();
     const width = viewport.right - viewport.left;
     const height = viewport.bottom - viewport.top;
     const insetX = Math.min(12, width * 0.12);
@@ -4991,9 +5372,9 @@
     const directionY = Math.sign(delta.y);
     const startMeanX = horizontalDominant
       ? viewport.left + (width * (directionX >= 0 ? 0.72 : 0.28))
-      : viewport.left + (width * (0.5 + TOUCH_SESSION.rightOffsetX));
+      : viewport.left + (width * (0.5 + session.rightOffsetX));
     const startMeanY = horizontalDominant
-      ? viewport.top + (height * (0.5 + TOUCH_SESSION.verticalOffsetY))
+      ? viewport.top + (height * (0.5 + session.verticalOffsetY))
       : viewport.top + (height * (directionY >= 0 ? 0.72 : 0.28));
     const endMeanX = horizontalDominant
       ? viewport.left + (width * (directionX >= 0 ? 0.28 : 0.72))
@@ -5037,7 +5418,7 @@
     const distance = Math.hypot(delta.x, delta.y);
     if (distance < 1) return false;
 
-    const speed = randomUniform(SCROLL_SPEED_MIN_PX_PER_SEC, SCROLL_SPEED_MAX_PX_PER_SEC);
+    const speed = sampleCenteredRange(SCROLL_SPEED_MIN_PX_PER_SEC, SCROLL_SPEED_MAX_PX_PER_SEC);
     const rawDuration = (distance / speed) * 1000;
     const durationMean = Math.min(860, Math.max(170, rawDuration));
     const duration = sampleTruncatedNormalMs({
@@ -5087,7 +5468,7 @@
 
       if (useInertia) {
         const inertiaStart = scrollPosition(win, scroller);
-        const inertiaDuration = sampleTruncatedNormalMs(TOUCH_SCROLL_INERTIA_LATENCY_MS);
+        const inertiaDuration = sampleExGaussianMs(TOUCH_SCROLL_INERTIA_LATENCY_MS);
         const inertiaStartedAt = highResolutionNow(win);
         const decayDenominator = 1 - Math.exp(-5);
         while (true) {
@@ -5105,7 +5486,7 @@
       }
 
       setScrollPosition(win, scroller, end.x, end.y);
-      await abortableDelay(sampleTruncatedNormalMs(TOUCH_SCROLL_SETTLE_LATENCY_MS), signal);
+      await abortableDelay(sampleExGaussianMs(TOUCH_SCROLL_SETTLE_LATENCY_MS), signal);
       return true;
     } catch (error) {
       if (touchActive) {
@@ -5195,8 +5576,8 @@
       const viewport = scrollViewport(win, scroller);
       if (pointInsideViewport(point, viewport, 4)) continue;
       const current = scrollPosition(win, scroller);
-      const anchorX = randomUniform(0.38, 0.62);
-      const anchorY = randomUniform(0.34, 0.66);
+      const anchorX = sampleCenteredRange(0.38, 0.62);
+      const anchorY = sampleCenteredRange(0.34, 0.66);
       const desiredX = viewport.left + ((viewport.right - viewport.left) * anchorX);
       const desiredY = viewport.top + ((viewport.bottom - viewport.top) * anchorY);
       scrolled = await animatePhysicalScroll(win, scroller, {
@@ -5214,16 +5595,17 @@
 
   function sampleTouchStartFractions(random = Math.random) {
     const inset = TOUCH_COORDINATE_INSET_RATIO;
+    const session = currentTouchSession();
     return {
       x: sampleTruncatedNormal({
-        mean: 0.5 + TOUCH_SESSION.rightOffsetX,
-        stdDev: TOUCH_SESSION.startStdDevRatio,
+        mean: 0.5 + session.rightOffsetX,
+        stdDev: session.startStdDevRatio,
         min: inset,
         max: 1 - inset
       }, random),
       y: sampleTruncatedNormal({
-        mean: 0.5 + TOUCH_SESSION.verticalOffsetY,
-        stdDev: TOUCH_SESSION.startStdDevRatio,
+        mean: 0.5 + session.verticalOffsetY,
+        stdDev: session.startStdDevRatio,
         min: inset,
         max: 1 - inset
       }, random)
@@ -5259,11 +5641,13 @@
   function determineTouchMoveCount(durationMs, distancePx, random = Math.random) {
     const duration = Math.max(1, finite(durationMs, 1));
     const distance = Math.max(0, finite(distancePx, 0));
+    // 平均間隔は端末のリフレッシュレート由来（セッション中は固定）。ばらつきだけを毎回引く。
+    const frameInterval = SESSION_FRAME_INTERVAL_MS;
     const meanIntervalMs = sampleTruncatedNormal({
-      mean: 15.5,
-      stdDev: 3.4,
-      min: 7.5,
-      max: 27
+      mean: frameInterval,
+      stdDev: frameInterval * 0.22,
+      min: frameInterval * 0.48,
+      max: frameInterval * 1.74
     }, random);
     const expectedCount = (duration / meanIntervalMs) + Math.min(4.5, distance / 2.4);
     const dynamicMaximum = Math.max(2, Math.floor(duration / 5.5));
@@ -5305,13 +5689,16 @@
     return progresses;
   }
 
-  async function waitForGestureProgress(win, startedAt, durationMs, progress, signal) {
-    const targetTime = startedAt + (durationMs * progress);
+  async function waitForGestureProgress(win, startedAt, durationMs, progress, signal, phaseOffsetMs = 0) {
+    const targetTime = startedAt + (durationMs * progress) + finite(phaseOffsetMs, 0);
     while (true) {
       const remaining = targetTime - highResolutionNow(win);
       if (remaining <= 0) return;
-      if (remaining > 20) {
-        await abortableDelay(remaining - 8, signal);
+      // 閾値と刻み戻しを毎回引き直し、rAF の周期に位相ロックしないようにする。
+      const threshold = sampleGestureFrameGuardMs();
+      const guard = sampleGestureFrameGuardMs();
+      if (remaining > threshold) {
+        await abortableDelay(Math.max(0, remaining - guard), signal);
       } else {
         await nextAnimationFrame(win, signal);
       }
@@ -5330,16 +5717,27 @@
       let identifier = null;
       let activePoint = null;
       let touchActive = false;
+      // テンポ乗数はタップごとに1回だけ進める。座標の再抽選ループで何度も進めない。
+      const tempoMultiplier = nextTempoMultiplier();
       try {
         let start = null;
         let sawStablePoint = false;
         for (let attempt = 0; attempt < 8; attempt++) {
           const fractions = sampleTouchStartFractions();
-          await ensureTargetPointVisible(target, fractions, { signal });
-          const visibleLatency = handoff
-            ? TOUCH_HANDOFF_VISIBLE_LATENCY_MS
-            : fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS;
-          await abortableDelay(sampleTruncatedNormalMs(visibleLatency), signal);
+          const planned = await ensureTargetPointVisible(target, fractions, { signal });
+          const plannedShortSide = Math.min(planned.rect.width, planned.rect.height);
+          const fitts = fittsLatencyProfile(recentTouchPoint(), planned, plannedShortSide, fittsBaselineMs);
+          fittsBaselineMs = nextFittsBaseline(fittsBaselineMs, fitts);
+          const visibleLatency = shiftLatencyMean(
+            scaleLatencyConfig(
+              handoff
+                ? TOUCH_HANDOFF_VISIBLE_LATENCY_MS
+                : fast ? TOUCH_FAST_VISIBLE_LATENCY_MS : TOUCH_VISIBLE_LATENCY_MS,
+              tempoMultiplier * postErrorSlowingFactor * fitts.meanScale
+            ),
+            fitts.addMs
+          );
+          await abortableDelay(sampleExGaussianMs(visibleLatency), signal);
           if (!target.isConnected || target.ownerDocument?.defaultView !== frameWindow()) {
             throw new FlowError(`${targetLabel}が押下直前に無効になりました`, 'STALE_TARGET');
           }
@@ -5364,28 +5762,36 @@
         const startTouch = createSyntheticTouch(win, dispatchTarget, identifier, start);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchstart', startTouch, true);
         touchActive = true;
-        const holdLatency = handoff
-          ? TOUCH_HANDOFF_HOLD_LATENCY_MS
-          : fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS;
-        const holdDuration = sampleTruncatedNormalMs(holdLatency);
+        // J: 標的が小さいほど hold を長めに取る（±15%）。
+        const holdLatency = scaleLatencyConfig(
+          handoff
+            ? TOUCH_HANDOFF_HOLD_LATENCY_MS
+            : fast ? TOUCH_FAST_HOLD_LATENCY_MS : TOUCH_HOLD_LATENCY_MS,
+          holdDurationSizeScale(Math.min(start.rect.width, start.rect.height))
+        );
+        const holdDuration = sampleExGaussianMs(holdLatency);
         const endPoint = sampleTouchEndPoint(start, start.rect);
         const movement = Math.hypot(endPoint.x - start.x, endPoint.y - start.y);
         const moveCount = determineTouchMoveCount(holdDuration, movement);
         const moveProgresses = sampleTouchMoveProgresses(moveCount);
         const trajectory = createCorrelatedTrajectory(start, endPoint, start.rect);
+        const phaseOffsetMs = sampleGesturePhaseOffsetMs();
         const startedAt = highResolutionNow(win);
         for (const moveProgress of moveProgresses) {
-          await waitForGestureProgress(win, startedAt, holdDuration, moveProgress, signal);
+          await waitForGestureProgress(win, startedAt, holdDuration, moveProgress, signal, phaseOffsetMs);
           const movePoint = sampleCorrelatedTrajectoryPoint(trajectory, moveProgress);
           activePoint = movePoint;
           const moveTouch = createSyntheticTouch(win, dispatchTarget, identifier, movePoint);
           dispatchSyntheticTouch(win, dispatchTarget, 'touchmove', moveTouch, true);
         }
-        await waitForGestureProgress(win, startedAt, holdDuration, 1, signal);
+        await waitForGestureProgress(win, startedAt, holdDuration, 1, signal, phaseOffsetMs);
         activePoint = endPoint;
         const endTouch = createSyntheticTouch(win, dispatchTarget, identifier, endPoint);
         dispatchSyntheticTouch(win, dispatchTarget, 'touchend', endTouch, false);
         touchActive = false;
+        lastTouchPoint = { x: endPoint.x, y: endPoint.y };
+        lastTouchAt = Date.now();
+        relaxPostErrorSlowing();
         await sleepMicrotask();
       } catch (error) {
         if (touchActive && dispatchTarget && activePoint && identifier != null) {
@@ -5471,6 +5877,8 @@
         return { selector, label };
       } catch (error) {
         if (error?.code !== 'STALE_TARGET') throw error;
+        // I: 押し損ねの直後だけ慎重になる。成功3回で元のテンポへ戻る。
+        markPostErrorSlowing();
       }
     }
   }
@@ -5698,9 +6106,13 @@
 
   async function waitRandomized(baseSec, jitterSec, signal) {
     const base = Math.max(0, finite(baseSec, 0));
-    const jitter = Math.max(0, finite(jitterSec, 0));
-    const actual = Math.max(0, base + randomUniform(-jitter, jitter));
-    await abortableDelay(actual * 1000, signal);
+    const configured = Math.max(0, finite(jitterSec, 0));
+    // G: 保存値は書き換えず、実行時にだけ最小ゆらぎを補う。
+    const jitter = configured > 0 ? configured : base * MINIMUM_RUNTIME_JITTER_RATIO;
+    // ±jitter の中央寄りゆらぎに、期待値1のテンポ乗数を掛ける。ここで範囲へ切り詰めると
+    // 乗数の裾が潰れて期待値が下振れするので、下限0だけを守る。
+    const actual = (base + sampleSymmetricJitter(jitter)) * nextTempoMultiplier();
+    await abortableDelay(Math.max(0, actual) * 1000, signal);
   }
 
   async function runAssistListTransition(beforeList, config, signal, action, {
@@ -7534,6 +7946,8 @@
             updateBlockProgress(context, block, `${control.iteration + 1} / ${count}回目`);
             await runBlockList(block.children, context, childKey);
             control.iteration += 1;
+            // E: 反復と反復のあいだにだけ「間」を置く。最後の反復のあとには置かない。
+            if (control.iteration < count) await pauseAtIterationBoundary(context);
             if (control.iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
           }
           removeExecutionControlFrame(context, controlKey);
@@ -7562,6 +7976,8 @@
             updateBlockProgress(context, block, `${control.iteration}回目`);
             await runBlockList(block.children, context, childKey);
             control.inIteration = false;
+            // E: 反復境界のみ。条件判定へ戻る前に「間」を置く。
+            await pauseAtIterationBoundary(context);
             if (control.iteration % WORKFLOW_YIELD_INTERVAL === 0) await abortableDelay(0, context.signal);
           }
           removeExecutionControlFrame(context, controlKey);
@@ -7583,9 +7999,13 @@
         case 'fixedWait':
           await abortableDelay(block.config.seconds * 1000, context.signal);
           break;
-        case 'randomWait':
-          await abortableDelay(randomUniform(block.config.minSeconds, block.config.maxSeconds) * 1000, context.signal);
+        case 'randomWait': {
+          const minSeconds = finite(block.config.minSeconds, 0);
+          const maxSeconds = finite(block.config.maxSeconds, 0);
+          const drawn = sampleCenteredRange(minSeconds, maxSeconds) * nextTempoMultiplier();
+          await abortableDelay(clamp(drawn, minSeconds, maxSeconds) * 1000, context.signal);
           break;
+        }
         case 'watch':
           await waitForWorkflowCondition(block.config.condition, blockContext, { timeoutSec: block.config.timeoutSec, stableMs: block.config.stableMs });
           break;
@@ -8542,15 +8962,23 @@
     return doc.elementFromPoint(x, y);
   }
 
+  // F: 新経路と同じガウス動径（σ = radius/2.2、radius で切断）。一様円板より中心に寄る。
+  function legacyJitterOffset(radiusPx, random = Math.random) {
+    const radius = Math.max(0, finite(radiusPx, 0));
+    if (!radius) return { dx: 0, dy: 0 };
+    const angle = random() * Math.PI * 2;
+    const length = sampleTruncatedNormal({ mean: 0, stdDev: radius / 2.2, min: -radius, max: radius }, random);
+    return { dx: Math.cos(angle) * length, dy: Math.sin(angle) * length };
+  }
+
   function legacyPositionWithJitter(action, runSettings = state.legacy) {
     if (!runSettings.positionRandomEnabled) return { x: action.cx, y: action.cy };
     const radius = clamp(finite(runSettings.positionJitterPx, 2), 0, 30);
     if (!radius) return { x: action.cx, y: action.cy };
-    const angle = Math.random() * Math.PI * 2;
-    const length = Math.sqrt(Math.random()) * radius;
+    const { dx, dy } = legacyJitterOffset(radius);
     return {
-      x: clamp(action.cx + Math.cos(angle) * length, 0, window.innerWidth),
-      y: clamp(action.cy + Math.sin(angle) * length, 0, window.innerHeight)
+      x: clamp(action.cx + dx, 0, window.innerWidth),
+      y: clamp(action.cy + dy, 0, window.innerHeight)
     };
   }
 
@@ -8666,7 +9094,7 @@
   async function executeLegacyAction(action, signal, index, runSettings = state.legacy) {
     if (action.enabled === false) return 'skip';
     const jitter = runSettings.timeRandomEnabled && index > 0
-      ? randomUniform(-finite(runSettings.timeJitterMs, 100), finite(runSettings.timeJitterMs, 100))
+      ? sampleSymmetricJitter(finite(runSettings.timeJitterMs, 100))
       : 0;
     await abortableDelay(Math.max(0, action.delayMs + jitter), signal);
     const conditionResult = await waitForLegacyCondition(action, signal);
@@ -9980,6 +10408,15 @@
   });
   byId('workflowErrorLogs').addEventListener('click', () => setPage('logs'));
   ui.battlePerformanceToggle.addEventListener('change', () => setBattlePerformanceEnabled(ui.battlePerformanceToggle.checked));
+  ui.humanPacingLevel.addEventListener('change', () => {
+    const level = normalizeHumanPacing(ui.humanPacingLevel.value);
+    ui.humanPacingLevel.value = level;
+    if (!state.workflows) return;
+    if (state.workflows.humanPacing === level) return;
+    state.workflows.humanPacing = level;
+    saveWorkflowStore({ immediate: true });
+    toast(`人間らしい間: ${HUMAN_PACING_LABELS[level]}`);
+  });
   byId('workflowErrorDismiss').addEventListener('click', clearWorkflowError);
   ui.paletteSearch.addEventListener('input', () => {
     state.paletteQuery = ui.paletteSearch.value;
@@ -10216,6 +10653,7 @@
   loadLegacyState();
   normalizeNarrowDockSize();
   ui.battlePerformanceToggle.checked = state.battlePerformanceEnabled;
+  ui.humanPacingLevel.value = currentHumanPacingLevel();
   renderTemplateSelect();
   renderWorkflowSelect();
   renderPalette();
